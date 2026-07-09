@@ -1,0 +1,14 @@
+{
+  "name": "sketchor",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @sketchor/web",
+    "build": "npm run build --workspace @sketchor/core && npm run build --workspace @sketchor/web",
+    "desktop": "npm run tauri dev --workspace @sketchor/web"
+  }
+}

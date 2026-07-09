@@ -1,0 +1,380 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+:root {
+  --bg: #1e2025;
+  --panel: #24262c;
+  --border: #33363e;
+  --text: #e8e9ec;
+  --text-dim: #9a9da6;
+  --accent: #3574f0;
+  --accent-soft: #2c3d63;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: "Segoe UI", system-ui, sans-serif;
+  font-size: 13px;
+  background: var(--bg);
+  color: var(--text);
+  user-select: none;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 14px;
+  color: var(--accent);
+}
+
+.brand svg {
+  color: var(--accent);
+}
+
+.topbar-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.action {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.action:hover:not(:disabled) {
+  background: var(--border);
+}
+
+.action:disabled {
+  color: #565a64;
+  cursor: default;
+}
+
+.hint {
+  margin-left: auto;
+  color: var(--text-dim);
+}
+
+.body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.toolrail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 8px;
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+}
+
+.tool {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.tool:hover {
+  background: var(--border);
+}
+
+.tool.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: #9ec1ff;
+}
+
+.keyhint {
+  position: absolute;
+  right: 3px;
+  bottom: 1px;
+  font-size: 8px;
+  color: var(--text-dim);
+}
+
+.stage {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+}
+
+.viewport {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.statusbar {
+  display: flex;
+  gap: 24px;
+  padding: 5px 14px;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- code panel ---------- */
+
+.codepanel {
+  display: flex;
+  flex-direction: column;
+  width: 340px;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+}
+
+.codepanel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+}
+
+.codepanel-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.btn {
+  padding: 4px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.btn.primary:hover:not(:disabled) {
+  background: #4886f5;
+}
+
+.btn.ghost:hover:not(:disabled) {
+  background: var(--border);
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.codepanel-text {
+  flex: 1;
+  min-height: 0;
+  padding: 10px 12px;
+  border: none;
+  outline: none;
+  resize: none;
+  background: #17181c;
+  color: var(--text);
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.7;
+  white-space: pre;
+  user-select: text;
+}
+
+.code-errors {
+  max-height: 110px;
+  overflow-y: auto;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  color: #ff7a7a;
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.codepanel-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.codepanel-footer code {
+  font-family: "Cascadia Code", Consolas, monospace;
+}
+
+.codepanel-footer .soon {
+  margin-top: 4px;
+  color: #6b7280;
+}
+
+.action.toggled {
+  background: var(--accent-soft);
+  color: #9ec1ff;
+}
+
+.measure-readout {
+  color: #5ad1c5;
+  font-weight: 600;
+}
+
+/* ---------- center column (stage + dxf strip) ---------- */
+
+.center {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.center .stage {
+  flex: 1;
+  min-height: 0;
+}
+
+/* ---------- dxf library strip ---------- */
+
+.dxfstrip {
+  display: flex;
+  flex-direction: column;
+  height: 200px;
+  background: var(--panel);
+  border-top: 1px solid var(--border);
+}
+
+.dxfstrip-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.dxfstrip-title {
+  font-weight: 600;
+}
+
+.dxfstrip-count {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.dxfstrip-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+
+.dxfstrip-empty {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  color: var(--text-dim);
+  text-align: center;
+}
+
+.dxfstrip-empty strong {
+  color: var(--text);
+}
+
+.dxfstrip-grid {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.dxfcard {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 120px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.dxfcard:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.dxfcard-thumb {
+  display: block;
+  line-height: 0;
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.dxfcard-thumb svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.dxfcard-name {
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+}

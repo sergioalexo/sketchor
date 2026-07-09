@@ -1,0 +1,11 @@
+# dependencies / build output
+node_modules/
+dist/
+
+# rust build output (tauri shell + native thumbnailer)
+target/
+
+# logs / os cruft
+*.log
+.DS_Store
+Thumbs.db
