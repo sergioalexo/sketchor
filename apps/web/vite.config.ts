@@ -3,6 +3,9 @@ import react from "@vitejs/plugin-react";
 import { fileURLToPath } from "node:url";
 
 export default defineConfig({
+  // Relative base so the built bundle is portable (servable from any path,
+  // and works inside the Tauri desktop shell).
+  base: "./",
   plugins: [react()],
   resolve: {
     alias: {
