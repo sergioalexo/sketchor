@@ -2,5 +2,5 @@
   "identifier": "default",
   "platforms": ["windows", "macOS", "linux"],
   "windows": ["main"],
-  "permissions": ["core:default", "updater:default", "process:allow-restart"]
+  "permissions": ["core:default", "opener:allow-open-url"]
 }

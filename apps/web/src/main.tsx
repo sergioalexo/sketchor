@@ -2,7 +2,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { initDesktopDxfOpen } from "./dxf/desktopBridge";
-import { initAutoUpdate } from "./update/autoUpdate";
+import { initUpdateNotifier } from "./update/updateNotifier";
 import "./styles.css";
 
 createRoot(document.getElementById("root")!).render(
@@ -14,5 +14,5 @@ createRoot(document.getElementById("root")!).render(
 // Wire up "open .dxf from Explorer" when running as the desktop app.
 initDesktopDxfOpen();
 
-// Check GitHub for a newer signed release (desktop only; no-op on web).
-void initAutoUpdate();
+// Notify if a newer release is on GitHub (keyless; works on web + desktop).
+void initUpdateNotifier();

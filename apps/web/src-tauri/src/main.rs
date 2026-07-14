@@ -35,16 +35,9 @@ fn first_dxf_arg(args: &[String]) -> Option<String> {
 }
 
 fn main() {
-    let builder = tauri::Builder::default();
-
-    // In-app updates from GitHub releases (desktop only). `plugin-process`
-    // supplies the relaunch the frontend calls after installing.
-    #[cfg(desktop)]
-    let builder = builder
-        .plugin(tauri_plugin_updater::Builder::new().build())
-        .plugin(tauri_plugin_process::init());
-
-    builder
+    tauri::Builder::default()
+        // Opens URLs (the update notifier's "download page" action).
+        .plugin(tauri_plugin_opener::init())
         // A second launch (e.g. double-clicking another .dxf) forwards its
         // argv to the already-running window instead of opening a new one.
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
