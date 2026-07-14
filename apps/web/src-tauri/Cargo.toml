@@ -1,6 +1,6 @@
 [package]
 name = "sketchor"
-version = "0.1.0"
+version = "0.2.0"
 description = "Sketchor - modern parametric 2D sketching"
 edition = "2021"
 
@@ -12,3 +12,8 @@ tauri = { version = "2", features = [] }
 tauri-plugin-single-instance = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# Desktop-only: in-app updates from GitHub releases + relaunch after update.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"

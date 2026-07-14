@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { Entity, EntityId, Point } from "@sketchor/core";
-import { dist, distToSegment, newEntityId, nextEntityName } from "@sketchor/core";
-import { bus, doc, useApp } from "../state/store";
+import { dist, distToSegment, layerOf, newEntityId, nextEntityName } from "@sketchor/core";
+import { bus, doc, hiddenLayerSet, useApp } from "../state/store";
 import { render } from "./renderer";
 import { findSnap, type Snap } from "./snapping";
 import { screenToWorld, zoomAt, type View } from "./view";
@@ -14,11 +14,18 @@ type Interaction =
   | { kind: "measure"; start: Point }
   | { kind: "move"; ids: EntityId[]; startWorld: Point; dx: number; dy: number };
 
+/** New geometry carries the active layer (omitted when it's the default). */
+function activeLayerProp(active: string): { layer?: string } {
+  return active && active !== "0" ? { layer: active } : {};
+}
+
 function hitTest(view: View, world: Point): EntityId | null {
   const tol = 6 / view.scale;
+  const hidden = hiddenLayerSet();
   let best: EntityId | null = null;
   let bestDist = tol;
   for (const e of doc.all()) {
+    if (hidden.has(layerOf(e))) continue; // can't pick what you can't see
     const d =
       e.type === "line"
         ? distToSegment(world, e.a, e.b)
@@ -39,6 +46,7 @@ export function Viewport() {
   const tool = useApp((s) => s.tool);
   const selection = useApp((s) => s.selection);
   const revision = useApp((s) => s.revision);
+  const layers = useApp((s) => s.layers);
 
   const redraw = () => {
     const canvas = canvasRef.current;
@@ -77,6 +85,7 @@ export function Viewport() {
       moveOffset:
         interaction.kind === "move" ? { dx: interaction.dx, dy: interaction.dy } : null,
       measurement: state.measurement,
+      hiddenLayers: hiddenLayerSet(),
     });
   };
 
@@ -95,8 +104,8 @@ export function Viewport() {
 
   const measurement = useApp((s) => s.measurement);
 
-  // Redraw when document, selection, tool or measurement changes
-  useEffect(redraw, [revision, selection, tool, measurement]);
+  // Redraw when document, selection, tool, measurement or layers change
+  useEffect(redraw, [revision, selection, tool, measurement, layers]);
 
   // Keyboard: tools, undo/redo, delete, escape
   useEffect(() => {
@@ -169,6 +178,7 @@ export function Viewport() {
                 id: newEntityId(),
                 type: "line",
                 name: nextEntityName(doc, "line"),
+                ...activeLayerProp(app.activeLayer),
                 a: interaction.start,
                 b: snapped,
               },
@@ -190,6 +200,7 @@ export function Viewport() {
                 id: newEntityId(),
                 type: "circle",
                 name: nextEntityName(doc, "circle"),
+                ...activeLayerProp(app.activeLayer),
                 center: interaction.center,
                 radius,
               },

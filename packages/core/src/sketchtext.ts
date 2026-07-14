@@ -190,10 +190,18 @@ function sameGeometry(existing: Entity, parsed: ParsedEntity): boolean {
   return false;
 }
 
-function toEntity(parsed: ParsedEntity, id: EntityId): Entity {
+function toEntity(parsed: ParsedEntity, id: EntityId, layer?: string): Entity {
+  const layerProp = layer ? { layer } : {};
   return parsed.type === "line"
-    ? { id, type: "line", name: parsed.name, a: parsed.a, b: parsed.b }
-    : { id, type: "circle", name: parsed.name, center: parsed.center, radius: parsed.radius };
+    ? { id, type: "line", name: parsed.name, ...layerProp, a: parsed.a, b: parsed.b }
+    : {
+        id,
+        type: "circle",
+        name: parsed.name,
+        ...layerProp,
+        center: parsed.center,
+        radius: parsed.radius,
+      };
 }
 
 /**
@@ -214,7 +222,8 @@ export function diffToCommands(doc: SketchDocument, parsed: ParsedEntity[]): Com
     if (existing) {
       keep.add(p.name);
       if (!sameGeometry(existing, p) || existing.name !== p.name) {
-        commands.push({ type: "update-entity", entity: toEntity(p, existing.id) });
+        // Preserve the entity's layer — sketch code doesn't express layers.
+        commands.push({ type: "update-entity", entity: toEntity(p, existing.id, existing.layer) });
       }
     } else {
       commands.push({ type: "add-entity", entity: toEntity(p, newEntityId()) });

@@ -1,9 +1,11 @@
 import { create } from "zustand";
 import {
   CommandBus,
+  DEFAULT_LAYER,
   SketchDocument,
   diffToCommands,
   dxfToSvg,
+  layerOf,
   parseCode,
   parseDxf,
   toCode,
@@ -48,6 +50,7 @@ export function importDxfText(text: string, replace = true): { count: number; wa
   for (const entity of entities) commands.push({ type: "add-entity" as const, entity });
   if (commands.length === 1) bus.execute(commands[0]);
   else if (commands.length > 1) bus.execute({ type: "batch", commands });
+  useApp.getState().syncLayersFromDoc(replace);
   return { count: entities.length, warnings };
 }
 
@@ -72,6 +75,17 @@ export interface DxfFile {
   text: string;
 }
 
+/** A named drawing layer with a visibility toggle. */
+export interface Layer {
+  name: string;
+  visible: boolean;
+}
+
+/** Names of layers currently hidden — consulted by the renderer/hit-test. */
+export function hiddenLayerSet(): Set<string> {
+  return new Set(useApp.getState().layers.filter((l) => !l.visible).map((l) => l.name));
+}
+
 interface AppState {
   tool: ToolId;
   selection: EntityId[];
@@ -80,6 +94,8 @@ interface AppState {
   zoom: number;
   measurement: Measurement | null;
   library: DxfFile[];
+  layers: Layer[];
+  activeLayer: string;
   setTool: (tool: ToolId) => void;
   setSelection: (ids: EntityId[]) => void;
   setCursor: (cursor: { x: number; y: number } | null) => void;
@@ -87,9 +103,16 @@ interface AppState {
   setMeasurement: (measurement: Measurement | null) => void;
   addLibraryFiles: (files: DxfFile[]) => void;
   clearLibrary: () => void;
+  setActiveLayer: (name: string) => void;
+  addLayer: () => void;
+  deleteLayer: (name: string) => void;
+  renameLayer: (from: string, to: string) => void;
+  toggleLayer: (name: string) => void;
+  /** Rebuild the layer list from the document (used after DXF import). */
+  syncLayersFromDoc: (reset?: boolean) => void;
 }
 
-export const useApp = create<AppState>((set) => ({
+export const useApp = create<AppState>((set, get) => ({
   tool: "line",
   selection: [],
   revision: 0,
@@ -97,6 +120,8 @@ export const useApp = create<AppState>((set) => ({
   zoom: 1,
   measurement: null,
   library: [],
+  layers: [{ name: DEFAULT_LAYER, visible: true }],
+  activeLayer: DEFAULT_LAYER,
   setTool: (tool) => set({ tool }),
   setSelection: (selection) => set({ selection }),
   setCursor: (cursor) => set({ cursor }),
@@ -109,6 +134,58 @@ export const useApp = create<AppState>((set) => ({
       return { library: [...byName.values()] };
     }),
   clearLibrary: () => set({ library: [] }),
+  setActiveLayer: (name) => set({ activeLayer: name }),
+  addLayer: () =>
+    set((s) => {
+      const used = new Set(s.layers.map((l) => l.name));
+      let i = 1;
+      while (used.has(`layer${i}`)) i += 1;
+      const name = `layer${i}`;
+      return { layers: [...s.layers, { name, visible: true }], activeLayer: name };
+    }),
+  deleteLayer: (name) => {
+    if (name === DEFAULT_LAYER) return; // the default layer is permanent
+    // Remove the layer's geometry as one undoable step.
+    const ids = doc.all().filter((e) => layerOf(e) === name).map((e) => e.id);
+    if (ids.length > 0) bus.execute({ type: "delete-entities", ids });
+    set((s) => {
+      const layers = s.layers.filter((l) => l.name !== name);
+      const activeLayer = s.activeLayer === name ? DEFAULT_LAYER : s.activeLayer;
+      return { layers, activeLayer };
+    });
+  },
+  renameLayer: (from, to) =>
+    set((s) => {
+      const t = to.trim();
+      if (from === DEFAULT_LAYER || t === "" || s.layers.some((l) => l.name === t)) return s;
+      return {
+        layers: s.layers.map((l) => (l.name === from ? { ...l, name: t } : l)),
+        activeLayer: s.activeLayer === from ? t : s.activeLayer,
+      };
+    }),
+  toggleLayer: (name) =>
+    set((s) => ({
+      layers: s.layers.map((l) => (l.name === name ? { ...l, visible: !l.visible } : l)),
+    })),
+  syncLayersFromDoc: (reset = false) => {
+    const present = new Set(doc.all().map((e) => layerOf(e)));
+    present.add(DEFAULT_LAYER);
+    const prev = get().layers;
+    const prevByName = new Map(prev.map((l) => [l.name, l]));
+    const layers: Layer[] = [];
+    // Keep the default first, then the rest in document order.
+    layers.push(prevByName.get(DEFAULT_LAYER) ?? { name: DEFAULT_LAYER, visible: true });
+    for (const name of present) {
+      if (name === DEFAULT_LAYER) continue;
+      // On a fresh import, previously-toggled visibility is irrelevant.
+      const existing = reset ? undefined : prevByName.get(name);
+      layers.push(existing ?? { name, visible: true });
+    }
+    const activeLayer = layers.some((l) => l.name === get().activeLayer)
+      ? get().activeLayer
+      : DEFAULT_LAYER;
+    set({ layers, activeLayer });
+  },
 }));
 
 bus.onChange(() => {

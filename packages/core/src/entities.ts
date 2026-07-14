@@ -7,6 +7,8 @@ export interface LineEntity {
   type: "line";
   /** Human-readable handle used in the sketch code view (e.g. "L1"). */
   name?: string;
+  /** Layer this entity belongs to; absent means the default layer "0". */
+  layer?: string;
   a: Point;
   b: Point;
 }
@@ -16,9 +18,18 @@ export interface CircleEntity {
   type: "circle";
   /** Human-readable handle used in the sketch code view (e.g. "C1"). */
   name?: string;
+  /** Layer this entity belongs to; absent means the default layer "0". */
+  layer?: string;
   center: Point;
   radius: number;
 }
+
+/** The layer an entity is drawn on, defaulting to "0" (DXF convention). */
+export function layerOf(entity: Entity): string {
+  return entity.layer ?? DEFAULT_LAYER;
+}
+
+export const DEFAULT_LAYER = "0";
 
 export type Entity = LineEntity | CircleEntity;
 

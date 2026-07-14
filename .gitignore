@@ -5,6 +5,9 @@ dist/
 # rust build output (tauri shell + native thumbnailer)
 target/
 
+# tauri updater signing keys — NEVER commit the private key
+.tauri-keys/
+
 # logs / os cruft
 *.log
 .DS_Store

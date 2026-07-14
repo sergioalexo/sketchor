@@ -4,6 +4,7 @@ import { bus, doc, TOOL_HINTS, useApp, type ToolId } from "./state/store";
 import { Viewport } from "./viewport/Viewport";
 import { CodePanel } from "./code/CodePanel";
 import { DxfBrowser } from "./dxf/DxfBrowser";
+import { LayerPanel } from "./layers/LayerPanel";
 
 const TOOLS: { id: ToolId; label: string; keyHint: string; icon: JSX.Element }[] = [
   {
@@ -71,7 +72,8 @@ export function App() {
   const revision = useApp((s) => s.revision);
   const selection = useApp((s) => s.selection);
   const measurement = useApp((s) => s.measurement);
-  const [showCode, setShowCode] = useState(true);
+  const [showCode, setShowCode] = useState(false);
+  const [showLayers, setShowLayers] = useState(true);
   const [showDxf, setShowDxf] = useState(false);
 
   const measuredDistance = measurement ? dist(measurement.a, measurement.b) : null;
@@ -123,6 +125,22 @@ export function App() {
                 strokeWidth="2"
                 fill="none"
                 strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+          <button
+            className={`action ${showLayers ? "toggled" : ""}`}
+            title="Toggle layers panel"
+            data-testid="toggle-layers"
+            onClick={() => setShowLayers((v) => !v)}
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18">
+              <path
+                d="M12 3l9 5-9 5-9-5 9-5zM3 13l9 5 9-5M3 17l9 5 9-5"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                fill="none"
                 strokeLinejoin="round"
               />
             </svg>
@@ -185,6 +203,7 @@ export function App() {
           </main>
           {showDxf && <DxfBrowser onClose={() => setShowDxf(false)} />}
         </div>
+        {showLayers && <LayerPanel />}
         {showCode && <CodePanel />}
       </div>
 

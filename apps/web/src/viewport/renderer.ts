@@ -1,5 +1,5 @@
 import type { Entity, EntityId, Point, SketchDocument } from "@sketchor/core";
-import { dist, translated } from "@sketchor/core";
+import { dist, layerOf, translated } from "@sketchor/core";
 import { gridStep, worldToScreen, type View } from "./view";
 import type { Snap } from "./snapping";
 
@@ -12,6 +12,8 @@ export interface RenderUiState {
   moveOffset: { dx: number; dy: number } | null;
   /** Active distance measurement overlay, if any. */
   measurement: { a: Point; b: Point } | null;
+  /** Names of layers to skip drawing. */
+  hiddenLayers: ReadonlySet<string>;
 }
 
 const COLORS = {
@@ -47,6 +49,7 @@ export function render(
   drawGrid(ctx, width, height, view);
 
   for (const entity of doc.all()) {
+    if (ui.hiddenLayers.has(layerOf(entity))) continue;
     const selected = ui.selection.has(entity.id);
     const shown =
       selected && ui.moveOffset
