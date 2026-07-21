@@ -60,6 +60,14 @@ body {
 .topbar-actions {
   display: flex;
   gap: 4px;
+  align-items: center;
+}
+
+.action-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 4px 4px;
+  background: var(--border);
 }
 
 .action {

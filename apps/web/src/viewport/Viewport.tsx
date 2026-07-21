@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import type { Entity, EntityId, Point } from "@sketchor/core";
 import { dist, distToSegment, layerOf, newEntityId, nextEntityName } from "@sketchor/core";
 import { bus, doc, hiddenLayerSet, useApp } from "../state/store";
+import { openSketchor, saveSketchor } from "../io/sketchorFile";
 import { render } from "./renderer";
 import { findSnap, type Snap } from "./snapping";
 import { screenToWorld, zoomAt, type View } from "./view";
@@ -113,7 +114,13 @@ export function Viewport() {
       const target = e.target as HTMLElement;
       if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
       const app = useApp.getState();
-      if (e.ctrlKey && e.key.toLowerCase() === "z" && !e.shiftKey) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        void saveSketchor();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "o") {
+        e.preventDefault();
+        void openSketchor();
+      } else if (e.ctrlKey && e.key.toLowerCase() === "z" && !e.shiftKey) {
         bus.undo();
         e.preventDefault();
       } else if (e.ctrlKey && (e.key.toLowerCase() === "y" || (e.key.toLowerCase() === "z" && e.shiftKey))) {

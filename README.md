@@ -74,21 +74,31 @@ constraint tangent L1 C1   # geometric relationship
 dim L1 length = width      # driven/driving dimension
 ```
 
+## Native `.sketchor` files & Explorer previews
+
+Drawings save and load as `.sketchor` documents (the JSON from
+`SketchDocument.toJSON()`). Use the **Open**/**Save** buttons in the topbar or
+`Ctrl+O` / `Ctrl+S`; the File System Access API is used in the browser and in
+Tauri's WebView2, with a download / file-input fallback elsewhere.
+
+On Windows, `native/sketchor-shell/` is a Rust COM shell extension that makes
+Explorer render a **preview of the geometry** — not just the app icon — as the
+file thumbnail (and, when installed elevated, in the reading pane). Install it
+per-user with `native/sketchor-shell/install.ps1`; a few example drawings live
+in `native/sketchor-shell/samples/`.
+
 ## Roadmap
 
-1. **Persistence** — save/load the JSON document; File System Access API in
-   the browser, native dialogs under Tauri. DXF import/export via existing
-   JS libraries (`dxf-parser`, `@tarikjabiri/dxf`).
-2. **More geometry** — arcs, polylines, rectangles; trim/extend/offset.
-3. **Parametric constraints** — integrate `planegcs` (FreeCAD's 2D
+1. **More geometry** — arcs, polylines, rectangles; trim/extend/offset.
+2. **Parametric constraints** — integrate `planegcs` (FreeCAD's 2D
    constraint solver, compiled to WASM, available on npm). Constraints
    (coincident, parallel, tangent, dimensions) become part of the document;
    a `solve` step runs after each command and emits `move/replace` commands.
    The `param`/`constraint`/`dim` keywords are already reserved in the sketch
    grammar so this layer is purely additive.
-4. **AI assistant** — a chat panel backed by the Claude API with tool
+3. **AI assistant** — a chat panel backed by the Claude API with tool
    definitions that emit `Command[]` proposals ("draw a 40x20 slot centered
    on the origin"). Proposals render as dashed previews; the user accepts or
    rejects. The command log doubles as conversation context.
-5. **Rendering scale-up** — swap the Canvas2D renderer for WebGPU behind the
+4. **Rendering scale-up** — swap the Canvas2D renderer for WebGPU behind the
    same `render()` interface once drawings get large.

@@ -9,6 +9,8 @@ import {
   parseCode,
   parseDxf,
   toCode,
+  type Command,
+  type Entity,
   type EntityId,
   type ParseIssue,
   type Point,
@@ -34,6 +36,29 @@ export function applySketchCode(text: string): ParseIssue[] {
   if (commands.length === 1) bus.execute(commands[0]);
   else if (commands.length > 1) bus.execute({ type: "batch", commands });
   return [];
+}
+
+/** Serialise the whole drawing to Sketchor's native `.sketchor` JSON. */
+export function drawingToJson(): string {
+  return JSON.stringify(doc.toJSON(), null, 2);
+}
+
+/**
+ * Loads a native `.sketchor` document (the JSON produced by {@link drawingToJson}
+ * / `SketchDocument.toJSON()`): replaces the drawing with the file's entities
+ * as one undoable step. Returns the entity count; throws on malformed JSON.
+ */
+export function loadDrawingJson(text: string): { count: number } {
+  const parsed = JSON.parse(text) as { entities?: unknown };
+  const entities = Array.isArray(parsed.entities) ? (parsed.entities as Entity[]) : [];
+  const commands: Command[] = [];
+  const existing = doc.all().map((e) => e.id);
+  if (existing.length) commands.push({ type: "delete-entities", ids: existing });
+  for (const entity of entities) commands.push({ type: "add-entity", entity });
+  if (commands.length === 1) bus.execute(commands[0]);
+  else if (commands.length > 1) bus.execute({ type: "batch", commands });
+  useApp.getState().syncLayersFromDoc(true);
+  return { count: entities.length };
 }
 
 /**

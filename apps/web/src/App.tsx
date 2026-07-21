@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { dist } from "@sketchor/core";
 import { bus, doc, TOOL_HINTS, useApp, type ToolId } from "./state/store";
+import { openSketchor, saveSketchor } from "./io/sketchorFile";
 import { Viewport } from "./viewport/Viewport";
 import { CodePanel } from "./code/CodePanel";
 import { DxfBrowser } from "./dxf/DxfBrowser";
@@ -95,6 +96,40 @@ export function App() {
           Sketchor
         </div>
         <div className="topbar-actions">
+          <button
+            className="action"
+            title="Open .sketchor drawing (Ctrl+O)"
+            data-testid="open-file"
+            onClick={() => void openSketchor()}
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18">
+              <path
+                d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"
+                stroke="currentColor"
+                strokeWidth="2"
+                fill="none"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+          <button
+            className="action"
+            title="Save as .sketchor (Ctrl+S)"
+            data-testid="save-file"
+            onClick={() => void saveSketchor()}
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18">
+              <path
+                d="M5 3h11l3 3v13a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z"
+                stroke="currentColor"
+                strokeWidth="2"
+                fill="none"
+                strokeLinejoin="round"
+              />
+              <path d="M8 3v5h6V3M8 21v-6h8v6" stroke="currentColor" strokeWidth="2" fill="none" strokeLinejoin="round" />
+            </svg>
+          </button>
+          <div className="action-sep" />
           <button
             className="action"
             title="Undo (Ctrl+Z)"

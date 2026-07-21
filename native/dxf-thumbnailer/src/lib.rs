@@ -190,7 +190,7 @@ extern "system" fn DllUnregisterServer() -> HRESULT {
 
 use windows::core::PCWSTR as RegStr;
 use windows::Win32::System::Registry::{
-    RegCloseKey, RegCreateKeyExW, RegDeleteTreeW, RegSetValueExW, HKEY, HKEY_CLASSES_ROOT,
+    RegCloseKey, RegCreateKeyExW, RegDeleteTreeW, RegSetValueExW, HKEY, HKEY_CURRENT_USER,
     KEY_WRITE, REG_DWORD, REG_OPTION_NON_VOLATILE, REG_SZ,
 };
 
@@ -198,12 +198,21 @@ fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
+/// Per-user class-registration root. We register under `HKCU\Software\Classes`
+/// rather than `HKEY_CLASSES_ROOT`: `.dxf` and `CLSID` already exist in the
+/// machine-wide HKLM hive, so a non-elevated `HKCR` write resolves toward HKLM
+/// and fails with ACCESS_DENIED (regsvr32 exit 5) — silently dropping the
+/// handler. HKCU always succeeds and Explorer merges it into HKCR at read time.
+fn classes(path: &str) -> String {
+    format!("Software\\Classes\\{path}")
+}
+
 fn create_key(path: &str) -> Result<HKEY, ()> {
     let mut hkey = HKEY::default();
-    let p = wide(path);
+    let p = wide(&classes(path));
     let rc = unsafe {
         RegCreateKeyExW(
-            HKEY_CLASSES_ROOT,
+            HKEY_CURRENT_USER,
             RegStr(p.as_ptr()),
             0,
             RegStr::null(),
@@ -264,18 +273,28 @@ fn register(clsid: &str, dll: &str) -> Result<(), ()> {
     set_string(&inproc, Some("ThreadingModel"), "Apartment")?;
     // Allow IInitializeWithFile (file path) instead of stream isolation.
     set_dword(&base, "DisableProcessIsolation", 1)?;
-    // Associate .dxf with this thumbnail provider.
-    let assoc = format!(".dxf\\ShellEx\\{SHELLEX_THUMB}");
-    set_string(&assoc, None, clsid)?;
+    // Associate .dxf with this thumbnail provider. Register at the extension
+    // level and under SystemFileAssociations (the shell consults both, and the
+    // latter survives even if another app owns the .dxf ProgID).
+    set_string(&format!(".dxf\\ShellEx\\{SHELLEX_THUMB}"), None, clsid)?;
+    set_string(
+        &format!("SystemFileAssociations\\.dxf\\ShellEx\\{SHELLEX_THUMB}"),
+        None,
+        clsid,
+    )?;
     Ok(())
 }
 
 fn unregister(clsid: &str) -> Result<(), ()> {
-    let base = wide(&format!("CLSID\\{clsid}"));
-    let assoc = wide(&format!(".dxf\\ShellEx\\{SHELLEX_THUMB}"));
+    let base = wide(&classes(&format!("CLSID\\{clsid}")));
+    let assoc = wide(&classes(&format!(".dxf\\ShellEx\\{SHELLEX_THUMB}")));
+    let sysassoc = wide(&classes(&format!(
+        "SystemFileAssociations\\.dxf\\ShellEx\\{SHELLEX_THUMB}"
+    )));
     unsafe {
-        let _ = RegDeleteTreeW(HKEY_CLASSES_ROOT, RegStr(base.as_ptr()));
-        let _ = RegDeleteTreeW(HKEY_CLASSES_ROOT, RegStr(assoc.as_ptr()));
+        let _ = RegDeleteTreeW(HKEY_CURRENT_USER, RegStr(base.as_ptr()));
+        let _ = RegDeleteTreeW(HKEY_CURRENT_USER, RegStr(assoc.as_ptr()));
+        let _ = RegDeleteTreeW(HKEY_CURRENT_USER, RegStr(sysassoc.as_ptr()));
     }
     Ok(())
 }

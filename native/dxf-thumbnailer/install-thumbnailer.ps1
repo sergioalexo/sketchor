@@ -7,8 +7,7 @@
   1. Builds the crate in release mode (needs the Rust MSVC toolchain).
   2. Copies the DLL to a stable per-user location (registration records
      the DLL path, so it must not move afterwards).
-  3. Registers it with regsvr32. The provider writes to HKEY_CLASSES_ROOT,
-     which redirects to HKCU\Software\Classes when run without elevation,
+  3. Registers it with regsvr32. The provider writes to HKCU\Software\Classes,
      so no administrator rights are required for a per-user install.
   4. Clears the Explorer thumbnail cache and restarts Explorer so the new
      previews appear.
@@ -47,17 +46,27 @@ $installed = Join-Path $installDir "dxf_thumbnailer.dll"
 
 # Unregister an older copy first (ignore errors), then replace the file.
 if (Test-Path $installed) {
-  & regsvr32.exe /s /u "$installed" 2>$null
+  Start-Process regsvr32.exe -ArgumentList "/s /u `"$installed`"" -Wait -ErrorAction SilentlyContinue
 }
 Copy-Item $built $installed -Force
 Write-Host "Installed to $installed"
 
-& regsvr32.exe /s "$installed"
-if ($LASTEXITCODE -ne 0) {
-  Write-Warning "regsvr32 returned $LASTEXITCODE. Try running this script elevated if previews do not appear."
-} else {
-  Write-Host "Registered DXF thumbnail provider."
+# Register via a child process so the exit code is captured reliably
+# (`& regsvr32 /s` does not always surface $LASTEXITCODE).
+$reg = Start-Process regsvr32.exe -ArgumentList "/s `"$installed`"" -PassThru -Wait
+if ($reg.ExitCode -ne 0) {
+  throw ("regsvr32 failed with exit code $($reg.ExitCode) " +
+    "(5 = access denied). Registration did NOT complete.")
 }
+Write-Host "Registered DXF thumbnail provider."
+
+# Confirm the handler key actually landed (catches a silent registration
+# failure that would leave Explorer showing only the generic .dxf icon).
+$thumbKey = "HKCU:\Software\Classes\.dxf\ShellEx\{E357FCCD-A995-4576-B01F-234630154E96}"
+if (-not (Test-Path $thumbKey)) {
+  throw "Thumbnail handler key missing after registration: $thumbKey"
+}
+Write-Host "Verified thumbnail handler registration."
 
 if (-not $NoRestart) {
   Write-Host "Clearing thumbnail cache and restarting Explorer..."

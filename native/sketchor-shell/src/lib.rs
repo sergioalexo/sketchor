@@ -214,11 +214,21 @@ extern "system" fn DllUnregisterServer() -> HRESULT {
 use windows::core::PCWSTR as RegStr;
 use windows::Win32::System::Registry::{
     RegCloseKey, RegCreateKeyExW, RegDeleteKeyValueW, RegDeleteTreeW, RegSetValueExW, HKEY,
-    HKEY_CLASSES_ROOT, HKEY_LOCAL_MACHINE, KEY_WRITE, REG_DWORD, REG_OPTION_NON_VOLATILE, REG_SZ,
+    HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_WRITE, REG_DWORD, REG_OPTION_NON_VOLATILE, REG_SZ,
 };
 
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+/// Per-user class-registration root. We register everything under
+/// `HKCU\Software\Classes` rather than `HKEY_CLASSES_ROOT`: a non-elevated
+/// write to `HKCR\CLSID\...` resolves toward the machine-wide HKLM hive and
+/// fails with ACCESS_DENIED, which silently dropped the thumbnail handler and
+/// left Explorer showing only the file's DefaultIcon. HKCU always succeeds
+/// without elevation and Explorer merges it into HKCR at read time.
+fn classes(path: &str) -> String {
+    format!("Software\\Classes\\{path}")
 }
 
 fn guid_braced(g: &GUID) -> String {
@@ -269,11 +279,11 @@ fn set_string_in(root: HKEY, path: &str, name: Option<&str>, value: &str) -> Res
 }
 
 fn set_string(path: &str, name: Option<&str>, value: &str) -> Result<(), ()> {
-    set_string_in(HKEY_CLASSES_ROOT, path, name, value)
+    set_string_in(HKEY_CURRENT_USER, &classes(path), name, value)
 }
 
 fn set_dword(path: &str, name: &str, value: u32) -> Result<(), ()> {
-    let hkey = create_key_in(HKEY_CLASSES_ROOT, path)?;
+    let hkey = create_key_in(HKEY_CURRENT_USER, &classes(path))?;
     let bytes = value.to_ne_bytes();
     let name_w = wide(name);
     let rc = unsafe { RegSetValueExW(hkey, RegStr(name_w.as_ptr()), 0, REG_DWORD, Some(&bytes)) };
@@ -290,10 +300,10 @@ fn set_dword(path: &str, name: &str, value: u32) -> Result<(), ()> {
 /// Register both CLSIDs and wire them to `.sketchor`.
 ///
 /// Everything except the preview handler's machine-wide "PreviewHandlers"
-/// list is written through `HKEY_CLASSES_ROOT`, which redirects to
-/// `HKCU\Software\Classes` for a non-elevated (per-user) install. The
-/// master list lives in HKLM and only takes effect when the installer runs
-/// elevated; its failure is non-fatal so the thumbnail still registers.
+/// list is written to `HKCU\Software\Classes` (see [`classes`]) for a
+/// non-elevated (per-user) install. The master list lives in HKLM and only
+/// takes effect when the installer runs elevated; its failure is non-fatal
+/// so the thumbnail still registers.
 fn register(dll: &str) -> Result<(), ()> {
     let thumb = guid_braced(&CLSID_SKETCHOR_THUMB);
     let preview = guid_braced(&CLSID_SKETCHOR_PREVIEW);
@@ -340,15 +350,15 @@ fn register(dll: &str) -> Result<(), ()> {
 }
 
 fn unregister() -> Result<(), ()> {
-    let thumb = wide(&format!("CLSID\\{}", guid_braced(&CLSID_SKETCHOR_THUMB)));
-    let preview_key = wide(&format!("CLSID\\{}", guid_braced(&CLSID_SKETCHOR_PREVIEW)));
-    let progid = wide(PROGID);
-    let ext = wide(EXT);
+    let thumb = wide(&classes(&format!("CLSID\\{}", guid_braced(&CLSID_SKETCHOR_THUMB))));
+    let preview_key = wide(&classes(&format!("CLSID\\{}", guid_braced(&CLSID_SKETCHOR_PREVIEW))));
+    let progid = wide(&classes(PROGID));
+    let ext = wide(&classes(EXT));
     unsafe {
-        let _ = RegDeleteTreeW(HKEY_CLASSES_ROOT, RegStr(thumb.as_ptr()));
-        let _ = RegDeleteTreeW(HKEY_CLASSES_ROOT, RegStr(preview_key.as_ptr()));
-        let _ = RegDeleteTreeW(HKEY_CLASSES_ROOT, RegStr(progid.as_ptr()));
-        let _ = RegDeleteTreeW(HKEY_CLASSES_ROOT, RegStr(ext.as_ptr()));
+        let _ = RegDeleteTreeW(HKEY_CURRENT_USER, RegStr(thumb.as_ptr()));
+        let _ = RegDeleteTreeW(HKEY_CURRENT_USER, RegStr(preview_key.as_ptr()));
+        let _ = RegDeleteTreeW(HKEY_CURRENT_USER, RegStr(progid.as_ptr()));
+        let _ = RegDeleteTreeW(HKEY_CURRENT_USER, RegStr(ext.as_ptr()));
 
         // Remove the master-list value (best effort, needs elevation).
         let list = wide("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\PreviewHandlers");
