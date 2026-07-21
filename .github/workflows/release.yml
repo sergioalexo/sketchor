@@ -1,0 +1,50 @@
+name: release
+
+# Push a version tag (e.g. v0.2.0) to build the Windows installer and
+# publish a GitHub Release. The app's update notifier polls the public
+# Releases API and points users at the installer attached here — no signing
+# keys or secrets required.
+#
+# NOTE: pushing this file needs a token with the `workflow` scope
+# (`gh auth refresh -s workflow`), or add it via the GitHub web UI.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    permissions:
+      contents: write
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: apps/web/src-tauri
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and publish release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: apps/web
+          tagName: ${{ github.ref_name }}
+          releaseName: "Sketchor ${{ github.ref_name }}"
+          releaseBody: |
+            Download the `.exe` installer below. It upgrades an existing
+            install in place. The app notifies you here when a newer
+            version is published.
+          releaseDraft: false
+          prerelease: false
