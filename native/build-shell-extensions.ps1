@@ -4,8 +4,10 @@
   the Tauri bundler picks them up as installer resources.
 
 .DESCRIPTION
-  Run automatically by `tauri build` via the `beforeBundleCommand` hook in
-  tauri.conf.json, so a packaged Sketchor installer *ships* the thumbnail
+  Run automatically by `tauri build` via the `beforeBuildCommand` hook in
+  tauri.conf.json (before the Rust app is compiled, so tauri-build sees the
+  staged DLLs when it validates bundle.resources), so a packaged Sketchor
+  installer *ships* the thumbnail
   handlers and registers them itself (see apps/web/src-tauri/installer-hooks.nsh).
   End users no longer run native/*/install*.ps1 by hand.
 

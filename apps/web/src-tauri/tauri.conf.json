@@ -7,8 +7,7 @@
     "devUrl": "http://localhost:5173",
     "frontendDist": "../dist",
     "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build",
-    "beforeBundleCommand": "powershell -NoProfile -ExecutionPolicy Bypass -File ../../native/build-shell-extensions.ps1"
+    "beforeBuildCommand": "powershell -NoProfile -ExecutionPolicy Bypass -File ../../native/build-shell-extensions.ps1 && npm run build"
   },
   "app": {
     "withGlobalTauri": true,
