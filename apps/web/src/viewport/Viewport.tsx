@@ -9,7 +9,7 @@ import {
   newEntityId,
   nextEntityName,
 } from "@sketchor/core";
-import { bus, doc, hiddenLayerSet, useApp } from "../state/store";
+import { applyStraighten, bus, computeStraightenTransform, doc, hiddenLayerSet, useApp } from "../state/store";
 import { openSketchor, saveSketchor } from "../io/sketchorFile";
 import { render } from "./renderer";
 import { findSnap, type Snap } from "./snapping";
@@ -89,6 +89,8 @@ export function Viewport() {
       };
     }
 
+    const straightenPlan = state.tool === "straighten" ? computeStraightenTransform() : null;
+
     render(ctx, w, h, viewRef.current, doc, {
       selection: new Set(state.selection),
       preview,
@@ -97,6 +99,8 @@ export function Viewport() {
         interaction.kind === "move" ? { dx: interaction.dx, dy: interaction.dy } : null,
       measurement: state.measurement,
       hiddenLayers: hiddenLayerSet(),
+      referenceEdgeId: state.tool === "straighten" ? state.referenceEdgeId : null,
+      transformPreview: straightenPlan ? { ...straightenPlan, ids: new Set(straightenPlan.ids) } : null,
     });
   };
 
@@ -114,9 +118,21 @@ export function Viewport() {
   }, []);
 
   const measurement = useApp((s) => s.measurement);
+  const referenceEdgeId = useApp((s) => s.referenceEdgeId);
+  const straightenAxis = useApp((s) => s.straightenAxis);
+  const straightenPivot = useApp((s) => s.straightenPivot);
 
-  // Redraw when document, selection, tool, measurement or layers change
-  useEffect(redraw, [revision, selection, tool, measurement, layers]);
+  // Redraw when document, selection, tool, measurement, layers, or the straighten pick change
+  useEffect(redraw, [
+    revision,
+    selection,
+    tool,
+    measurement,
+    layers,
+    referenceEdgeId,
+    straightenAxis,
+    straightenPivot,
+  ]);
 
   /** Zoom-extents: frames `ids` if given and non-empty, else every visible entity. */
   const fitView = (ids?: EntityId[]) => {
@@ -169,6 +185,10 @@ export function Viewport() {
         app.setTool("measure");
       } else if (e.key.toLowerCase() === "f") {
         fitView(app.selection.length ? app.selection : undefined);
+      } else if (e.key.toLowerCase() === "t") {
+        app.setTool("straighten");
+      } else if (e.key === "Enter" && app.tool === "straighten") {
+        applyStraighten();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -273,6 +293,15 @@ export function Viewport() {
           }
         } else if (!e.shiftKey) {
           app.setSelection([]);
+        }
+        break;
+      }
+      case "straighten": {
+        // Only a line already in the selection can become the reference edge.
+        const hit = hitTest(view, world);
+        const entity = hit ? doc.get(hit) : null;
+        if (hit && entity?.type === "line" && app.selection.includes(hit)) {
+          app.setReferenceEdge(hit);
         }
         break;
       }

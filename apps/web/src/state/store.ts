@@ -3,11 +3,14 @@ import {
   CommandBus,
   DEFAULT_LAYER,
   SketchDocument,
+  centroidOfEntities,
   diffToCommands,
   dxfToSvg,
   layerOf,
+  mid,
   parseCode,
   parseDxf,
+  reduceToHalfTurn,
   toCode,
   type Command,
   type DxfImportReport,
@@ -81,14 +84,75 @@ export function importDxfText(text: string, replace = true): { count: number; wa
   return { count: entities.length, warnings };
 }
 
-export type ToolId = "select" | "line" | "circle" | "measure";
+export type ToolId = "select" | "line" | "circle" | "measure" | "straighten";
 
 export const TOOL_HINTS: Record<ToolId, string> = {
   select: "Click to select (Shift adds) - drag to move - Del deletes",
   line: "Click start point, then click next points to chain - Esc to finish",
   circle: "Click center, then click a point on the circle",
   measure: "Click two points to measure distance and angle - Esc clears",
+  straighten: "Select the part with V, switch here, click the reference edge, then Enter to apply",
 };
+
+export type StraightenAxis = "horizontal" | "vertical";
+export type StraightenPivot = "center" | "edge-mid" | "edge-start";
+
+/**
+ * The pivot the straighten tool rotates the whole selection about,
+ * matching the pivot-mode toggle from the spec (selection center by
+ * default, or a point on the reference edge itself).
+ */
+function straightenPivotPoint(
+  mode: StraightenPivot,
+  selectionEntities: Entity[],
+  ref: Extract<Entity, { type: "line" }>,
+): Point {
+  switch (mode) {
+    case "edge-mid":
+      return mid(ref.a, ref.b);
+    case "edge-start":
+      return ref.a;
+    case "center":
+    default:
+      return centroidOfEntities(selectionEntities);
+  }
+}
+
+/**
+ * The rigid rotation the straighten tool would apply right now: one pivot,
+ * one angle, for the whole selection — the smallest turn that lands the
+ * reference edge on the chosen axis. Null when there's no valid reference
+ * edge picked yet. Shared by the live dashed preview and the commit below.
+ */
+export function computeStraightenTransform(): { ids: EntityId[]; pivot: Point; rotation: number } | null {
+  const { referenceEdgeId, selection, straightenAxis, straightenPivot } = useApp.getState();
+  if (!referenceEdgeId || !selection.includes(referenceEdgeId)) return null;
+  const ref = doc.get(referenceEdgeId);
+  if (!ref || ref.type !== "line") return null;
+
+  const selectionEntities = selection.map((id) => doc.get(id)).filter((e): e is Entity => !!e);
+  if (selectionEntities.length === 0) return null;
+
+  const currentAngle = Math.atan2(ref.b.y - ref.a.y, ref.b.x - ref.a.x);
+  const target = straightenAxis === "horizontal" ? 0 : Math.PI / 2;
+  const rotation = reduceToHalfTurn(target - currentAngle);
+  const pivot = straightenPivotPoint(straightenPivot, selectionEntities, ref);
+  return { ids: selection, pivot, rotation };
+}
+
+/**
+ * Commits the straighten tool: rotates the whole current selection, as one
+ * rigid body about a single pivot, by the smallest angle that lands the
+ * reference edge on the chosen axis. Returns false (no-op) if there's no
+ * valid reference edge to straighten against.
+ */
+export function applyStraighten(): boolean {
+  const plan = computeStraightenTransform();
+  if (!plan) return false;
+  bus.execute({ type: "transform-entities", ...plan, dx: 0, dy: 0, scale: 1 });
+  useApp.getState().setReferenceEdge(null);
+  return true;
+}
 
 /** A live or frozen measurement between two world points (not geometry). */
 export interface Measurement {
@@ -126,6 +190,13 @@ interface AppState {
   /** Parsed-vs-skipped tally from the most recent DXF import; null once dismissed. */
   importReport: DxfImportReport | null;
   setImportReport: (report: DxfImportReport | null) => void;
+  /** The line entity picked as the straighten tool's reference edge (must be in `selection`). */
+  referenceEdgeId: EntityId | null;
+  straightenAxis: StraightenAxis;
+  straightenPivot: StraightenPivot;
+  setReferenceEdge: (id: EntityId | null) => void;
+  setStraightenAxis: (axis: StraightenAxis) => void;
+  setStraightenPivot: (pivot: StraightenPivot) => void;
   setTool: (tool: ToolId) => void;
   setSelection: (ids: EntityId[]) => void;
   setCursor: (cursor: { x: number; y: number } | null) => void;
@@ -154,7 +225,14 @@ export const useApp = create<AppState>((set, get) => ({
   activeLayer: DEFAULT_LAYER,
   importReport: null,
   setImportReport: (report) => set({ importReport: report }),
-  setTool: (tool) => set({ tool }),
+  referenceEdgeId: null,
+  straightenAxis: "horizontal",
+  straightenPivot: "center",
+  setReferenceEdge: (id) => set({ referenceEdgeId: id }),
+  setStraightenAxis: (axis) => set({ straightenAxis: axis }),
+  setStraightenPivot: (pivot) => set({ straightenPivot: pivot }),
+  // Switching tools invalidates any in-progress reference-edge pick.
+  setTool: (tool) => set({ tool, referenceEdgeId: null }),
   setSelection: (selection) => set({ selection }),
   setCursor: (cursor) => set({ cursor }),
   setZoom: (zoom) => set({ zoom }),
@@ -221,10 +299,15 @@ export const useApp = create<AppState>((set, get) => ({
 }));
 
 bus.onChange(() => {
-  useApp.setState((s) => ({
-    revision: doc.revision,
-    selection: s.selection.filter((id) => doc.has(id)),
-  }));
+  useApp.setState((s) => {
+    const selection = s.selection.filter((id) => doc.has(id));
+    return {
+      revision: doc.revision,
+      selection,
+      referenceEdgeId:
+        s.referenceEdgeId && selection.includes(s.referenceEdgeId) ? s.referenceEdgeId : null,
+    };
+  });
 });
 
 // Debug handle; later this same surface becomes the AI-assistant entry

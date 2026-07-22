@@ -1,7 +1,14 @@
 import type { Entity, EntityId, Point, SketchDocument } from "@sketchor/core";
-import { dist, entityPoints, layerOf, translated } from "@sketchor/core";
+import { dist, entityPoints, layerOf, transformed, translated } from "@sketchor/core";
 import { gridStep, worldToScreen, type View } from "./view";
 import type { Snap } from "./snapping";
+
+/** A pending rigid transform (rotate about a pivot) previewed dashed over the real geometry. */
+export interface TransformPreview {
+  ids: ReadonlySet<EntityId>;
+  pivot: Point;
+  rotation: number;
+}
 
 export interface RenderUiState {
   selection: ReadonlySet<EntityId>;
@@ -14,6 +21,10 @@ export interface RenderUiState {
   measurement: { a: Point; b: Point } | null;
   /** Names of layers to skip drawing. */
   hiddenLayers: ReadonlySet<string>;
+  /** The straighten tool's chosen reference edge, highlighted distinctly. */
+  referenceEdgeId: EntityId | null;
+  /** The straighten tool's live preview of the rotated selection. */
+  transformPreview: TransformPreview | null;
 }
 
 const COLORS = {
@@ -28,6 +39,7 @@ const COLORS = {
   handle: "#5b96ff",
   measure: "#5ad1c5",
   measureLabelBg: "#0c2b28",
+  reference: "#ff5c5c",
 };
 
 function fmtNum(n: number): string {
@@ -51,12 +63,25 @@ export function render(
   for (const entity of doc.all()) {
     if (ui.hiddenLayers.has(layerOf(entity))) continue;
     const selected = ui.selection.has(entity.id);
+    const isReference = entity.id === ui.referenceEdgeId;
     const shown =
       selected && ui.moveOffset
         ? translated(entity, ui.moveOffset.dx, ui.moveOffset.dy)
         : entity;
-    drawEntity(ctx, view, shown, selected ? COLORS.selected : COLORS.entity, selected ? 2 : 1.5);
+    const color = isReference ? COLORS.reference : selected ? COLORS.selected : COLORS.entity;
+    drawEntity(ctx, view, shown, color, selected || isReference ? 2 : 1.5);
     if (selected) drawHandles(ctx, view, shown);
+  }
+
+  if (ui.transformPreview) {
+    const { ids, pivot, rotation } = ui.transformPreview;
+    ctx.setLineDash([6, 4]);
+    for (const id of ids) {
+      const entity = doc.get(id);
+      if (!entity) continue;
+      drawEntity(ctx, view, transformed(entity, pivot, 0, 0, rotation, 1), COLORS.preview, 1.5);
+    }
+    ctx.setLineDash([]);
   }
 
   if (ui.preview) {

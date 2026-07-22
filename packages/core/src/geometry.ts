@@ -50,6 +50,20 @@ export function shortestTurn(angle: number): number {
 }
 
 /**
+ * Reduces an angle (radians) modulo a half turn, to (-PI/2, PI/2]. Used to
+ * find the smallest rotation that aligns an undirected line with an axis —
+ * a line pointing "backwards" is already aligned, so this avoids an
+ * unnecessary 180 turn that would flip the rest of a rigidly-rotated part.
+ */
+export function reduceToHalfTurn(angle: number): number {
+  const half = Math.PI / 2;
+  let a = angle % Math.PI;
+  if (a <= -half) a += Math.PI;
+  if (a > half) a -= Math.PI;
+  return a;
+}
+
+/**
  * Magnitude of the sweep (0, TAU] traversed from `start` to `end`, going
  * counterclockwise (increasing angle) if `ccw`, clockwise otherwise.
  * Equal start/end is treated as a full turn, matching DXF ARC convention.

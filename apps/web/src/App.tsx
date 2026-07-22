@@ -7,6 +7,7 @@ import { CodePanel } from "./code/CodePanel";
 import { DxfBrowser } from "./dxf/DxfBrowser";
 import { ImportReportBanner } from "./dxf/ImportReportBanner";
 import { LayerPanel } from "./layers/LayerPanel";
+import { StraightenPanel } from "./viewport/StraightenPanel";
 
 const TOOLS: { id: ToolId; label: string; keyHint: string; icon: JSX.Element }[] = [
   {
@@ -61,6 +62,24 @@ const TOOLS: { id: ToolId; label: string; keyHint: string; icon: JSX.Element }[]
           strokeWidth="1.6"
           strokeLinecap="round"
         />
+      </svg>
+    ),
+  },
+  {
+    id: "straighten",
+    label: "Straighten",
+    keyHint: "T",
+    icon: (
+      <svg viewBox="0 0 24 24" width="20" height="20">
+        <path
+          d="M4 17L15 6M15 6h-5M15 6v5"
+          stroke="currentColor"
+          strokeWidth="2"
+          fill="none"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path d="M4 20h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
       </svg>
     ),
   },
@@ -238,6 +257,7 @@ export function App() {
         <div className="center">
           <main className="stage">
             <Viewport />
+            {tool === "straighten" && <StraightenPanel />}
           </main>
           {showDxf && <DxfBrowser onClose={() => setShowDxf(false)} />}
         </div>
