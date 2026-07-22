@@ -5,6 +5,7 @@ import { openSketchor, saveSketchor } from "./io/sketchorFile";
 import { Viewport } from "./viewport/Viewport";
 import { CodePanel } from "./code/CodePanel";
 import { DxfBrowser } from "./dxf/DxfBrowser";
+import { FileExplorerPanel } from "./browser/FileExplorerPanel";
 import { DiagnosticsPanel } from "./heal/DiagnosticsPanel";
 import { ImportReportBanner } from "./dxf/ImportReportBanner";
 import { LayerPanel } from "./layers/LayerPanel";
@@ -99,6 +100,8 @@ export function App() {
   const [showLayers, setShowLayers] = useState(true);
   const [showDxf, setShowDxf] = useState(false);
   const [showDiag, setShowDiag] = useState(false);
+  const showFiles = useApp((s) => s.fileBrowserVisible);
+  const setShowFiles = useApp((s) => s.setFileBrowserVisible);
 
   const measuredDistance = measurement ? dist(measurement.a, measurement.b) : null;
 
@@ -252,6 +255,22 @@ export function App() {
               <circle cx="12" cy="12" r="4" stroke="currentColor" strokeWidth="2" fill="none" />
             </svg>
           </button>
+          <button
+            className={`action ${showFiles ? "toggled" : ""}`}
+            title="Toggle file browser"
+            data-testid="toggle-file-browser"
+            onClick={() => setShowFiles(!showFiles)}
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18">
+              <path
+                d="M3 6a2 2 0 012-2h4l2 2h6a2 2 0 012 2v1H3zM3 9h18v9a2 2 0 01-2 2H5a2 2 0 01-2-2z"
+                stroke="currentColor"
+                strokeWidth="2"
+                fill="none"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
         </div>
         <div className="hint">{TOOL_HINTS[tool]}</div>
       </header>
@@ -273,6 +292,7 @@ export function App() {
             </button>
           ))}
         </nav>
+        {showFiles && <FileExplorerPanel onClose={() => setShowFiles(false)} />}
         <div className="center">
           <TabStrip />
           <main className="stage">

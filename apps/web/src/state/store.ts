@@ -351,6 +351,12 @@ interface AppState {
   /** The group currently "entered" for editing individual members (double-click a group, Esc to exit). */
   enteredGroupId: GroupId | null;
   setEnteredGroup: (id: GroupId | null) => void;
+  /** In-app file browser (R9): left-dock panel visibility. */
+  fileBrowserVisible: boolean;
+  setFileBrowserVisible: (v: boolean) => void;
+  /** Desktop only: a directory the file browser should auto-load (set when a file is opened from Explorer). */
+  fileBrowserDesktopDir: string | null;
+  setFileBrowserDesktopDir: (dir: string | null) => void;
   setTool: (tool: ToolId) => void;
   setSelection: (ids: EntityId[]) => void;
   setCursor: (cursor: { x: number; y: number } | null) => void;
@@ -397,6 +403,10 @@ export const useApp = create<AppState>((set, get) => ({
   setHealFocus: (p) => set({ healFocus: p }),
   enteredGroupId: null,
   setEnteredGroup: (id) => set({ enteredGroupId: id }),
+  fileBrowserVisible: false,
+  setFileBrowserVisible: (v) => set({ fileBrowserVisible: v }),
+  fileBrowserDesktopDir: null,
+  setFileBrowserDesktopDir: (dir) => set({ fileBrowserDesktopDir: dir }),
   // Switching tools invalidates any in-progress reference-edge pick or entered group.
   setTool: (tool) => set({ tool, referenceEdgeId: null, enteredGroupId: null }),
   setSelection: (selection) => set({ selection }),

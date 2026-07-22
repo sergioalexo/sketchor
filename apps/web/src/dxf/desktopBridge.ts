@@ -16,9 +16,16 @@ interface TauriGlobal {
   event: {
     listen: (
       event: string,
-      handler: (e: { payload: { name: string; text: string } }) => void,
+      handler: (e: { payload: { name: string; text: string; dir?: string } }) => void,
     ) => Promise<() => void>;
   };
+}
+
+/** Reveals the in-app file browser (R9) pointed at the opened file's folder, when the desktop side sent one. */
+function revealFolder(dir: string | undefined): void {
+  if (!dir) return;
+  useApp.getState().setFileBrowserDesktopDir(dir);
+  useApp.getState().setFileBrowserVisible(true);
 }
 
 export function initDesktopFileOpen(): void {
@@ -31,12 +38,14 @@ export function initDesktopFileOpen(): void {
       useApp.getState().addLibraryFiles([{ name: payload.name, text: payload.text }]);
       importDxfText(payload.text);
     });
+    revealFolder(payload.dir);
   });
 
   tauri.event.listen("open-sketchor", ({ payload }) => {
     if (!payload?.text) return;
     try {
       openIntoSession(payload.name, () => loadDrawingJson(payload.text));
+      revealFolder(payload.dir);
     } catch {
       // Malformed file — leave the canvas as-is rather than crashing.
     }
