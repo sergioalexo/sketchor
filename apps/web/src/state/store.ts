@@ -12,15 +12,19 @@ import {
   issueEntityIds,
   layerOf,
   mid,
+  newGroupId,
   parseCode,
   parseDxf,
   reduceToHalfTurn,
   scanForIssues,
   toCode,
+  wholeGroupSelected,
   type Command,
   type DxfImportReport,
   type Entity,
   type EntityId,
+  type Group,
+  type GroupId,
   type HealIssue,
   type HealOptions,
   type ParseIssue,
@@ -60,16 +64,48 @@ export function drawingToJson(): string {
  * as one undoable step. Returns the entity count; throws on malformed JSON.
  */
 export function loadDrawingJson(text: string): { count: number } {
-  const parsed = JSON.parse(text) as { entities?: unknown };
+  const parsed = JSON.parse(text) as { entities?: unknown; groups?: unknown };
   const entities = Array.isArray(parsed.entities) ? (parsed.entities as Entity[]) : [];
+  const groups = Array.isArray(parsed.groups) ? (parsed.groups as Group[]) : [];
   const commands: Command[] = [];
+  for (const g of doc.groups()) commands.push({ type: "ungroup", groupId: g.id });
   const existing = doc.all().map((e) => e.id);
   if (existing.length) commands.push({ type: "delete-entities", ids: existing });
   for (const entity of entities) commands.push({ type: "add-entity", entity });
+  for (const g of groups) {
+    commands.push({
+      type: "group-entities",
+      groupId: g.id,
+      ids: g.members,
+      name: g.name,
+      ...(g.parent ? { parent: g.parent } : {}),
+    });
+  }
   if (commands.length === 1) bus.execute(commands[0]);
   else if (commands.length > 1) bus.execute({ type: "batch", commands });
   useApp.getState().syncLayersFromDoc(true);
   return { count: entities.length };
+}
+
+/* -------------------------------- groups -------------------------------- */
+
+/** Groups the current selection into a named group; requires 2+ selected entities. Returns the new group id, or null if not applicable. */
+export function groupSelection(name?: string): GroupId | null {
+  const { selection } = useApp.getState();
+  if (selection.length < 2) return null;
+  const groupId = newGroupId();
+  bus.execute({ type: "group-entities", groupId, ids: selection, name: name ?? "Group" });
+  useApp.getState().setSelection(selection); // keep the (now grouped) selection as-is
+  return groupId;
+}
+
+/** Ungroups the current selection, if it's exactly one whole group. */
+export function ungroupSelection(): boolean {
+  const { selection } = useApp.getState();
+  const groupId = wholeGroupSelected(doc, selection);
+  if (!groupId) return false;
+  bus.execute({ type: "ungroup", groupId });
+  return true;
 }
 
 /**
@@ -242,6 +278,9 @@ interface AppState {
   setHealOptions: (options: Partial<HealOptions>) => void;
   setJoinCollinear: (v: boolean) => void;
   setHealFocus: (p: Point | null) => void;
+  /** The group currently "entered" for editing individual members (double-click a group, Esc to exit). */
+  enteredGroupId: GroupId | null;
+  setEnteredGroup: (id: GroupId | null) => void;
   setTool: (tool: ToolId) => void;
   setSelection: (ids: EntityId[]) => void;
   setCursor: (cursor: { x: number; y: number } | null) => void;
@@ -284,8 +323,10 @@ export const useApp = create<AppState>((set, get) => ({
   setHealOptions: (options) => set((s) => ({ healOptions: { ...s.healOptions, ...options } })),
   setJoinCollinear: (v) => set({ joinCollinear: v }),
   setHealFocus: (p) => set({ healFocus: p }),
-  // Switching tools invalidates any in-progress reference-edge pick.
-  setTool: (tool) => set({ tool, referenceEdgeId: null }),
+  enteredGroupId: null,
+  setEnteredGroup: (id) => set({ enteredGroupId: id }),
+  // Switching tools invalidates any in-progress reference-edge pick or entered group.
+  setTool: (tool) => set({ tool, referenceEdgeId: null, enteredGroupId: null }),
   setSelection: (selection) => set({ selection }),
   setCursor: (cursor) => set({ cursor }),
   setZoom: (zoom) => set({ zoom }),
@@ -380,6 +421,8 @@ declare global {
       rescanHeal: typeof rescanHeal;
       fixAllHeal: typeof fixAllHeal;
       getHealIssues: () => HealIssue[];
+      getSelection: () => EntityId[];
+      getEnteredGroup: () => GroupId | null;
     };
   }
 }
@@ -393,5 +436,7 @@ window.sketchor = {
   loadLibrary: (files) => useApp.getState().addLibraryFiles(files),
   rescanHeal,
   fixAllHeal,
+  getSelection: () => useApp.getState().selection,
+  getEnteredGroup: () => useApp.getState().enteredGroupId,
   getHealIssues: () => useApp.getState().healIssues,
 };

@@ -1,5 +1,6 @@
 export * from "./geometry";
 export * from "./entities";
+export * from "./groups";
 export * from "./document";
 export * from "./commands";
 export * from "./sketchtext";

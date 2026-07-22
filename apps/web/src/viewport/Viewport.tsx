@@ -8,12 +8,23 @@ import {
   layerOf,
   newEntityId,
   nextEntityName,
+  resolveSelection,
+  wholeGroupSelected,
 } from "@sketchor/core";
-import { applyStraighten, bus, computeStraightenTransform, doc, hiddenLayerSet, useApp } from "../state/store";
+import {
+  applyStraighten,
+  bus,
+  computeStraightenTransform,
+  doc,
+  groupSelection,
+  hiddenLayerSet,
+  ungroupSelection,
+  useApp,
+} from "../state/store";
 import { openSketchor, saveSketchor } from "../io/sketchorFile";
 import { render } from "./renderer";
 import { findSnap, type Snap } from "./snapping";
-import { fitToBounds, screenToWorld, zoomAt, type View } from "./view";
+import { fitToBounds, screenToWorld, worldToScreen, zoomAt, type View } from "./view";
 
 type Interaction =
   | { kind: "idle" }
@@ -21,7 +32,17 @@ type Interaction =
   | { kind: "draw-line"; start: Point }
   | { kind: "draw-circle"; center: Point }
   | { kind: "measure"; start: Point }
-  | { kind: "move"; ids: EntityId[]; startWorld: Point; dx: number; dy: number };
+  | { kind: "move"; ids: EntityId[]; startWorld: Point; dx: number; dy: number }
+  | { kind: "rotate-group"; ids: EntityId[]; pivot: Point; startAngle: number; rotation: number };
+
+/** Fixed pixel offset above a selected group's bounding box where its rotate handle is drawn/hit-tested. */
+const GROUP_HANDLE_OFFSET_PX = 26;
+const GROUP_HANDLE_HIT_PX = 8;
+
+function groupHandleScreenPos(view: View, bb: { minX: number; maxX: number; maxY: number }): Point {
+  const s = worldToScreen(view, { x: (bb.minX + bb.maxX) / 2, y: bb.maxY });
+  return { x: s.x, y: s.y - GROUP_HANDLE_OFFSET_PX };
+}
 
 /** New geometry carries the active layer (omitted when it's the default). */
 function activeLayerProp(active: string): { layer?: string } {
@@ -91,6 +112,18 @@ export function Viewport() {
 
     const straightenPlan = state.tool === "straighten" ? computeStraightenTransform() : null;
 
+    // A whole-group selection gets a dashed bbox + rotate handle (select tool only).
+    const groupId = state.tool === "select" ? wholeGroupSelected(doc, state.selection) : null;
+    const groupBounds = groupId
+      ? boundsOf(state.selection.map((id) => doc.get(id)).filter((e): e is Entity => !!e))
+      : null;
+    const rotating = interaction.kind === "rotate-group" ? interaction : null;
+    const groupPivot = rotating
+      ? rotating.pivot
+      : groupBounds
+        ? { x: (groupBounds.minX + groupBounds.maxX) / 2, y: (groupBounds.minY + groupBounds.maxY) / 2 }
+        : null;
+
     render(ctx, w, h, viewRef.current, doc, {
       selection: new Set(state.selection),
       preview,
@@ -100,8 +133,13 @@ export function Viewport() {
       measurement: state.measurement,
       hiddenLayers: hiddenLayerSet(),
       referenceEdgeId: state.tool === "straighten" ? state.referenceEdgeId : null,
-      transformPreview: straightenPlan ? { ...straightenPlan, ids: new Set(straightenPlan.ids) } : null,
+      transformPreview: rotating
+        ? { ids: new Set(rotating.ids), pivot: rotating.pivot, rotation: rotating.rotation }
+        : straightenPlan
+          ? { ...straightenPlan, ids: new Set(straightenPlan.ids) }
+          : null,
       healMarkers: state.healIssues.map((i) => i.location),
+      groupHandle: groupBounds && groupPivot ? { bounds: groupBounds, pivot: groupPivot } : null,
     });
   };
 
@@ -200,6 +238,7 @@ export function Viewport() {
         interactionRef.current = { kind: "idle" };
         app.setSelection([]);
         app.setMeasurement(null);
+        app.setEnteredGroup(null);
         redraw();
       } else if (e.key.toLowerCase() === "v" || e.key.toLowerCase() === "s") {
         app.setTool("select");
@@ -215,6 +254,10 @@ export function Viewport() {
         app.setTool("straighten");
       } else if (e.key === "Enter" && app.tool === "straighten") {
         applyStraighten();
+      } else if (e.key.toLowerCase() === "g" && !e.ctrlKey && !e.metaKey && app.tool === "select") {
+        groupSelection();
+      } else if (e.key.toLowerCase() === "u" && !e.ctrlKey && !e.metaKey && app.tool === "select") {
+        ungroupSelection();
       }
     };
     window.addEventListener("keydown", onKey);
@@ -243,6 +286,20 @@ export function Viewport() {
       return;
     }
     if (e.button !== 0) return;
+
+    if (app.tool === "select") {
+      const groupId = wholeGroupSelected(doc, app.selection);
+      const bb = groupId
+        ? boundsOf(app.selection.map((id) => doc.get(id)).filter((ent): ent is Entity => !!ent))
+        : null;
+      if (bb && dist(screen, groupHandleScreenPos(view, bb)) <= GROUP_HANDLE_HIT_PX) {
+        const pivot = { x: (bb.minX + bb.maxX) / 2, y: (bb.minY + bb.maxY) / 2 };
+        const startAngle = Math.atan2(world.y - pivot.y, world.x - pivot.x);
+        interactionRef.current = { kind: "rotate-group", ids: app.selection, pivot, startAngle, rotation: 0 };
+        redraw();
+        return;
+      }
+    }
 
     const snapped = findSnap(doc, view, world).point;
     const interaction = interactionRef.current;
@@ -305,16 +362,21 @@ export function Viewport() {
       case "select": {
         const hit = hitTest(view, world);
         if (hit) {
+          // Clicking any member of a group selects the whole group, unless it's currently "entered".
+          const resolved = resolveSelection(doc, hit, app.enteredGroupId);
           let ids: EntityId[];
           if (e.shiftKey) {
-            ids = app.selection.includes(hit)
-              ? app.selection.filter((id) => id !== hit)
-              : [...app.selection, hit];
+            const allSelected = resolved.every((id) => app.selection.includes(id));
+            ids = allSelected
+              ? app.selection.filter((id) => !resolved.includes(id))
+              : [...new Set([...app.selection, ...resolved])];
           } else {
-            ids = app.selection.includes(hit) ? app.selection : [hit];
+            const alreadyExact =
+              app.selection.length === resolved.length && resolved.every((id) => app.selection.includes(id));
+            ids = alreadyExact ? app.selection : resolved;
           }
           app.setSelection(ids);
-          if (ids.includes(hit)) {
+          if (resolved.every((id) => ids.includes(id))) {
             interactionRef.current = { kind: "move", ids, startWorld: world, dx: 0, dy: 0 };
           }
         } else if (!e.shiftKey) {
@@ -352,6 +414,9 @@ export function Viewport() {
         dx: world.x - interaction.startWorld.x,
         dy: world.y - interaction.startWorld.y,
       };
+    } else if (interaction.kind === "rotate-group") {
+      const angle = Math.atan2(world.y - interaction.pivot.y, world.x - interaction.pivot.x);
+      interactionRef.current = { ...interaction, rotation: angle - interaction.startAngle };
     }
 
     const snap = findSnap(doc, view, world);
@@ -379,6 +444,20 @@ export function Viewport() {
       }
       interactionRef.current = { kind: "idle" };
       redraw();
+    } else if (interaction.kind === "rotate-group") {
+      if (Math.abs(interaction.rotation) > 1e-9) {
+        bus.execute({
+          type: "transform-entities",
+          ids: interaction.ids,
+          pivot: interaction.pivot,
+          rotation: interaction.rotation,
+          dx: 0,
+          dy: 0,
+          scale: 1,
+        });
+      }
+      interactionRef.current = { kind: "idle" };
+      redraw();
     }
     try {
       canvasRef.current!.releasePointerCapture(e.pointerId);
@@ -399,7 +478,19 @@ export function Viewport() {
     const screen = { x: e.nativeEvent.offsetX, y: e.nativeEvent.offsetY };
     const world = screenToWorld(viewRef.current, screen);
     const hit = hitTest(viewRef.current, world);
-    if (!hit) fitView(); // double-click on empty canvas == zoom-fit everything
+    if (!hit) {
+      fitView(); // double-click on empty canvas == zoom-fit everything
+      return;
+    }
+    const app = useApp.getState();
+    if (app.tool !== "select") return;
+    const top = doc.topLevelGroupOf(hit);
+    if (top && top.id !== app.enteredGroupId) {
+      // Enter the group to edit its members individually (Esc exits).
+      app.setEnteredGroup(top.id);
+      app.setSelection([hit]);
+      redraw();
+    }
   };
 
   return (

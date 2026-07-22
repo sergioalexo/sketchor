@@ -1,5 +1,6 @@
 import type { Entity, EntityId } from "./entities";
 import { transformed, translated } from "./entities";
+import type { GroupId } from "./groups";
 import type { Point } from "./geometry";
 import type { SketchDocument } from "./document";
 
@@ -24,6 +25,8 @@ export type Command =
       rotation?: number;
       scale?: number;
     }
+  | { type: "group-entities"; groupId: GroupId; ids: (EntityId | GroupId)[]; name?: string; parent?: GroupId }
+  | { type: "ungroup"; groupId: GroupId }
   | { type: "batch"; commands: Command[] };
 
 interface HistoryEntry {
@@ -136,6 +139,29 @@ export class CommandBus {
           );
         }
         return inverse;
+      }
+      case "group-entities": {
+        doc._putGroup({
+          id: command.groupId,
+          name: command.name ?? command.groupId,
+          members: command.ids,
+          ...(command.parent ? { parent: command.parent } : {}),
+        });
+        return [{ type: "ungroup", groupId: command.groupId }];
+      }
+      case "ungroup": {
+        const group = doc.getGroup(command.groupId);
+        if (!group) return [];
+        doc._removeGroup(command.groupId);
+        return [
+          {
+            type: "group-entities",
+            groupId: group.id,
+            ids: group.members,
+            name: group.name,
+            ...(group.parent ? { parent: group.parent } : {}),
+          },
+        ];
       }
       case "batch": {
         const inverse: Command[] = [];

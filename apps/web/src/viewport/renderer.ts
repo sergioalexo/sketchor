@@ -1,4 +1,4 @@
-import type { Entity, EntityId, Point, SketchDocument } from "@sketchor/core";
+import type { Bounds, Entity, EntityId, Point, SketchDocument } from "@sketchor/core";
 import { dist, entityPoints, layerOf, transformed, translated } from "@sketchor/core";
 import { gridStep, worldToScreen, type View } from "./view";
 import type { Snap } from "./snapping";
@@ -27,7 +27,12 @@ export interface RenderUiState {
   transformPreview: TransformPreview | null;
   /** World locations of current heal-diagnostics findings. */
   healMarkers: readonly Point[];
+  /** Dashed bbox + rotate handle shown when the selection is exactly one whole group. */
+  groupHandle: { bounds: Bounds; pivot: Point } | null;
 }
+
+/** Must match GROUP_HANDLE_OFFSET_PX in Viewport.tsx, which hit-tests this same handle. */
+const GROUP_HANDLE_OFFSET_PX = 26;
 
 const COLORS = {
   bg: "#17181c",
@@ -75,6 +80,8 @@ export function render(
     if (selected) drawHandles(ctx, view, shown);
   }
 
+  if (ui.groupHandle) drawGroupHandle(ctx, view, ui.groupHandle);
+
   if (ui.transformPreview) {
     const { ids, pivot, rotation } = ui.transformPreview;
     ctx.setLineDash([6, 4]);
@@ -97,6 +104,38 @@ export function render(
   for (const p of ui.healMarkers) drawHealMarker(ctx, view, p);
 
   if (ui.snap) drawSnapMarker(ctx, view, ui.snap);
+}
+
+function drawGroupHandle(
+  ctx: CanvasRenderingContext2D,
+  view: View,
+  gh: { bounds: Bounds; pivot: Point },
+): void {
+  const bb = gh.bounds;
+  const topLeft = worldToScreen(view, { x: bb.minX, y: bb.maxY });
+  const bottomRight = worldToScreen(view, { x: bb.maxX, y: bb.minY });
+
+  ctx.strokeStyle = COLORS.selected;
+  ctx.lineWidth = 1;
+  ctx.setLineDash([5, 4]);
+  ctx.strokeRect(topLeft.x, topLeft.y, bottomRight.x - topLeft.x, bottomRight.y - topLeft.y);
+  ctx.setLineDash([]);
+
+  const topCenter = worldToScreen(view, { x: (bb.minX + bb.maxX) / 2, y: bb.maxY });
+  const handle = { x: topCenter.x, y: topCenter.y - GROUP_HANDLE_OFFSET_PX };
+
+  ctx.beginPath();
+  ctx.moveTo(topCenter.x, topCenter.y);
+  ctx.lineTo(handle.x, handle.y);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.arc(handle.x, handle.y, 6, 0, Math.PI * 2);
+  ctx.fillStyle = COLORS.selected;
+  ctx.fill();
+  ctx.strokeStyle = COLORS.bg;
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
 }
 
 function drawHealMarker(ctx: CanvasRenderingContext2D, view: View, p: Point): void {
