@@ -1,6 +1,7 @@
 import type { Entity, EntityId } from "./entities";
 import { transformed, translated } from "./entities";
 import type { GroupId } from "./groups";
+import type { Constraint, ConstraintId } from "./constraints";
 import type { Point } from "./geometry";
 import type { SketchDocument } from "./document";
 
@@ -27,6 +28,8 @@ export type Command =
     }
   | { type: "group-entities"; groupId: GroupId; ids: (EntityId | GroupId)[]; name?: string; parent?: GroupId }
   | { type: "ungroup"; groupId: GroupId }
+  | { type: "add-constraint"; constraint: Constraint }
+  | { type: "remove-constraint"; id: ConstraintId }
   | { type: "batch"; commands: Command[] };
 
 interface HistoryEntry {
@@ -162,6 +165,16 @@ export class CommandBus {
             ...(group.parent ? { parent: group.parent } : {}),
           },
         ];
+      }
+      case "add-constraint": {
+        doc._putConstraint(command.constraint);
+        return [{ type: "remove-constraint", id: command.constraint.id }];
+      }
+      case "remove-constraint": {
+        const existing = doc.getConstraint(command.id);
+        if (!existing) return [];
+        doc._removeConstraint(command.id);
+        return [{ type: "add-constraint", constraint: existing }];
       }
       case "batch": {
         const inverse: Command[] = [];

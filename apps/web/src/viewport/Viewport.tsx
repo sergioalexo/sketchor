@@ -5,6 +5,7 @@ import {
   dist,
   distToArc,
   distToSegment,
+  freeEndpointEntityIds,
   layerOf,
   newEntityId,
   nextEntityName,
@@ -142,6 +143,7 @@ export function Viewport() {
           : null,
       healMarkers: state.healIssues.map((i) => i.location),
       groupHandle: groupBounds && groupPivot ? { bounds: groupBounds, pivot: groupPivot } : null,
+      freeEndpointIds: state.showConnectivityHint ? freeEndpointEntityIds(doc) : null,
     });
   };
 
@@ -187,6 +189,7 @@ export function Viewport() {
   const straightenPivot = useApp((s) => s.straightenPivot);
   const healIssues = useApp((s) => s.healIssues);
   const healFocus = useApp((s) => s.healFocus);
+  const showConnectivityHint = useApp((s) => s.showConnectivityHint);
 
   // Redraw when document, selection, tool, measurement, layers, the straighten pick, or heal findings change
   useEffect(redraw, [
@@ -199,6 +202,7 @@ export function Viewport() {
     straightenAxis,
     straightenPivot,
     healIssues,
+    showConnectivityHint,
   ]);
 
   // Diagnostics panel row click: frame that finding.

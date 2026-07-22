@@ -1,9 +1,11 @@
 import type { Entity, EntityId } from "./entities";
 import type { Group, GroupId } from "./groups";
+import type { Constraint, ConstraintId } from "./constraints";
 
 /**
- * The drawing document: a flat store of entities, plus a registry of
- * groups over them (see groups.ts).
+ * The drawing document: a flat store of entities, a registry of groups
+ * over them (see groups.ts), and a constraint list (see constraints.ts —
+ * scaffolding only; nothing reads these yet, see R2's status).
  *
  * Deliberately dumb — all mutations go through the CommandBus so that
  * every change is serializable, undoable, and (later) producible by an
@@ -12,6 +14,7 @@ import type { Group, GroupId } from "./groups";
 export class SketchDocument {
   private entities = new Map<EntityId, Entity>();
   private groupsMap = new Map<GroupId, Group>();
+  private constraintsMap = new Map<ConstraintId, Constraint>();
   /** Bumped on every mutation; cheap dirty-check for renderers. */
   revision = 0;
 
@@ -93,14 +96,35 @@ export class SketchDocument {
     return out;
   }
 
-  toJSON(): { version: 2; entities: Entity[]; groups: Group[] } {
-    return { version: 2, entities: this.all(), groups: this.groups() };
+  getConstraint(id: ConstraintId): Constraint | undefined {
+    return this.constraintsMap.get(id);
   }
 
-  static fromJSON(json: { entities: Entity[]; groups?: Group[] }): SketchDocument {
+  constraints(): Constraint[] {
+    return [...this.constraintsMap.values()];
+  }
+
+  /** Internal — used by the command bus only. */
+  _putConstraint(constraint: Constraint): void {
+    this.constraintsMap.set(constraint.id, constraint);
+    this.revision += 1;
+  }
+
+  /** Internal — used by the command bus only. */
+  _removeConstraint(id: ConstraintId): void {
+    this.constraintsMap.delete(id);
+    this.revision += 1;
+  }
+
+  toJSON(): { version: 2; entities: Entity[]; groups: Group[]; constraints: Constraint[] } {
+    return { version: 2, entities: this.all(), groups: this.groups(), constraints: this.constraints() };
+  }
+
+  static fromJSON(json: { entities: Entity[]; groups?: Group[]; constraints?: Constraint[] }): SketchDocument {
     const doc = new SketchDocument();
     for (const e of json.entities) doc._put(e);
     for (const g of json.groups ?? []) doc._putGroup(g);
+    for (const c of json.constraints ?? []) doc._putConstraint(c);
     return doc;
   }
 }

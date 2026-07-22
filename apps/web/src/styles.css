@@ -383,6 +383,11 @@ body {
   font-weight: 600;
 }
 
+.connectivity-readout {
+  color: #4d7ac7;
+  font-weight: 600;
+}
+
 /* ---------- center column (stage + dxf strip) ---------- */
 
 .center {

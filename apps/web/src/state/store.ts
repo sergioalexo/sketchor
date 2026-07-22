@@ -9,6 +9,7 @@ import {
   dxfToSvg,
   fixAllIssues,
   fixIssue,
+  freeEndpointEntityIds,
   issueEntityIds,
   layerOf,
   mid,
@@ -20,6 +21,7 @@ import {
   toCode,
   wholeGroupSelected,
   type Command,
+  type Constraint,
   type DxfImportReport,
   type Entity,
   type EntityId,
@@ -131,10 +133,12 @@ export function drawingToJson(): string {
  * as one undoable step. Returns the entity count; throws on malformed JSON.
  */
 export function loadDrawingJson(text: string): { count: number } {
-  const parsed = JSON.parse(text) as { entities?: unknown; groups?: unknown };
+  const parsed = JSON.parse(text) as { entities?: unknown; groups?: unknown; constraints?: unknown };
   const entities = Array.isArray(parsed.entities) ? (parsed.entities as Entity[]) : [];
   const groups = Array.isArray(parsed.groups) ? (parsed.groups as Group[]) : [];
+  const constraints = Array.isArray(parsed.constraints) ? (parsed.constraints as Constraint[]) : [];
   const commands: Command[] = [];
+  for (const c of doc.constraints()) commands.push({ type: "remove-constraint", id: c.id });
   for (const g of doc.groups()) commands.push({ type: "ungroup", groupId: g.id });
   const existing = doc.all().map((e) => e.id);
   if (existing.length) commands.push({ type: "delete-entities", ids: existing });
@@ -148,6 +152,7 @@ export function loadDrawingJson(text: string): { count: number } {
       ...(g.parent ? { parent: g.parent } : {}),
     });
   }
+  for (const c of constraints) commands.push({ type: "add-constraint", constraint: c });
   if (commands.length === 1) bus.execute(commands[0]);
   else if (commands.length > 1) bus.execute({ type: "batch", commands });
   useApp.getState().syncLayersFromDoc(true);
@@ -357,6 +362,13 @@ interface AppState {
   /** Desktop only: a directory the file browser should auto-load (set when a file is opened from Explorer). */
   fileBrowserDesktopDir: string | null;
   setFileBrowserDesktopDir: (dir: string | null) => void;
+  /**
+   * R2's interim connectivity hint: colors entities with a free (unshared)
+   * endpoint blue. This is NOT real constraint/DOF status — there's no
+   * solver yet — so it's opt-in and off by default. See connectivity.ts.
+   */
+  showConnectivityHint: boolean;
+  setShowConnectivityHint: (v: boolean) => void;
   setTool: (tool: ToolId) => void;
   setSelection: (ids: EntityId[]) => void;
   setCursor: (cursor: { x: number; y: number } | null) => void;
@@ -407,6 +419,8 @@ export const useApp = create<AppState>((set, get) => ({
   setFileBrowserVisible: (v) => set({ fileBrowserVisible: v }),
   fileBrowserDesktopDir: null,
   setFileBrowserDesktopDir: (dir) => set({ fileBrowserDesktopDir: dir }),
+  showConnectivityHint: false,
+  setShowConnectivityHint: (v) => set({ showConnectivityHint: v }),
   // Switching tools invalidates any in-progress reference-edge pick or entered group.
   setTool: (tool) => set({ tool, referenceEdgeId: null, enteredGroupId: null }),
   setSelection: (selection) => set({ selection }),

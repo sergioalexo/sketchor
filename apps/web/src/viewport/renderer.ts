@@ -29,6 +29,12 @@ export interface RenderUiState {
   healMarkers: readonly Point[];
   /** Dashed bbox + rotate handle shown when the selection is exactly one whole group. */
   groupHandle: { bounds: Bounds; pivot: Point } | null;
+  /**
+   * R2's interim connectivity hint (opt-in, off by default): entities with a
+   * free endpoint render blue. NOT real constraint/DOF status — see
+   * connectivity.ts. Null when the hint is turned off.
+   */
+  freeEndpointIds: ReadonlySet<EntityId> | null;
 }
 
 /** Must match GROUP_HANDLE_OFFSET_PX in Viewport.tsx, which hit-tests this same handle. */
@@ -47,6 +53,7 @@ const COLORS = {
   measure: "#5ad1c5",
   measureLabelBg: "#0c2b28",
   reference: "#ff5c5c",
+  connectivityHint: "#4d7ac7",
 };
 
 function fmtNum(n: number): string {
@@ -71,11 +78,18 @@ export function render(
     if (ui.hiddenLayers.has(layerOf(entity))) continue;
     const selected = ui.selection.has(entity.id);
     const isReference = entity.id === ui.referenceEdgeId;
+    const isFreeEndpoint = !!ui.freeEndpointIds?.has(entity.id);
     const shown =
       selected && ui.moveOffset
         ? translated(entity, ui.moveOffset.dx, ui.moveOffset.dy)
         : entity;
-    const color = isReference ? COLORS.reference : selected ? COLORS.selected : COLORS.entity;
+    const color = isReference
+      ? COLORS.reference
+      : selected
+        ? COLORS.selected
+        : isFreeEndpoint
+          ? COLORS.connectivityHint
+          : COLORS.entity;
     drawEntity(ctx, view, shown, color, selected || isReference ? 2 : 1.5);
     if (selected) drawHandles(ctx, view, shown);
   }

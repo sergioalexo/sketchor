@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { dist } from "@sketchor/core";
+import { dist, freeEndpointEntityIds } from "@sketchor/core";
 import { bus, doc, TOOL_HINTS, useApp, type ToolId } from "./state/store";
 import { openSketchor, saveSketchor } from "./io/sketchorFile";
 import { Viewport } from "./viewport/Viewport";
@@ -102,8 +102,12 @@ export function App() {
   const [showDiag, setShowDiag] = useState(false);
   const showFiles = useApp((s) => s.fileBrowserVisible);
   const setShowFiles = useApp((s) => s.setFileBrowserVisible);
+  const showConnectivityHint = useApp((s) => s.showConnectivityHint);
+  const setShowConnectivityHint = useApp((s) => s.setShowConnectivityHint);
 
   const measuredDistance = measurement ? dist(measurement.a, measurement.b) : null;
+  // Recomputed every render (cheap, matches the entity-count footer pattern below); `revision` forces the re-render.
+  const freeEndpointCount = showConnectivityHint ? freeEndpointEntityIds(doc).size : 0;
 
   return (
     <div className="app">
@@ -271,6 +275,25 @@ export function App() {
               />
             </svg>
           </button>
+          <button
+            className={`action ${showConnectivityHint ? "toggled" : ""}`}
+            title="Toggle connectivity hint — endpoints with nothing joined to them turn blue. This is NOT real constraint status (no solver yet), just a free-endpoint heuristic."
+            data-testid="toggle-connectivity-hint"
+            onClick={() => setShowConnectivityHint(!showConnectivityHint)}
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18">
+              <path
+                d="M4 18L10 8l4 5 6-9"
+                stroke="currentColor"
+                strokeWidth="2"
+                fill="none"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <circle cx="4" cy="18" r="1.8" fill="currentColor" />
+              <circle cx="20" cy="4" r="1.8" fill="currentColor" />
+            </svg>
+          </button>
         </div>
         <div className="hint">{TOOL_HINTS[tool]}</div>
       </header>
@@ -316,6 +339,15 @@ export function App() {
         {measuredDistance !== null && (
           <span className="measure-readout" data-testid="measure-readout">
             distance {measuredDistance.toFixed(2)}
+          </span>
+        )}
+        {showConnectivityHint && (
+          <span
+            className="connectivity-readout"
+            data-testid="connectivity-readout"
+            title="Free-endpoint heuristic, not real constraint status — see the toggle's tooltip"
+          >
+            {freeEndpointCount === 0 ? "No free endpoints (hint)" : `${freeEndpointCount} with a free endpoint (hint)`}
           </span>
         )}
       </footer>
