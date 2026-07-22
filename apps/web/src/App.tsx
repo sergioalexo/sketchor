@@ -9,6 +9,7 @@ import { DiagnosticsPanel } from "./heal/DiagnosticsPanel";
 import { ImportReportBanner } from "./dxf/ImportReportBanner";
 import { LayerPanel } from "./layers/LayerPanel";
 import { StraightenPanel } from "./viewport/StraightenPanel";
+import { TabStrip } from "./tabs/TabStrip";
 
 const TOOLS: { id: ToolId; label: string; keyHint: string; icon: JSX.Element }[] = [
   {
@@ -273,6 +274,7 @@ export function App() {
           ))}
         </nav>
         <div className="center">
+          <TabStrip />
           <main className="stage">
             <Viewport />
             {tool === "straighten" && <StraightenPanel />}

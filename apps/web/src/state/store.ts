@@ -31,8 +31,75 @@ import {
   type Point,
 } from "@sketchor/core";
 
-export const doc = new SketchDocument();
-export const bus = new CommandBus(doc);
+/**
+ * Multi-document sessions ("tabs"). Each open drawing gets its own
+ * `SketchDocument` + `CommandBus` (so undo/redo is isolated per tab) plus
+ * its own selection, layers, and viewport. `doc`/`bus` below stay as the
+ * two names every other module already imports — they're now proxies that
+ * always forward to the *active* session, so the rest of the app didn't
+ * need to change to become multi-document aware.
+ */
+export interface DocSession {
+  id: string;
+  name: string;
+  /** True once this tab has been loaded from or saved to a real file (vs. a fresh "Untitled-N"). */
+  named: boolean;
+  dirty: boolean;
+  doc: SketchDocument;
+  bus: CommandBus;
+  selection: EntityId[];
+  layers: Layer[];
+  activeLayer: string;
+  /** Saved pan/zoom, restored when this tab becomes active again; null until the viewport has set one. */
+  view: { scale: number; ox: number; oy: number } | null;
+}
+
+let sessionCounter = 0;
+function newSessionId(): string {
+  sessionCounter += 1;
+  return `sess${Date.now().toString(36)}${sessionCounter.toString(36)}`;
+}
+
+function newSession(name: string): DocSession {
+  const document = new SketchDocument();
+  return {
+    id: newSessionId(),
+    name,
+    named: false,
+    dirty: false,
+    doc: document,
+    bus: new CommandBus(document),
+    selection: [],
+    layers: [{ name: DEFAULT_LAYER, visible: true }],
+    activeLayer: DEFAULT_LAYER,
+    view: null,
+  };
+}
+
+const sessions: DocSession[] = [newSession("Untitled-1")];
+
+function activeSession(): DocSession {
+  const id = useApp.getState().activeSessionId;
+  return sessions.find((s) => s.id === id) ?? sessions[0];
+}
+
+/** A proxy that always forwards property access to `getTarget()`'s current value — see the module doc comment. */
+function makeProxy<T extends object>(getTarget: () => T): T {
+  return new Proxy({} as T, {
+    get(_t, prop) {
+      const target = getTarget();
+      const value = Reflect.get(target as object, prop, target as object);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+    set(_t, prop, value) {
+      const target = getTarget();
+      return Reflect.set(target as object, prop, value, target as object);
+    },
+  });
+}
+
+export const doc: SketchDocument = makeProxy(() => activeSession().doc);
+export const bus: CommandBus = makeProxy(() => activeSession().bus);
 
 /** Reads the whole drawing as sketch code. */
 export function sketchToCode(): string {
@@ -130,7 +197,7 @@ export function importDxfText(text: string, replace = true): { count: number; wa
 export type ToolId = "select" | "line" | "circle" | "measure" | "straighten";
 
 export const TOOL_HINTS: Record<ToolId, string> = {
-  select: "Click to select (Shift adds) - drag to move - Del deletes",
+  select: "Click to select (Shift adds) - drag to move - Del deletes - G groups - U ungroups",
   line: "Click start point, then click next points to chain - Esc to finish",
   circle: "Click center, then click a point on the circle",
   measure: "Click two points to measure distance and angle - Esc clears",
@@ -258,6 +325,9 @@ interface AppState {
   library: DxfFile[];
   layers: Layer[];
   activeLayer: string;
+  /** Which tab (see DocSession) is currently shown; bump `sessionsVersion` after mutating the sessions array itself. */
+  activeSessionId: string;
+  sessionsVersion: number;
   /** Parsed-vs-skipped tally from the most recent DXF import; null once dismissed. */
   importReport: DxfImportReport | null;
   setImportReport: (report: DxfImportReport | null) => void;
@@ -307,6 +377,8 @@ export const useApp = create<AppState>((set, get) => ({
   library: [],
   layers: [{ name: DEFAULT_LAYER, visible: true }],
   activeLayer: DEFAULT_LAYER,
+  activeSessionId: sessions[0].id,
+  sessionsVersion: 0,
   importReport: null,
   setImportReport: (report) => set({ importReport: report }),
   referenceEdgeId: null,
@@ -392,7 +464,7 @@ export const useApp = create<AppState>((set, get) => ({
   },
 }));
 
-bus.onChange(() => {
+function syncFromBus(): void {
   useApp.setState((s) => {
     const selection = s.selection.filter((id) => doc.has(id));
     return {
@@ -404,7 +476,134 @@ bus.onChange(() => {
       healIssues: s.healIssues.filter((issue) => issueEntityIds(issue).every((id) => doc.has(id))),
     };
   });
-});
+  activeSession().dirty = true;
+}
+
+let unbindBus: (() => void) | null = null;
+/** Re-subscribes the revision/selection/dirty sync to whichever session's bus is now active. */
+function rebindBus(): void {
+  unbindBus?.();
+  unbindBus = bus.onChange(syncFromBus);
+}
+rebindBus();
+
+/* ------------------------------ document tabs ---------------------------- */
+
+function bumpSessionsVersion(): void {
+  useApp.setState((s) => ({ sessionsVersion: s.sessionsVersion + 1 }));
+}
+
+function isSessionBlank(s: DocSession): boolean {
+  return s.doc.all().length === 0 && !s.dirty && !s.named;
+}
+
+function nextUntitledName(): string {
+  const used = new Set(sessions.filter((s) => !s.named).map((s) => s.name));
+  let i = 1;
+  while (used.has(`Untitled-${i}`)) i += 1;
+  return `Untitled-${i}`;
+}
+
+/** All open tabs, in order. Re-read this after `sessionsVersion` changes. */
+export function getSessions(): DocSession[] {
+  return sessions;
+}
+
+export function getSessionView(id: string): { scale: number; ox: number; oy: number } | null {
+  return sessions.find((s) => s.id === id)?.view ?? null;
+}
+
+export function setSessionView(id: string, view: { scale: number; ox: number; oy: number }): void {
+  const s = sessions.find((s) => s.id === id);
+  if (s) s.view = { ...view };
+}
+
+/** Switches the active tab, saving the outgoing tab's selection/layers and rebinding undo/redo sync. */
+export function switchToSession(id: string): void {
+  const state = useApp.getState();
+  if (id === state.activeSessionId) return;
+  const outgoing = sessions.find((s) => s.id === state.activeSessionId);
+  if (outgoing) {
+    outgoing.selection = state.selection;
+    outgoing.layers = state.layers;
+    outgoing.activeLayer = state.activeLayer;
+  }
+  const incoming = sessions.find((s) => s.id === id);
+  if (!incoming) return;
+  useApp.setState({
+    activeSessionId: id,
+    selection: incoming.selection,
+    layers: incoming.layers,
+    activeLayer: incoming.activeLayer,
+    revision: incoming.doc.revision,
+    // Tool-scoped state doesn't carry meaning across a document switch.
+    referenceEdgeId: null,
+    enteredGroupId: null,
+    healIssues: [],
+    measurement: null,
+    importReport: null,
+  });
+  rebindBus();
+  bumpSessionsVersion();
+}
+
+/** Opens a new, empty tab and switches to it. */
+export function newTab(): void {
+  const s = newSession(nextUntitledName());
+  sessions.push(s);
+  switchToSession(s.id);
+  bumpSessionsVersion();
+}
+
+/** Closes a tab (prompting if it has unsaved changes); always leaves at least one tab open. */
+export function closeTab(id: string): void {
+  const idx = sessions.findIndex((s) => s.id === id);
+  if (idx === -1) return;
+  if (sessions[idx].dirty) {
+    const ok = window.confirm(`"${sessions[idx].name}" has unsaved changes. Close anyway?`);
+    if (!ok) return;
+  }
+  const wasActive = useApp.getState().activeSessionId === id;
+  sessions.splice(idx, 1);
+  if (sessions.length === 0) sessions.push(newSession(nextUntitledName()));
+  if (wasActive) {
+    // The closed session is already gone from `sessions`, so switchToSession's
+    // "save the outgoing tab" step is naturally a no-op (nothing to save into).
+    const next = sessions[Math.max(0, idx - 1)] ?? sessions[0];
+    switchToSession(next.id);
+  }
+  bumpSessionsVersion();
+}
+
+/**
+ * Targets a tab for opening a file into: reuses the active tab if it's
+ * still blank (a fresh, unmodified "Untitled" tab), otherwise opens a new
+ * one — matching Ctrl+O / desktop file-association behavior from the spec.
+ * `load` runs against whichever tab ends up active.
+ */
+export function openIntoSession(name: string, load: () => void): void {
+  let active = sessions.find((s) => s.id === useApp.getState().activeSessionId)!;
+  if (!isSessionBlank(active)) {
+    active = newSession(name);
+    sessions.push(active);
+    switchToSession(active.id);
+  }
+  load();
+  active.name = name;
+  active.named = true;
+  active.dirty = false;
+  bumpSessionsVersion();
+}
+
+/** Marks the active tab as saved under `name` (e.g. after a successful Save-as). */
+export function finishSessionSave(name: string): void {
+  const active = sessions.find((s) => s.id === useApp.getState().activeSessionId);
+  if (!active) return;
+  active.name = name;
+  active.named = true;
+  active.dirty = false;
+  bumpSessionsVersion();
+}
 
 // Debug handle; later this same surface becomes the AI-assistant entry
 // point (an LLM proposes Command values, the user previews and accepts).
@@ -423,6 +622,10 @@ declare global {
       getHealIssues: () => HealIssue[];
       getSelection: () => EntityId[];
       getEnteredGroup: () => GroupId | null;
+      newTab: typeof newTab;
+      closeTab: typeof closeTab;
+      switchToSession: typeof switchToSession;
+      getSessions: typeof getSessions;
     };
   }
 }
@@ -439,4 +642,8 @@ window.sketchor = {
   getSelection: () => useApp.getState().selection,
   getEnteredGroup: () => useApp.getState().enteredGroupId,
   getHealIssues: () => useApp.getState().healIssues,
+  newTab,
+  closeTab,
+  switchToSession,
+  getSessions,
 };

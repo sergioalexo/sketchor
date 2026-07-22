@@ -16,8 +16,10 @@ import {
   bus,
   computeStraightenTransform,
   doc,
+  getSessionView,
   groupSelection,
   hiddenLayerSet,
+  setSessionView,
   ungroupSelection,
   useApp,
 } from "../state/store";
@@ -155,6 +157,29 @@ export function Viewport() {
     return () => observer.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const activeSessionId = useApp((s) => s.activeSessionId);
+  const prevSessionIdRef = useRef(activeSessionId);
+
+  // Switching tabs: save the outgoing tab's pan/zoom, restore (or default) the incoming one's.
+  useEffect(() => {
+    const prevId = prevSessionIdRef.current;
+    if (prevId === activeSessionId) return;
+    setSessionView(prevId, viewRef.current);
+    prevSessionIdRef.current = activeSessionId;
+
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const saved = getSessionView(activeSessionId);
+    viewRef.current = saved ?? {
+      scale: 2,
+      ox: canvas.clientWidth * 0.25,
+      oy: canvas.clientHeight * 0.75,
+    };
+    useApp.getState().setZoom(viewRef.current.scale);
+    redraw();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeSessionId]);
 
   const measurement = useApp((s) => s.measurement);
   const referenceEdgeId = useApp((s) => s.referenceEdgeId);

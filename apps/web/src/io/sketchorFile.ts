@@ -1,4 +1,4 @@
-import { drawingToJson, loadDrawingJson } from "../state/store";
+import { drawingToJson, finishSessionSave, loadDrawingJson, openIntoSession } from "../state/store";
 
 /**
  * Save / open of Sketchor's native `.sketchor` documents.
@@ -28,6 +28,7 @@ interface FsWritable {
   close(): Promise<void>;
 }
 interface FsFileHandle {
+  name: string;
   createWritable(): Promise<FsWritable>;
   getFile(): Promise<File>;
 }
@@ -57,6 +58,7 @@ export async function saveSketchor(suggestedName = "drawing.sketchor"): Promise<
       const writable = await handle.createWritable();
       await writable.write(json);
       await writable.close();
+      finishSessionSave(handle.name);
     } catch (err) {
       // The user dismissing the picker throws AbortError — treat as a no-op.
       if ((err as DOMException)?.name !== "AbortError") throw err;
@@ -72,6 +74,7 @@ export async function saveSketchor(suggestedName = "drawing.sketchor"): Promise<
   a.download = suggestedName;
   a.click();
   URL.revokeObjectURL(url);
+  finishSessionSave(suggestedName);
 }
 
 /** Opens a `.sketchor` file into the canvas. No-op if cancelled. */
@@ -83,7 +86,8 @@ export async function openSketchor(): Promise<void> {
       const [handle] = await w.showOpenFilePicker({ multiple: false, types: FILE_TYPES });
       if (!handle) return;
       const file = await handle.getFile();
-      loadDrawingJson(await file.text());
+      const text = await file.text();
+      openIntoSession(handle.name, () => loadDrawingJson(text));
     } catch (err) {
       if ((err as DOMException)?.name !== "AbortError") throw err;
     }
@@ -97,7 +101,10 @@ export async function openSketchor(): Promise<void> {
     input.accept = EXT;
     input.onchange = async () => {
       const file = input.files?.[0];
-      if (file) loadDrawingJson(await file.text());
+      if (file) {
+        const text = await file.text();
+        openIntoSession(file.name, () => loadDrawingJson(text));
+      }
       resolve();
     };
     input.oncancel = () => resolve();
