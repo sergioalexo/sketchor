@@ -493,3 +493,29 @@ body {
   text-overflow: ellipsis;
   text-align: center;
 }
+
+/* ---------- import report banner ---------- */
+
+.import-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  font-size: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.import-banner.clean {
+  background: rgba(63, 188, 130, 0.12);
+  color: #7fe0ab;
+}
+
+.import-banner.warn {
+  background: rgba(230, 160, 60, 0.14);
+  color: #f0b968;
+}
+
+.import-banner-summary {
+  flex: 1;
+  min-width: 0;
+}

@@ -2,6 +2,7 @@ import type { Entity } from "./entities";
 import { newEntityId } from "./entities";
 import type { Point } from "./geometry";
 import { arcExtentPoints, arcPointAt, arcSweep } from "./geometry";
+import { textToStrokes } from "./font";
 
 /**
  * Minimal ASCII DXF support: enough to import and preview typical 2D
@@ -78,6 +79,11 @@ function num(raw: RawEntity, code: number, fallback = 0): number {
 function str(raw: RawEntity, code: number, fallback = ""): string {
   const p = raw.pairs.find((x) => x.code === code);
   return p ? p.value.trim() : fallback;
+}
+
+/** Every numeric value for a repeated group code, in document order (e.g. SPLINE control points). */
+function allNums(raw: RawEntity, code: number): number[] {
+  return raw.pairs.filter((p) => p.code === code).map((p) => parseFloat(p.value));
 }
 
 function line(a: Point, b: Point, layer?: string): Entity {
@@ -216,9 +222,107 @@ function emitPolylineWithBulges(
   }
 }
 
+/* ------------------------- SPLINE tessellation ------------------------ */
+
+/** A standard clamped/open uniform knot vector, used when a SPLINE's own knots are missing or malformed. */
+function clampedUniformKnots(count: number, degree: number): number[] {
+  const numMid = Math.max(0, count + degree + 1 - 2 * (degree + 1));
+  const knots: number[] = [];
+  for (let i = 0; i <= degree; i++) knots.push(0);
+  for (let i = 1; i <= numMid; i++) knots.push(i / (numMid + 1));
+  for (let i = 0; i <= degree; i++) knots.push(1);
+  return knots;
+}
+
+/** Knot span containing `u`, via binary search (Piegl & Tiller, "The NURBS Book", A2.1). */
+function findSpan(degree: number, n: number, u: number, knots: number[]): number {
+  if (u >= knots[n + 1]) return n;
+  if (u <= knots[degree]) return degree;
+  let lo = degree;
+  let hi = n + 1;
+  while (u < knots[lo] || u >= knots[lo + 1]) {
+    const mid = Math.floor((lo + hi) / 2);
+    if (u < knots[mid]) hi = mid;
+    else lo = mid;
+  }
+  return lo;
+}
+
+interface HomogeneousPoint {
+  x: number;
+  y: number;
+  w: number;
+}
+
+/** Evaluates a (rational) B-spline curve at parameter `u` via de Boor's algorithm in homogeneous coordinates. */
+function deBoorPoint(degree: number, knots: number[], weighted: HomogeneousPoint[], u: number): Point {
+  const n = weighted.length - 1;
+  const k = findSpan(degree, n, u, knots);
+  const d: HomogeneousPoint[] = [];
+  for (let j = 0; j <= degree; j++) d[j] = { ...weighted[k - degree + j] };
+  for (let r = 1; r <= degree; r++) {
+    for (let j = degree; j >= r; j--) {
+      const i = k - degree + j;
+      const denom = knots[i + degree - r + 1] - knots[i];
+      const alpha = denom !== 0 ? (u - knots[i]) / denom : 0;
+      d[j] = {
+        x: (1 - alpha) * d[j - 1].x + alpha * d[j].x,
+        y: (1 - alpha) * d[j - 1].y + alpha * d[j].y,
+        w: (1 - alpha) * d[j - 1].w + alpha * d[j].w,
+      };
+    }
+  }
+  const res = d[degree];
+  return res.w !== 0 ? { x: res.x / res.w, y: res.y / res.w } : { x: res.x, y: res.y };
+}
+
+/** Tessellates a DXF SPLINE (control points, degree, knots, optional weights) to a polyline. */
+function splinePoints(raw: RawEntity): Point[] {
+  const xs = allNums(raw, 10);
+  const ys = allNums(raw, 20);
+  const count = Math.min(xs.length, ys.length);
+  if (count < 2) return [];
+  const degree = Math.max(1, Math.min(Math.round(num(raw, 71, 3)), count - 1));
+  const weights = allNums(raw, 41);
+  const ctrl = Array.from({ length: count }, (_, i) => ({ x: xs[i], y: ys[i], w: weights[i] ?? 1 }));
+
+  let knots = allNums(raw, 40);
+  if (knots.length !== count + degree + 1) knots = clampedUniformKnots(count, degree);
+
+  const lo = knots[degree];
+  const hi = knots[count];
+  if (!(hi > lo)) return ctrl.map((c) => ({ x: c.x, y: c.y })); // degenerate knots: fall back to the control polygon
+
+  const weighted = ctrl.map((c) => ({ x: c.w * c.x, y: c.w * c.y, w: c.w }));
+  const steps = Math.min(200, Math.max(16, count * 12));
+  const pts: Point[] = [];
+  for (let i = 0; i <= steps; i++) {
+    pts.push(deBoorPoint(degree, knots, weighted, lo + (hi - lo) * (i / steps)));
+  }
+  return pts;
+}
+
+/** Strips MTEXT's inline formatting codes (`\P`, `{\C1;...}`, font/height overrides) down to plain text. */
+function cleanMtext(s: string): string {
+  return s
+    .replace(/\\P/g, " ")
+    .replace(/\\~/g, " ")
+    .replace(/[{}]/g, "")
+    .replace(/\\[A-Za-z][^;]*;/g, "")
+    .replace(/\\\\/g, "\\");
+}
+
+export interface DxfImportReport {
+  /** Entity types that produced geometry, with how many raw records of that type were found. */
+  parsed: { type: string; count: number }[];
+  /** Entity types found in the file but not imported (e.g. HATCH, DIMENSION). */
+  skipped: { type: string; count: number }[];
+}
+
 export interface DxfParseResult {
   entities: Entity[];
   warnings: string[];
+  report: DxfImportReport;
 }
 
 export function parseDxf(text: string): DxfParseResult {
@@ -279,6 +383,25 @@ export function parseDxf(text: string): DxfParseResult {
         emitPolylineWithBulges(verts, closed, entities, layer);
         break;
       }
+      case "SPLINE": {
+        polyline(splinePoints(raw), entities, layer);
+        break;
+      }
+      case "TEXT":
+      case "MTEXT": {
+        const insertion = { x: num(raw, 10), y: num(raw, 20) };
+        const height = num(raw, 40, 2.5) || 2.5;
+        const rotation = (num(raw, 50, 0) * Math.PI) / 180;
+        const raw1 = str(raw, 1, "");
+        const content =
+          raw.type === "MTEXT"
+            ? cleanMtext(raw.pairs.filter((p) => p.code === 3).map((p) => p.value).join("") + raw1)
+            : raw1;
+        for (const stroke of textToStrokes(content, insertion, height, rotation)) {
+          polyline(stroke, entities, layer);
+        }
+        break;
+      }
       // POLYLINE / VERTEX / SEQEND are handled in the legacy second pass below.
       default:
         if (!KNOWN_IGNORED.has(raw.type)) {
@@ -290,7 +413,37 @@ export function parseDxf(text: string): DxfParseResult {
   // Second pass for legacy POLYLINE/VERTEX sequences.
   stitchLegacyPolylines(raws, entities);
 
-  return { entities, warnings: dedupe(warnings) };
+  return { entities, warnings: dedupe(warnings), report: buildImportReport(raws) };
+}
+
+const SUPPORTED_TYPES = new Set([
+  "LINE",
+  "CIRCLE",
+  "ARC",
+  "ELLIPSE",
+  "LWPOLYLINE",
+  "SPLINE",
+  "TEXT",
+  "MTEXT",
+  "POLYLINE",
+]);
+
+/** Tallies raw DXF entity types into parsed/skipped buckets for the import report. */
+function buildImportReport(raws: RawEntity[]): DxfImportReport {
+  const counts = new Map<string, number>();
+  for (const raw of raws) {
+    // VERTEX/SEQEND are sub-records of a POLYLINE, not distinct entities to report.
+    if (raw.type === "VERTEX" || raw.type === "SEQEND") continue;
+    counts.set(raw.type, (counts.get(raw.type) ?? 0) + 1);
+  }
+  const parsed: { type: string; count: number }[] = [];
+  const skipped: { type: string; count: number }[] = [];
+  for (const [type, count] of counts) {
+    (SUPPORTED_TYPES.has(type) ? parsed : skipped).push({ type, count });
+  }
+  parsed.sort((a, b) => a.type.localeCompare(b.type));
+  skipped.sort((a, b) => b.count - a.count);
+  return { parsed, skipped };
 }
 
 const KNOWN_IGNORED = new Set(["SEQEND", "POLYLINE", "VERTEX"]);

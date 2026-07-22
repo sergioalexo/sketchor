@@ -5,6 +5,7 @@ import { openSketchor, saveSketchor } from "./io/sketchorFile";
 import { Viewport } from "./viewport/Viewport";
 import { CodePanel } from "./code/CodePanel";
 import { DxfBrowser } from "./dxf/DxfBrowser";
+import { ImportReportBanner } from "./dxf/ImportReportBanner";
 import { LayerPanel } from "./layers/LayerPanel";
 
 const TOOLS: { id: ToolId; label: string; keyHint: string; icon: JSX.Element }[] = [
@@ -216,6 +217,8 @@ export function App() {
         </div>
         <div className="hint">{TOOL_HINTS[tool]}</div>
       </header>
+
+      <ImportReportBanner />
 
       <div className="body">
         <nav className="toolrail">

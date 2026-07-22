@@ -10,6 +10,7 @@ import {
   parseDxf,
   toCode,
   type Command,
+  type DxfImportReport,
   type Entity,
   type EntityId,
   type ParseIssue,
@@ -66,7 +67,7 @@ export function loadDrawingJson(text: string): { count: number } {
  * undoable step. Returns the entity count and any parse warnings.
  */
 export function importDxfText(text: string, replace = true): { count: number; warnings: string[] } {
-  const { entities, warnings } = parseDxf(text);
+  const { entities, warnings, report } = parseDxf(text);
   const commands = [];
   if (replace) {
     const ids = doc.all().map((e) => e.id);
@@ -76,6 +77,7 @@ export function importDxfText(text: string, replace = true): { count: number; wa
   if (commands.length === 1) bus.execute(commands[0]);
   else if (commands.length > 1) bus.execute({ type: "batch", commands });
   useApp.getState().syncLayersFromDoc(replace);
+  useApp.getState().setImportReport(report);
   return { count: entities.length, warnings };
 }
 
@@ -121,6 +123,9 @@ interface AppState {
   library: DxfFile[];
   layers: Layer[];
   activeLayer: string;
+  /** Parsed-vs-skipped tally from the most recent DXF import; null once dismissed. */
+  importReport: DxfImportReport | null;
+  setImportReport: (report: DxfImportReport | null) => void;
   setTool: (tool: ToolId) => void;
   setSelection: (ids: EntityId[]) => void;
   setCursor: (cursor: { x: number; y: number } | null) => void;
@@ -147,6 +152,8 @@ export const useApp = create<AppState>((set, get) => ({
   library: [],
   layers: [{ name: DEFAULT_LAYER, visible: true }],
   activeLayer: DEFAULT_LAYER,
+  importReport: null,
+  setImportReport: (report) => set({ importReport: report }),
   setTool: (tool) => set({ tool }),
   setSelection: (selection) => set({ selection }),
   setCursor: (cursor) => set({ cursor }),
