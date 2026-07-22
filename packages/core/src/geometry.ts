@@ -19,15 +19,20 @@ export function mid(a: Point, b: Point): Point {
   return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
 }
 
-/** Distance from point p to the segment a-b. */
-export function distToSegment(p: Point, a: Point, b: Point): number {
+/** The closest point to `p` lying on the segment a-b. */
+export function closestPointOnSegment(p: Point, a: Point, b: Point): Point {
   const abx = b.x - a.x;
   const aby = b.y - a.y;
   const lenSq = abx * abx + aby * aby;
-  if (lenSq === 0) return dist(p, a);
+  if (lenSq === 0) return a;
   let t = ((p.x - a.x) * abx + (p.y - a.y) * aby) / lenSq;
   t = Math.max(0, Math.min(1, t));
-  return dist(p, { x: a.x + t * abx, y: a.y + t * aby });
+  return { x: a.x + t * abx, y: a.y + t * aby };
+}
+
+/** Distance from point p to the segment a-b. */
+export function distToSegment(p: Point, a: Point, b: Point): number {
+  return dist(p, closestPointOnSegment(p, a, b));
 }
 
 /** Rotates `p` about `pivot` by `angle` radians (standard math convention, CCW for positive angle). */

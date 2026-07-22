@@ -5,6 +5,7 @@ import { openSketchor, saveSketchor } from "./io/sketchorFile";
 import { Viewport } from "./viewport/Viewport";
 import { CodePanel } from "./code/CodePanel";
 import { DxfBrowser } from "./dxf/DxfBrowser";
+import { DiagnosticsPanel } from "./heal/DiagnosticsPanel";
 import { ImportReportBanner } from "./dxf/ImportReportBanner";
 import { LayerPanel } from "./layers/LayerPanel";
 import { StraightenPanel } from "./viewport/StraightenPanel";
@@ -96,6 +97,7 @@ export function App() {
   const [showCode, setShowCode] = useState(false);
   const [showLayers, setShowLayers] = useState(true);
   const [showDxf, setShowDxf] = useState(false);
+  const [showDiag, setShowDiag] = useState(false);
 
   const measuredDistance = measurement ? dist(measurement.a, measurement.b) : null;
 
@@ -233,6 +235,22 @@ export function App() {
               />
             </svg>
           </button>
+          <button
+            className={`action ${showDiag ? "toggled" : ""}`}
+            title="Toggle diagnostics (find & heal unjointed lines)"
+            data-testid="toggle-diagnostics"
+            onClick={() => setShowDiag((v) => !v)}
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18">
+              <path
+                d="M12 2v6M12 16v6M2 12h6M16 12h6"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              />
+              <circle cx="12" cy="12" r="4" stroke="currentColor" strokeWidth="2" fill="none" />
+            </svg>
+          </button>
         </div>
         <div className="hint">{TOOL_HINTS[tool]}</div>
       </header>
@@ -261,6 +279,7 @@ export function App() {
           </main>
           {showDxf && <DxfBrowser onClose={() => setShowDxf(false)} />}
         </div>
+        {showDiag && <DiagnosticsPanel onClose={() => setShowDiag(false)} />}
         {showLayers && <LayerPanel />}
         {showCode && <CodePanel />}
       </div>

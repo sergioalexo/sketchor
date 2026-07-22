@@ -25,6 +25,8 @@ export interface RenderUiState {
   referenceEdgeId: EntityId | null;
   /** The straighten tool's live preview of the rotated selection. */
   transformPreview: TransformPreview | null;
+  /** World locations of current heal-diagnostics findings. */
+  healMarkers: readonly Point[];
 }
 
 const COLORS = {
@@ -92,7 +94,22 @@ export function render(
 
   if (ui.measurement) drawMeasurement(ctx, view, ui.measurement);
 
+  for (const p of ui.healMarkers) drawHealMarker(ctx, view, p);
+
   if (ui.snap) drawSnapMarker(ctx, view, ui.snap);
+}
+
+function drawHealMarker(ctx: CanvasRenderingContext2D, view: View, p: Point): void {
+  const s = worldToScreen(view, p);
+  ctx.strokeStyle = COLORS.reference;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(s.x, s.y, 7, 0, Math.PI * 2);
+  ctx.moveTo(s.x - 4, s.y - 4);
+  ctx.lineTo(s.x + 4, s.y + 4);
+  ctx.moveTo(s.x + 4, s.y - 4);
+  ctx.lineTo(s.x - 4, s.y + 4);
+  ctx.stroke();
 }
 
 function drawMeasurement(

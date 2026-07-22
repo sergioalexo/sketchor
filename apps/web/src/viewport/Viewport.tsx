@@ -101,6 +101,7 @@ export function Viewport() {
       hiddenLayers: hiddenLayerSet(),
       referenceEdgeId: state.tool === "straighten" ? state.referenceEdgeId : null,
       transformPreview: straightenPlan ? { ...straightenPlan, ids: new Set(straightenPlan.ids) } : null,
+      healMarkers: state.healIssues.map((i) => i.location),
     });
   };
 
@@ -121,8 +122,10 @@ export function Viewport() {
   const referenceEdgeId = useApp((s) => s.referenceEdgeId);
   const straightenAxis = useApp((s) => s.straightenAxis);
   const straightenPivot = useApp((s) => s.straightenPivot);
+  const healIssues = useApp((s) => s.healIssues);
+  const healFocus = useApp((s) => s.healFocus);
 
-  // Redraw when document, selection, tool, measurement, layers, or the straighten pick change
+  // Redraw when document, selection, tool, measurement, layers, the straighten pick, or heal findings change
   useEffect(redraw, [
     revision,
     selection,
@@ -132,7 +135,30 @@ export function Viewport() {
     referenceEdgeId,
     straightenAxis,
     straightenPivot,
+    healIssues,
   ]);
+
+  // Diagnostics panel row click: frame that finding.
+  useEffect(() => {
+    if (!healFocus) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const margin = 15;
+    viewRef.current = fitToBounds(
+      {
+        minX: healFocus.x - margin,
+        minY: healFocus.y - margin,
+        maxX: healFocus.x + margin,
+        maxY: healFocus.y + margin,
+      },
+      canvas.clientWidth,
+      canvas.clientHeight,
+      0.3,
+    );
+    useApp.getState().setZoom(viewRef.current.scale);
+    redraw();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [healFocus]);
 
   /** Zoom-extents: frames `ids` if given and non-empty, else every visible entity. */
   const fitView = (ids?: EntityId[]) => {

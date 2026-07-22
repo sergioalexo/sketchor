@@ -1,21 +1,28 @@
 import { create } from "zustand";
 import {
   CommandBus,
+  DEFAULT_HEAL_OPTIONS,
   DEFAULT_LAYER,
   SketchDocument,
   centroidOfEntities,
   diffToCommands,
   dxfToSvg,
+  fixAllIssues,
+  fixIssue,
+  issueEntityIds,
   layerOf,
   mid,
   parseCode,
   parseDxf,
   reduceToHalfTurn,
+  scanForIssues,
   toCode,
   type Command,
   type DxfImportReport,
   type Entity,
   type EntityId,
+  type HealIssue,
+  type HealOptions,
   type ParseIssue,
   type Point,
 } from "@sketchor/core";
@@ -154,6 +161,34 @@ export function applyStraighten(): boolean {
   return true;
 }
 
+/* ------------------------------- healing -------------------------------- */
+
+function runCommands(commands: Command[]): void {
+  if (commands.length === 1) bus.execute(commands[0]);
+  else if (commands.length > 1) bus.execute({ type: "batch", commands });
+}
+
+/** Re-scans the drawing for unjointed-line issues under the current tolerances. */
+export function rescanHeal(): void {
+  useApp.getState().setHealIssues(scanForIssues(doc, useApp.getState().healOptions));
+}
+
+/** Fixes one diagnostics-panel finding, then re-scans. */
+export function fixOneHeal(issueId: string): void {
+  const { healIssues, joinCollinear } = useApp.getState();
+  const issue = healIssues.find((i) => i.id === issueId);
+  if (!issue) return;
+  runCommands(fixIssue(doc, issue, joinCollinear));
+  rescanHeal();
+}
+
+/** Fixes every current finding as one undoable step, then re-scans. */
+export function fixAllHeal(): void {
+  const { healIssues, joinCollinear } = useApp.getState();
+  runCommands(fixAllIssues(doc, healIssues, joinCollinear));
+  rescanHeal();
+}
+
 /** A live or frozen measurement between two world points (not geometry). */
 export interface Measurement {
   a: Point;
@@ -197,6 +232,16 @@ interface AppState {
   setReferenceEdge: (id: EntityId | null) => void;
   setStraightenAxis: (axis: StraightenAxis) => void;
   setStraightenPivot: (pivot: StraightenPivot) => void;
+  /** Findings from the most recent heal scan (see the Diagnostics panel). */
+  healIssues: HealIssue[];
+  healOptions: HealOptions;
+  joinCollinear: boolean;
+  /** World point the Diagnostics panel last asked the viewport to frame. */
+  healFocus: Point | null;
+  setHealIssues: (issues: HealIssue[]) => void;
+  setHealOptions: (options: Partial<HealOptions>) => void;
+  setJoinCollinear: (v: boolean) => void;
+  setHealFocus: (p: Point | null) => void;
   setTool: (tool: ToolId) => void;
   setSelection: (ids: EntityId[]) => void;
   setCursor: (cursor: { x: number; y: number } | null) => void;
@@ -231,6 +276,14 @@ export const useApp = create<AppState>((set, get) => ({
   setReferenceEdge: (id) => set({ referenceEdgeId: id }),
   setStraightenAxis: (axis) => set({ straightenAxis: axis }),
   setStraightenPivot: (pivot) => set({ straightenPivot: pivot }),
+  healIssues: [],
+  healOptions: DEFAULT_HEAL_OPTIONS,
+  joinCollinear: false,
+  healFocus: null,
+  setHealIssues: (healIssues) => set({ healIssues }),
+  setHealOptions: (options) => set((s) => ({ healOptions: { ...s.healOptions, ...options } })),
+  setJoinCollinear: (v) => set({ joinCollinear: v }),
+  setHealFocus: (p) => set({ healFocus: p }),
   // Switching tools invalidates any in-progress reference-edge pick.
   setTool: (tool) => set({ tool, referenceEdgeId: null }),
   setSelection: (selection) => set({ selection }),
@@ -306,6 +359,8 @@ bus.onChange(() => {
       selection,
       referenceEdgeId:
         s.referenceEdgeId && selection.includes(s.referenceEdgeId) ? s.referenceEdgeId : null,
+      // Drop findings that no longer make sense (their entities were edited/removed elsewhere).
+      healIssues: s.healIssues.filter((issue) => issueEntityIds(issue).every((id) => doc.has(id))),
     };
   });
 });
@@ -322,6 +377,9 @@ declare global {
       importDxf: typeof importDxfText;
       dxfToSvg: typeof dxfToSvg;
       loadLibrary: (files: DxfFile[]) => void;
+      rescanHeal: typeof rescanHeal;
+      fixAllHeal: typeof fixAllHeal;
+      getHealIssues: () => HealIssue[];
     };
   }
 }
@@ -333,4 +391,7 @@ window.sketchor = {
   importDxf: importDxfText,
   dxfToSvg,
   loadLibrary: (files) => useApp.getState().addLibraryFiles(files),
+  rescanHeal,
+  fixAllHeal,
+  getHealIssues: () => useApp.getState().healIssues,
 };

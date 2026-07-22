@@ -565,3 +565,114 @@ body {
   color: var(--text);
   font-size: 12px;
 }
+
+/* ---------- diagnostics panel ---------- */
+
+.diagpanel {
+  display: flex;
+  flex-direction: column;
+  width: 280px;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+}
+
+.diagpanel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+}
+
+.diagpanel-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 10px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.diagpanel-options label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.diagpanel-options input[type="number"] {
+  padding: 3px 6px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: #17181c;
+  color: var(--text);
+  font-size: 12px;
+  width: 100%;
+}
+
+.diagpanel-checkbox {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 6px !important;
+}
+
+.diagpanel-actions {
+  display: flex;
+  gap: 6px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.diagpanel-actions .btn {
+  flex: 1;
+}
+
+.diagpanel-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.diagpanel-empty {
+  padding: 16px 12px;
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.diag-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.diag-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  padding: 2px 0;
+  text-align: left;
+}
+
+.diag-row-main:hover .diag-row-label {
+  color: var(--accent);
+}
+
+.diag-row-label {
+  font-size: 12.5px;
+}
+
+.diag-row-entities {
+  font-size: 10.5px;
+  color: var(--text-dim);
+}
