@@ -5,7 +5,7 @@
 //! painting either into an off-screen 32-bpp DIB (thumbnail -> `HBITMAP`)
 //! or straight onto a window DC (preview pane).
 
-use crate::model::{bounds, Shape};
+use crate::model::{arc_point_at, arc_sweep, bounds, Shape};
 use windows::Win32::Foundation::{COLORREF, HANDLE, HWND, RECT};
 use windows::Win32::Graphics::Gdi::*;
 
@@ -53,6 +53,24 @@ pub unsafe fn paint(dc: HDC, shapes: &[Shape], width: i32, height: i32, stroke_p
                 let rr = (r * scale).round() as i32;
                 let (cx, cy) = (sx(c.x), sy(c.y));
                 let _ = Ellipse(dc, cx - rr, cy - rr, cx + rr, cy + rr);
+            }
+            Shape::Arc(c, r, start, end, ccw) => {
+                // Tessellated in world space, then mapped through sx()/sy() like every
+                // other shape — sidesteps GDI's own (Y-flip-sensitive) arc angle rules.
+                let sweep = arc_sweep(*start, *end, *ccw);
+                let steps = ((sweep / (2.0 * std::f64::consts::PI)) * 64.0).ceil().clamp(2.0, 64.0) as i32;
+                let mut prev = arc_point_at(*c, *r, *start);
+                for i in 1..=steps {
+                    let t = if *ccw {
+                        start + sweep * (i as f64 / steps as f64)
+                    } else {
+                        start - sweep * (i as f64 / steps as f64)
+                    };
+                    let p = arc_point_at(*c, *r, t);
+                    let _ = MoveToEx(dc, sx(prev.x), sy(prev.y), None);
+                    let _ = LineTo(dc, sx(p.x), sy(p.y));
+                    prev = p;
+                }
             }
         }
     }

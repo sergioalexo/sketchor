@@ -1,5 +1,6 @@
 import type { Entity, EntityId } from "./entities";
-import { translated } from "./entities";
+import { transformed, translated } from "./entities";
+import type { Point } from "./geometry";
 import type { SketchDocument } from "./document";
 
 /**
@@ -14,6 +15,15 @@ export type Command =
   | { type: "delete-entities"; ids: EntityId[] }
   | { type: "move-entities"; ids: EntityId[]; dx: number; dy: number }
   | { type: "update-entity"; entity: Entity }
+  | {
+      type: "transform-entities";
+      ids: EntityId[];
+      pivot: Point;
+      dx?: number;
+      dy?: number;
+      rotation?: number;
+      scale?: number;
+    }
   | { type: "batch"; commands: Command[] };
 
 interface HistoryEntry {
@@ -107,6 +117,25 @@ export class CommandBus {
         return previous
           ? [{ type: "update-entity", entity: previous }]
           : [{ type: "delete-entities", ids: [command.entity.id] }];
+      }
+      case "transform-entities": {
+        const inverse: Command[] = [];
+        for (const id of command.ids) {
+          const existing = doc.get(id);
+          if (!existing) continue;
+          inverse.push({ type: "update-entity", entity: existing });
+          doc._put(
+            transformed(
+              existing,
+              command.pivot,
+              command.dx ?? 0,
+              command.dy ?? 0,
+              command.rotation ?? 0,
+              command.scale ?? 1,
+            ),
+          );
+        }
+        return inverse;
       }
       case "batch": {
         const inverse: Command[] = [];

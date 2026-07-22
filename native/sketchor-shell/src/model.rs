@@ -28,6 +28,52 @@ pub struct Pt {
 pub enum Shape {
     Line(Pt, Pt),
     Circle(Pt, f64),
+    /// center, radius, start angle, end angle (radians), sweep-is-counterclockwise.
+    /// Mirrors `ArcEntity` in `@sketchor/core` exactly — see its doc comment.
+    Arc(Pt, f64, f64, f64, bool),
+}
+
+const TAU: f64 = std::f64::consts::PI * 2.0;
+
+/// Magnitude of the sweep (0, TAU] from `start` to `end`; mirrors the
+/// TypeScript `arcSweep` in `packages/core/src/geometry.ts`.
+pub fn arc_sweep(start: f64, end: f64, ccw: bool) -> f64 {
+    let raw = if ccw { end - start } else { start - end };
+    let s = ((raw % TAU) + TAU) % TAU;
+    if s == 0.0 {
+        TAU
+    } else {
+        s
+    }
+}
+
+pub fn arc_point_at(center: Pt, radius: f64, angle: f64) -> Pt {
+    Pt {
+        x: center.x + radius * angle.cos(),
+        y: center.y + radius * angle.sin(),
+    }
+}
+
+fn angle_in_sweep(angle: f64, start: f64, end: f64, ccw: bool) -> bool {
+    let sweep = arc_sweep(start, end, ccw);
+    let raw = if ccw { angle - start } else { start - angle };
+    let rel = ((raw % TAU) + TAU) % TAU;
+    rel <= sweep + 1e-9
+}
+
+/// Points needed to bound an arc precisely: its two ends plus any
+/// axis-aligned extrema it sweeps through.
+fn arc_extent_points(center: Pt, radius: f64, start: f64, end: f64, ccw: bool) -> Vec<Pt> {
+    let mut pts = vec![
+        arc_point_at(center, radius, start),
+        arc_point_at(center, radius, end),
+    ];
+    for k in [0.0, std::f64::consts::FRAC_PI_2, std::f64::consts::PI, 3.0 * std::f64::consts::FRAC_PI_2] {
+        if angle_in_sweep(k, start, end, ccw) {
+            pts.push(arc_point_at(center, radius, k));
+        }
+    }
+    pts
 }
 
 /* --------------------------- JSON schema ---------------------------- */
@@ -51,8 +97,18 @@ enum JsonEntity {
         center: JsonPoint,
         radius: f64,
     },
-    /// Any entity kind we don't render yet (arc, polyline, ...). Silently
-    /// skipped rather than failing the whole parse.
+    Arc {
+        center: JsonPoint,
+        radius: f64,
+        #[serde(rename = "startAngle")]
+        start_angle: f64,
+        #[serde(rename = "endAngle")]
+        end_angle: f64,
+        #[serde(default)]
+        ccw: bool,
+    },
+    /// Any entity kind we don't render yet (polyline, block-ref, ...).
+    /// Silently skipped rather than failing the whole parse.
     #[serde(other)]
     Unknown,
 }
@@ -82,6 +138,19 @@ pub fn parse(text: &str) -> Vec<Shape> {
             JsonEntity::Circle { center, radius } if radius.is_finite() && radius > 0.0 => {
                 shapes.push(Shape::Circle(Pt { x: center.x, y: center.y }, radius))
             }
+            JsonEntity::Arc {
+                center,
+                radius,
+                start_angle,
+                end_angle,
+                ccw,
+            } if radius.is_finite() && radius > 0.0 => shapes.push(Shape::Arc(
+                Pt { x: center.x, y: center.y },
+                radius,
+                start_angle,
+                end_angle,
+                ccw,
+            )),
             _ => {}
         }
     }
@@ -123,6 +192,11 @@ pub fn bounds(shapes: &[Shape]) -> Option<Bounds> {
             Shape::Circle(c, r) => {
                 acc(c.x - r, c.y - r);
                 acc(c.x + r, c.y + r);
+            }
+            Shape::Arc(c, r, start, end, ccw) => {
+                for p in arc_extent_points(*c, *r, *start, *end, *ccw) {
+                    acc(p.x, p.y);
+                }
             }
         }
     }

@@ -1,6 +1,7 @@
 import type { Entity } from "./entities";
 import { newEntityId } from "./entities";
 import type { Point } from "./geometry";
+import { arcExtentPoints, arcPointAt, arcSweep } from "./geometry";
 
 /**
  * Minimal ASCII DXF support: enough to import and preview typical 2D
@@ -88,43 +89,43 @@ function polyline(pts: Point[], out: Entity[], layer?: string): void {
   for (let i = 0; i + 1 < pts.length; i++) out.push(line(pts[i], pts[i + 1], layer));
 }
 
-function arcToLines(
-  cx: number,
-  cy: number,
-  r: number,
-  a0deg: number,
-  a1deg: number,
+function arc(
+  center: Point,
+  radius: number,
+  startAngle: number,
+  endAngle: number,
+  ccw: boolean,
   layer?: string,
-): Entity[] {
-  const a0 = (a0deg * Math.PI) / 180;
-  let sweep = ((a1deg - a0deg) % 360 + 360) % 360;
-  if (sweep === 0) sweep = 360;
-  const steps = Math.min(96, Math.max(2, Math.ceil(sweep / 6)));
-  const out: Entity[] = [];
-  let prev: Point = { x: cx + r * Math.cos(a0), y: cy + r * Math.sin(a0) };
-  for (let i = 1; i <= steps; i++) {
-    const a = a0 + ((sweep * Math.PI) / 180) * (i / steps);
-    const p = { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) };
-    out.push(line(prev, p, layer));
-    prev = p;
-  }
-  return out;
+): Entity {
+  return {
+    id: newEntityId(),
+    type: "arc",
+    center,
+    radius,
+    startAngle,
+    endAngle,
+    ccw,
+    ...(layer ? { layer } : {}),
+  };
+}
+
+/** DXF ARC (angles in degrees, always swept counterclockwise from code 50 to code 51). */
+function dxfArc(cx: number, cy: number, r: number, a0deg: number, a1deg: number, layer?: string): Entity {
+  return arc({ x: cx, y: cy }, r, (a0deg * Math.PI) / 180, (a1deg * Math.PI) / 180, true, layer);
 }
 
 /**
- * Approximates a polyline arc segment defined by a DXF *bulge* (the tangent
- * of a quarter of the arc's included angle) between two vertices. A zero
- * bulge means a straight segment. Getting this right is what makes rounded
- * polylines — slots, filleted rectangles — render as curves instead of
- * chords.
+ * A polyline segment defined by a DXF *bulge* (the tangent of a quarter of
+ * the arc's included angle) between two vertices — a zero bulge is a
+ * straight segment, a nonzero one a real first-class arc between a and b.
  */
-function bulgeToPoints(a: Point, b: Point, bulge: number): Point[] {
-  if (!bulge || Math.abs(bulge) < 1e-9) return [b];
+function bulgeToEntity(a: Point, b: Point, bulge: number, layer?: string): Entity {
+  if (!bulge || Math.abs(bulge) < 1e-9) return line(a, b, layer);
   const theta = 4 * Math.atan(bulge); // signed included angle (CCW positive)
   const dx = b.x - a.x;
   const dy = b.y - a.y;
   const chord = Math.hypot(dx, dy);
-  if (chord < 1e-9) return [b];
+  if (chord < 1e-9) return line(a, b, layer);
   const r = chord / (2 * Math.sin(theta / 2)); // signed radius
   const m = r * Math.cos(theta / 2); // midpoint -> center distance
   const midx = (a.x + b.x) / 2;
@@ -135,13 +136,8 @@ function bulgeToPoints(a: Point, b: Point, bulge: number): Point[] {
   const cy = midy + ny * m;
   const rad = Math.abs(r);
   const a0 = Math.atan2(a.y - cy, a.x - cx);
-  const steps = Math.min(96, Math.max(2, Math.ceil(Math.abs(theta) / (Math.PI / 30))));
-  const out: Point[] = [];
-  for (let i = 1; i <= steps; i++) {
-    const ang = a0 + theta * (i / steps);
-    out.push({ x: cx + rad * Math.cos(ang), y: cy + rad * Math.sin(ang) });
-  }
-  return out;
+  const a1 = Math.atan2(b.y - cy, b.x - cx);
+  return arc({ x: cx, y: cy }, rad, a0, a1, theta >= 0, layer);
 }
 
 /** DXF ELLIPSE -> polyline. Major axis is an endpoint relative to center. */
@@ -205,7 +201,7 @@ function lwpolylineVertices(raw: RawEntity): Vertex[] {
   return verts;
 }
 
-/** Emits polyline segments, expanding any bulged segment into an arc. */
+/** Emits polyline segments, turning any bulged segment into a first-class arc. */
 function emitPolylineWithBulges(
   verts: Vertex[],
   closed: boolean,
@@ -216,12 +212,7 @@ function emitPolylineWithBulges(
   for (let i = 0; i < segs; i++) {
     const a = verts[i];
     const b = verts[(i + 1) % verts.length];
-    const from: Point = { x: a.x, y: a.y };
-    let prev = from;
-    for (const p of bulgeToPoints(from, { x: b.x, y: b.y }, a.bulge)) {
-      out.push(line(prev, p, layer));
-      prev = p;
-    }
+    out.push(bulgeToEntity({ x: a.x, y: a.y }, { x: b.x, y: b.y }, a.bulge, layer));
   }
 }
 
@@ -263,9 +254,7 @@ export function parseDxf(text: string): DxfParseResult {
       case "ARC": {
         const r = num(raw, 40);
         if (r > 0) {
-          entities.push(
-            ...arcToLines(num(raw, 10), num(raw, 20), r, num(raw, 50), num(raw, 51), layer),
-          );
+          entities.push(dxfArc(num(raw, 10), num(raw, 20), r, num(raw, 50), num(raw, 51), layer));
         }
         break;
       }
@@ -360,9 +349,13 @@ export function boundsOf(entities: Entity[]): Bounds | null {
     if (e.type === "line") {
       acc(e.a.x, e.a.y);
       acc(e.b.x, e.b.y);
-    } else {
+    } else if (e.type === "circle") {
       acc(e.center.x - e.radius, e.center.y - e.radius);
       acc(e.center.x + e.radius, e.center.y + e.radius);
+    } else {
+      for (const p of arcExtentPoints(e.center, e.radius, e.startAngle, e.endAngle, e.ccw)) {
+        acc(p.x, p.y);
+      }
     }
   }
   return Number.isFinite(minX) ? { minX, minY, maxX, maxY } : null;
@@ -407,10 +400,23 @@ export function entitiesToSvg(entities: Entity[], opts: ThumbnailOptions = {}): 
         body.push(
           `<line x1="${f(sx(e.a.x))}" y1="${f(sy(e.a.y))}" x2="${f(sx(e.b.x))}" y2="${f(sy(e.b.y))}"/>`,
         );
-      } else {
+      } else if (e.type === "circle") {
         body.push(
           `<circle cx="${f(sx(e.center.x))}" cy="${f(sy(e.center.y))}" r="${f(e.radius * scale)}" fill="none"/>`,
         );
+      } else {
+        // Tessellated for display only — the document keeps the arc as one entity.
+        const sweep = arcSweep(e.startAngle, e.endAngle, e.ccw);
+        const steps = Math.min(64, Math.max(2, Math.ceil((sweep / (2 * Math.PI)) * 64)));
+        const d: string[] = [];
+        for (let i = 0; i <= steps; i++) {
+          const t = e.ccw
+            ? e.startAngle + sweep * (i / steps)
+            : e.startAngle - sweep * (i / steps);
+          const p = arcPointAt(e.center, e.radius, t);
+          d.push(`${i === 0 ? "M" : "L"}${f(sx(p.x))} ${f(sy(p.y))}`);
+        }
+        body.push(`<path d="${d.join(" ")}" fill="none"/>`);
       }
     }
   }

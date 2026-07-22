@@ -32,6 +32,9 @@ const LINE_RE = new RegExp(
 const CIRCLE_RE = new RegExp(
   String.raw`^circle\s+([A-Za-z_]\w*)\s+at\s*\(\s*(${NUM})\s*,\s*(${NUM})\s*\)\s*r\s+(${NUM})$`,
 );
+const ARC_RE = new RegExp(
+  String.raw`^arc\s+([A-Za-z_]\w*)\s+at\s*\(\s*(${NUM})\s*,\s*(${NUM})\s*\)\s*r\s+(${NUM})\s+from\s+(${NUM})\s+to\s+(${NUM})(\s+cw)?$`,
+);
 
 function fmt(n: number): string {
   const rounded = Math.round(n * 10000) / 10000;
@@ -51,10 +54,10 @@ export function assignNames(doc: SketchDocument): Map<EntityId, string> {
       used.add(e.name);
     }
   }
-  const counters: Record<Entity["type"], number> = { line: 1, circle: 1 };
+  const counters: Record<Entity["type"], number> = { line: 1, circle: 1, arc: 1 };
   for (const e of doc.all()) {
     if (names.has(e.id)) continue;
-    const prefix = e.type === "line" ? "L" : "C";
+    const prefix = NAME_PREFIX[e.type];
     let i = counters[e.type];
     while (used.has(prefix + i)) i += 1;
     counters[e.type] = i + 1;
@@ -64,14 +67,18 @@ export function assignNames(doc: SketchDocument): Map<EntityId, string> {
   return names;
 }
 
+const NAME_PREFIX: Record<Entity["type"], string> = { line: "L", circle: "C", arc: "A" };
+
 /** Next free name for a newly drawn entity (used by the tools). */
 export function nextEntityName(doc: SketchDocument, type: Entity["type"]): string {
   const used = new Set(assignNames(doc).values());
-  const prefix = type === "line" ? "L" : "C";
+  const prefix = NAME_PREFIX[type];
   let i = 1;
   while (used.has(prefix + i)) i += 1;
   return prefix + i;
 }
+
+const toDeg = (rad: number) => (rad * 180) / Math.PI;
 
 export function toCode(doc: SketchDocument): string {
   const names = assignNames(doc);
@@ -82,9 +89,14 @@ export function toCode(doc: SketchDocument): string {
       out.push(
         `line ${name} from (${fmt(e.a.x)}, ${fmt(e.a.y)}) to (${fmt(e.b.x)}, ${fmt(e.b.y)})`,
       );
-    } else {
+    } else if (e.type === "circle") {
       out.push(
         `circle ${name} at (${fmt(e.center.x)}, ${fmt(e.center.y)}) r ${fmt(e.radius)}`,
+      );
+    } else {
+      out.push(
+        `arc ${name} at (${fmt(e.center.x)}, ${fmt(e.center.y)}) r ${fmt(e.radius)} ` +
+          `from ${fmt(toDeg(e.startAngle))} to ${fmt(toDeg(e.endAngle))}${e.ccw ? "" : " cw"}`,
       );
     }
   }
@@ -94,7 +106,16 @@ export function toCode(doc: SketchDocument): string {
 /** An entity as written in code — identified by name, not by internal id. */
 export type ParsedEntity =
   | { type: "line"; name: string; a: { x: number; y: number }; b: { x: number; y: number } }
-  | { type: "circle"; name: string; center: { x: number; y: number }; radius: number };
+  | { type: "circle"; name: string; center: { x: number; y: number }; radius: number }
+  | {
+      type: "arc";
+      name: string;
+      center: { x: number; y: number };
+      radius: number;
+      startAngle: number;
+      endAngle: number;
+      ccw: boolean;
+    };
 
 export interface ParseIssue {
   line: number;
@@ -142,17 +163,34 @@ export function parseCode(text: string): { entities: ParsedEntity[]; errors: Par
         center: { x: Number(match[2]), y: Number(match[3]) },
         radius,
       };
+    } else if ((match = row.match(ARC_RE))) {
+      const radius = Number(match[4]);
+      if (radius <= 0) {
+        errors.push({ line: lineNo, message: "arc radius must be positive" });
+        continue;
+      }
+      parsed = {
+        type: "arc",
+        name: match[1],
+        center: { x: Number(match[2]), y: Number(match[3]) },
+        radius,
+        startAngle: (Number(match[5]) * Math.PI) / 180,
+        endAngle: (Number(match[6]) * Math.PI) / 180,
+        ccw: !match[7],
+      };
     }
 
     if (!parsed) {
       errors.push({
         line: lineNo,
         message:
-          keyword === "line" || keyword === "circle"
+          keyword === "line" || keyword === "circle" || keyword === "arc"
             ? `could not parse ${keyword} — expected: ` +
               (keyword === "line"
                 ? "line NAME from (x, y) to (x, y)"
-                : "circle NAME at (x, y) r RADIUS")
+                : keyword === "circle"
+                  ? "circle NAME at (x, y) r RADIUS"
+                  : "arc NAME at (x, y) r RADIUS from DEG to DEG [cw]")
             : `unknown statement '${keyword}'`,
       });
       continue;
@@ -187,14 +225,26 @@ function sameGeometry(existing: Entity, parsed: ParsedEntity): boolean {
       Math.abs(existing.radius - parsed.radius) < EPS
     );
   }
+  if (existing.type === "arc" && parsed.type === "arc") {
+    return (
+      Math.abs(existing.center.x - parsed.center.x) < EPS &&
+      Math.abs(existing.center.y - parsed.center.y) < EPS &&
+      Math.abs(existing.radius - parsed.radius) < EPS &&
+      Math.abs(existing.startAngle - parsed.startAngle) < EPS &&
+      Math.abs(existing.endAngle - parsed.endAngle) < EPS &&
+      existing.ccw === parsed.ccw
+    );
+  }
   return false;
 }
 
 function toEntity(parsed: ParsedEntity, id: EntityId, layer?: string): Entity {
   const layerProp = layer ? { layer } : {};
-  return parsed.type === "line"
-    ? { id, type: "line", name: parsed.name, ...layerProp, a: parsed.a, b: parsed.b }
-    : {
+  switch (parsed.type) {
+    case "line":
+      return { id, type: "line", name: parsed.name, ...layerProp, a: parsed.a, b: parsed.b };
+    case "circle":
+      return {
         id,
         type: "circle",
         name: parsed.name,
@@ -202,6 +252,19 @@ function toEntity(parsed: ParsedEntity, id: EntityId, layer?: string): Entity {
         center: parsed.center,
         radius: parsed.radius,
       };
+    case "arc":
+      return {
+        id,
+        type: "arc",
+        name: parsed.name,
+        ...layerProp,
+        center: parsed.center,
+        radius: parsed.radius,
+        startAngle: parsed.startAngle,
+        endAngle: parsed.endAngle,
+        ccw: parsed.ccw,
+      };
+  }
 }
 
 /**

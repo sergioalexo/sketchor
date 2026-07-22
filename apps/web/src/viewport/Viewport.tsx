@@ -1,11 +1,19 @@
 import { useEffect, useRef } from "react";
 import type { Entity, EntityId, Point } from "@sketchor/core";
-import { dist, distToSegment, layerOf, newEntityId, nextEntityName } from "@sketchor/core";
+import {
+  boundsOf,
+  dist,
+  distToArc,
+  distToSegment,
+  layerOf,
+  newEntityId,
+  nextEntityName,
+} from "@sketchor/core";
 import { bus, doc, hiddenLayerSet, useApp } from "../state/store";
 import { openSketchor, saveSketchor } from "../io/sketchorFile";
 import { render } from "./renderer";
 import { findSnap, type Snap } from "./snapping";
-import { screenToWorld, zoomAt, type View } from "./view";
+import { fitToBounds, screenToWorld, zoomAt, type View } from "./view";
 
 type Interaction =
   | { kind: "idle" }
@@ -30,7 +38,9 @@ function hitTest(view: View, world: Point): EntityId | null {
     const d =
       e.type === "line"
         ? distToSegment(world, e.a, e.b)
-        : Math.abs(dist(world, e.center) - e.radius);
+        : e.type === "circle"
+          ? Math.abs(dist(world, e.center) - e.radius)
+          : distToArc(world, e.center, e.radius, e.startAngle, e.endAngle, e.ccw);
     if (d <= bestDist) {
       best = e.id;
       bestDist = d;
@@ -108,6 +118,20 @@ export function Viewport() {
   // Redraw when document, selection, tool, measurement or layers change
   useEffect(redraw, [revision, selection, tool, measurement, layers]);
 
+  /** Zoom-extents: frames `ids` if given and non-empty, else every visible entity. */
+  const fitView = (ids?: EntityId[]) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const hidden = hiddenLayerSet();
+    const visible = doc.all().filter((e) => !hidden.has(layerOf(e)));
+    const targets = ids && ids.length ? visible.filter((e) => ids.includes(e.id)) : visible;
+    const bb = boundsOf(targets);
+    if (!bb) return;
+    viewRef.current = fitToBounds(bb, canvas.clientWidth, canvas.clientHeight);
+    useApp.getState().setZoom(viewRef.current.scale);
+    redraw();
+  };
+
   // Keyboard: tools, undo/redo, delete, escape
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -143,6 +167,8 @@ export function Viewport() {
         app.setTool("circle");
       } else if (e.key.toLowerCase() === "m") {
         app.setTool("measure");
+      } else if (e.key.toLowerCase() === "f") {
+        fitView(app.selection.length ? app.selection : undefined);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -314,6 +340,13 @@ export function Viewport() {
     redraw();
   };
 
+  const onDoubleClick = (e: React.MouseEvent) => {
+    const screen = { x: e.nativeEvent.offsetX, y: e.nativeEvent.offsetY };
+    const world = screenToWorld(viewRef.current, screen);
+    const hit = hitTest(viewRef.current, world);
+    if (!hit) fitView(); // double-click on empty canvas == zoom-fit everything
+  };
+
   return (
     <canvas
       ref={canvasRef}
@@ -323,6 +356,7 @@ export function Viewport() {
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onWheel={onWheel}
+      onDoubleClick={onDoubleClick}
       onContextMenu={(e) => e.preventDefault()}
     />
   );

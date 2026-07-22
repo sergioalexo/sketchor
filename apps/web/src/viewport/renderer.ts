@@ -1,5 +1,5 @@
 import type { Entity, EntityId, Point, SketchDocument } from "@sketchor/core";
-import { dist, layerOf, translated } from "@sketchor/core";
+import { dist, entityPoints, layerOf, translated } from "@sketchor/core";
 import { gridStep, worldToScreen, type View } from "./view";
 import type { Snap } from "./snapping";
 
@@ -189,16 +189,21 @@ function drawEntity(
     const b = worldToScreen(view, entity.b);
     ctx.moveTo(a.x, a.y);
     ctx.lineTo(b.x, b.y);
-  } else {
+  } else if (entity.type === "circle") {
     const c = worldToScreen(view, entity.center);
     ctx.arc(c.x, c.y, entity.radius * view.scale, 0, Math.PI * 2);
+  } else {
+    // World angles increase CCW in a Y-up plane; screen Y is flipped, so
+    // angles negate and the sweep direction flips (canvas's own
+    // "counterclockwise" flag already matches our ccw once negated).
+    const c = worldToScreen(view, entity.center);
+    ctx.arc(c.x, c.y, entity.radius * view.scale, -entity.startAngle, -entity.endAngle, entity.ccw);
   }
   ctx.stroke();
 }
 
 function drawHandles(ctx: CanvasRenderingContext2D, view: View, entity: Entity): void {
-  const points: Point[] =
-    entity.type === "line" ? [entity.a, entity.b] : [entity.center];
+  const points: Point[] = entity.type === "circle" ? [entity.center] : entityPoints(entity);
   ctx.fillStyle = COLORS.handle;
   for (const p of points) {
     const s = worldToScreen(view, p);
