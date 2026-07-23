@@ -156,6 +156,8 @@ export function loadDrawingJson(text: string): { count: number } {
   if (commands.length === 1) bus.execute(commands[0]);
   else if (commands.length > 1) bus.execute({ type: "batch", commands });
   useApp.getState().syncLayersFromDoc(true);
+  useApp.getState().setTool("select");
+  useApp.getState().requestFit();
   return { count: entities.length };
 }
 
@@ -196,6 +198,8 @@ export function importDxfText(text: string, replace = true): { count: number; wa
   else if (commands.length > 1) bus.execute({ type: "batch", commands });
   useApp.getState().syncLayersFromDoc(replace);
   useApp.getState().setImportReport(report);
+  useApp.getState().setTool("select");
+  useApp.getState().requestFit();
   return { count: entities.length, warnings };
 }
 
@@ -303,12 +307,6 @@ export interface Measurement {
   b: Point;
 }
 
-/** A DXF file loaded into the browsable library (previews + open). */
-export interface DxfFile {
-  name: string;
-  text: string;
-}
-
 /** A named drawing layer with a visibility toggle. */
 export interface Layer {
   name: string;
@@ -327,7 +325,6 @@ interface AppState {
   cursor: { x: number; y: number } | null;
   zoom: number;
   measurement: Measurement | null;
-  library: DxfFile[];
   layers: Layer[];
   activeLayer: string;
   /** Which tab (see DocSession) is currently shown; bump `sessionsVersion` after mutating the sessions array itself. */
@@ -369,13 +366,14 @@ interface AppState {
    */
   showConnectivityHint: boolean;
   setShowConnectivityHint: (v: boolean) => void;
+  /** Bumped whenever the viewport should zoom-to-fit (e.g. after opening a file) — Viewport watches this. */
+  fitRequestId: number;
+  requestFit: () => void;
   setTool: (tool: ToolId) => void;
   setSelection: (ids: EntityId[]) => void;
   setCursor: (cursor: { x: number; y: number } | null) => void;
   setZoom: (zoom: number) => void;
   setMeasurement: (measurement: Measurement | null) => void;
-  addLibraryFiles: (files: DxfFile[]) => void;
-  clearLibrary: () => void;
   setActiveLayer: (name: string) => void;
   addLayer: () => void;
   deleteLayer: (name: string) => void;
@@ -386,13 +384,12 @@ interface AppState {
 }
 
 export const useApp = create<AppState>((set, get) => ({
-  tool: "line",
+  tool: "select",
   selection: [],
   revision: 0,
   cursor: null,
   zoom: 1,
   measurement: null,
-  library: [],
   layers: [{ name: DEFAULT_LAYER, visible: true }],
   activeLayer: DEFAULT_LAYER,
   activeSessionId: sessions[0].id,
@@ -415,25 +412,20 @@ export const useApp = create<AppState>((set, get) => ({
   setHealFocus: (p) => set({ healFocus: p }),
   enteredGroupId: null,
   setEnteredGroup: (id) => set({ enteredGroupId: id }),
-  fileBrowserVisible: false,
+  fileBrowserVisible: true,
   setFileBrowserVisible: (v) => set({ fileBrowserVisible: v }),
   fileBrowserDesktopDir: null,
   setFileBrowserDesktopDir: (dir) => set({ fileBrowserDesktopDir: dir }),
   showConnectivityHint: false,
   setShowConnectivityHint: (v) => set({ showConnectivityHint: v }),
+  fitRequestId: 0,
+  requestFit: () => set((s) => ({ fitRequestId: s.fitRequestId + 1 })),
   // Switching tools invalidates any in-progress reference-edge pick or entered group.
   setTool: (tool) => set({ tool, referenceEdgeId: null, enteredGroupId: null }),
   setSelection: (selection) => set({ selection }),
   setCursor: (cursor) => set({ cursor }),
   setZoom: (zoom) => set({ zoom }),
   setMeasurement: (measurement) => set({ measurement }),
-  addLibraryFiles: (files) =>
-    set((s) => {
-      const byName = new Map(s.library.map((f) => [f.name, f]));
-      for (const f of files) byName.set(f.name, f);
-      return { library: [...byName.values()] };
-    }),
-  clearLibrary: () => set({ library: [] }),
   setActiveLayer: (name) => set({ activeLayer: name }),
   addLayer: () =>
     set((s) => {
@@ -640,7 +632,6 @@ declare global {
       applyCode: typeof applySketchCode;
       importDxf: typeof importDxfText;
       dxfToSvg: typeof dxfToSvg;
-      loadLibrary: (files: DxfFile[]) => void;
       rescanHeal: typeof rescanHeal;
       fixAllHeal: typeof fixAllHeal;
       getHealIssues: () => HealIssue[];
@@ -660,7 +651,6 @@ window.sketchor = {
   applyCode: applySketchCode,
   importDxf: importDxfText,
   dxfToSvg,
-  loadLibrary: (files) => useApp.getState().addLibraryFiles(files),
   rescanHeal,
   fixAllHeal,
   getSelection: () => useApp.getState().selection,

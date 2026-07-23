@@ -6,7 +6,7 @@ import { importDxfText, loadDrawingJson, openIntoSession, useApp } from "../stat
  * tab (reusing the active one if it's still blank, else opening a new one —
  * see openIntoSession). Two file kinds are handled:
  *
- *  - `open-dxf`      → import DXF geometry (added to the library too)
+ *  - `open-dxf`      → import DXF geometry
  *  - `open-sketchor` → load a native `.sketchor` document
  *
  * On the web there is no `window.__TAURI__`, so this is a no-op — the same
@@ -34,10 +34,7 @@ export function initDesktopFileOpen(): void {
 
   tauri.event.listen("open-dxf", ({ payload }) => {
     if (!payload?.text) return;
-    openIntoSession(payload.name, () => {
-      useApp.getState().addLibraryFiles([{ name: payload.name, text: payload.text }]);
-      importDxfText(payload.text);
-    });
+    openIntoSession(payload.name, () => importDxfText(payload.text));
     revealFolder(payload.dir);
   });
 

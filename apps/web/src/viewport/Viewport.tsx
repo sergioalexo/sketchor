@@ -241,6 +241,19 @@ export function Viewport() {
     redraw();
   };
 
+  const fitRequestId = useApp((s) => s.fitRequestId);
+  const firstFitRequestRef = useRef(true);
+  // Opening a file (importDxfText/loadDrawingJson) bumps fitRequestId so the
+  // newly-loaded part fills the viewport instead of sitting at whatever pan/zoom was left over.
+  useEffect(() => {
+    if (firstFitRequestRef.current) {
+      firstFitRequestRef.current = false;
+      return;
+    }
+    fitView();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fitRequestId]);
+
   // Keyboard: tools, undo/redo, delete, escape
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -507,19 +520,20 @@ export function Viewport() {
     const screen = { x: e.nativeEvent.offsetX, y: e.nativeEvent.offsetY };
     const world = screenToWorld(viewRef.current, screen);
     const hit = hitTest(viewRef.current, world);
-    if (!hit) {
-      fitView(); // double-click on empty canvas == zoom-fit everything
-      return;
-    }
     const app = useApp.getState();
-    if (app.tool !== "select") return;
-    const top = doc.topLevelGroupOf(hit);
-    if (top && top.id !== app.enteredGroupId) {
-      // Enter the group to edit its members individually (Esc exits).
-      app.setEnteredGroup(top.id);
-      app.setSelection([hit]);
-      redraw();
+
+    if (hit && app.tool === "select") {
+      const top = doc.topLevelGroupOf(hit);
+      if (top && top.id !== app.enteredGroupId) {
+        // Enter the group to edit its members individually (Esc exits).
+        app.setEnteredGroup(top.id);
+        app.setSelection([hit]);
+        redraw();
+        return;
+      }
     }
+    // Anywhere else — empty canvas or an ungrouped/already-entered entity — zoom in to fit.
+    fitView(app.selection.length ? app.selection : undefined);
   };
 
   return (

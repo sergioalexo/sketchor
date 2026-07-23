@@ -4,7 +4,6 @@ import { bus, doc, TOOL_HINTS, useApp, type ToolId } from "./state/store";
 import { openSketchor, saveSketchor } from "./io/sketchorFile";
 import { Viewport } from "./viewport/Viewport";
 import { CodePanel } from "./code/CodePanel";
-import { DxfBrowser } from "./dxf/DxfBrowser";
 import { FileExplorerPanel } from "./browser/FileExplorerPanel";
 import { DiagnosticsPanel } from "./heal/DiagnosticsPanel";
 import { ImportReportBanner } from "./dxf/ImportReportBanner";
@@ -98,7 +97,6 @@ export function App() {
   const measurement = useApp((s) => s.measurement);
   const [showCode, setShowCode] = useState(false);
   const [showLayers, setShowLayers] = useState(true);
-  const [showDxf, setShowDxf] = useState(false);
   const [showDiag, setShowDiag] = useState(false);
   const showFiles = useApp((s) => s.fileBrowserVisible);
   const setShowFiles = useApp((s) => s.setFileBrowserVisible);
@@ -211,22 +209,6 @@ export function App() {
             </svg>
           </button>
           <button
-            className={`action ${showDxf ? "toggled" : ""}`}
-            title="Toggle DXF library"
-            data-testid="toggle-dxf"
-            onClick={() => setShowDxf((v) => !v)}
-          >
-            <svg viewBox="0 0 24 24" width="18" height="18">
-              <path
-                d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"
-                stroke="currentColor"
-                strokeWidth="2"
-                fill="none"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </button>
-          <button
             className={`action ${showCode ? "toggled" : ""}`}
             title="Toggle sketch code panel"
             data-testid="toggle-code"
@@ -322,7 +304,6 @@ export function App() {
             <Viewport />
             {tool === "straighten" && <StraightenPanel />}
           </main>
-          {showDxf && <DxfBrowser onClose={() => setShowDxf(false)} />}
         </div>
         {showDiag && <DiagnosticsPanel onClose={() => setShowDiag(false)} />}
         {showLayers && <LayerPanel />}

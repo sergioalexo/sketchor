@@ -4,8 +4,11 @@ import { fileToSvg, isDrawingFile } from "./thumbnail";
 
 interface Entry {
   name: string;
-  /** Web: a handle to lazily read the file's text. Desktop: a full path passed to the Rust `read_drawing_file` command. */
+  /** Already-read content (e.g. from the "Add files…" picker) — skips the lazy read below. */
+  text?: string;
+  /** Web folder browsing: a handle to lazily read the file's text. */
   handle?: FileSystemFileHandle;
+  /** Desktop: a full path passed to the Rust `read_drawing_file` command. */
   path?: string;
 }
 
@@ -18,6 +21,7 @@ function tauri(): TauriInvoke | undefined {
 }
 
 async function readEntryText(entry: Entry): Promise<string> {
+  if (entry.text !== undefined) return entry.text;
   if (entry.handle) return (await entry.handle.getFile()).text();
   if (entry.path) {
     const t = tauri();
@@ -35,19 +39,26 @@ function openEntry(entry: Entry, text: string): void {
   }
 }
 
+const MIN_WIDTH = 160;
+const MAX_WIDTH = 520;
+const DEFAULT_WIDTH = 240;
+
 /**
  * Left-dock "mini-Explorer" (R9): geometry thumbnails of every .dxf/.sketchor
  * drawing in a folder, click to open into a new tab. Reuses the same
- * dxfToSvg/entitiesToSvg headless renderer as the DXF library strip and the
- * native Explorer thumbnailer, so previews everywhere agree.
+ * dxfToSvg/entitiesToSvg headless renderer as the native Explorer
+ * thumbnailer, so previews everywhere agree. Drag the right edge to resize.
  *
- * Two folder-access paths: on desktop, a directory (from a file opened via
- * Explorer/file-association) is read in Rust with no sandbox limits; on the
- * web, a one-time `showDirectoryPicker()` grant is required.
+ * Folder access, in order of preference: on desktop, a directory (from a
+ * file opened via Explorer/file-association) is read in Rust with no
+ * sandbox limits; on the web, a one-time `showDirectoryPicker()` grant, or
+ * (always available) picking individual files.
  */
 export function FileExplorerPanel({ onClose }: { onClose: () => void }) {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [folderLabel, setFolderLabel] = useState<string | null>(null);
+  const [width, setWidth] = useState(DEFAULT_WIDTH);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const desktopDir = useApp((s) => s.fileBrowserDesktopDir);
   const activeSessionId = useApp((s) => s.activeSessionId);
 
@@ -73,6 +84,43 @@ export function FileExplorerPanel({ onClose }: { onClose: () => void }) {
     }
   };
 
+  const addFiles = async (files: FileList | null) => {
+    if (!files) return;
+    const picked = await Promise.all(
+      Array.from(files)
+        .filter((f) => isDrawingFile(f.name))
+        .map(async (f) => ({ name: f.name, text: await f.text() })),
+    );
+    if (picked.length === 0) return;
+    setEntries((prev) => {
+      const byName = new Map(prev.map((e) => [e.name, e]));
+      for (const p of picked) byName.set(p.name, p);
+      return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+    });
+    setFolderLabel(null);
+  };
+
+  // Resize: drag the right-edge handle.
+  const resizing = useRef(false);
+  const onResizeStart = (e: React.PointerEvent) => {
+    resizing.current = true;
+    (e.target as HTMLElement).setPointerCapture(e.pointerId);
+  };
+  const onResizeMove = (e: React.PointerEvent) => {
+    if (!resizing.current) return;
+    const panelLeft = (e.currentTarget as HTMLElement).parentElement!.getBoundingClientRect().left;
+    const next = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, e.clientX - panelLeft));
+    setWidth(next);
+  };
+  const onResizeEnd = (e: React.PointerEvent) => {
+    resizing.current = false;
+    try {
+      (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+    } catch {
+      // already released
+    }
+  };
+
   // Desktop: a file opened from Explorer sets fileBrowserDesktopDir -> auto-load + reveal.
   useEffect(() => {
     if (!desktopDir) return;
@@ -94,7 +142,7 @@ export function FileExplorerPanel({ onClose }: { onClose: () => void }) {
   }, [desktopDir]);
 
   return (
-    <aside className="filexplorer" data-testid="file-explorer">
+    <aside className="filexplorer" data-testid="file-explorer" style={{ width }}>
       <div className="filexplorer-header">
         <span className="filexplorer-title">{folderLabel ?? "Files"}</span>
         <div className="filexplorer-actions">
@@ -103,10 +151,21 @@ export function FileExplorerPanel({ onClose }: { onClose: () => void }) {
               Open folder…
             </button>
           )}
+          <button className="btn ghost" onClick={() => fileInputRef.current?.click()} data-testid="file-explorer-add-files">
+            Add files…
+          </button>
           <button className="btn ghost" onClick={onClose} title="Hide panel">
             ✕
           </button>
         </div>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".dxf,.sketchor"
+          multiple
+          hidden
+          onChange={(e) => void addFiles(e.target.files)}
+        />
       </div>
 
       {entries.length === 0 ? (
@@ -114,8 +173,8 @@ export function FileExplorerPanel({ onClose }: { onClose: () => void }) {
           {isDesktop
             ? "Open a .dxf or .sketchor file, or pick a folder, to browse its drawings."
             : supportsDirPicker
-              ? "Use Open folder… to browse a folder of drawings."
-              : "Folder browsing isn't supported in this browser."}
+              ? "Use Open folder… or Add files… to browse drawings."
+              : "Use Add files… to preview and open drawings."}
         </div>
       ) : (
         <div className="filexplorer-grid" data-testid="file-explorer-grid">
@@ -124,6 +183,15 @@ export function FileExplorerPanel({ onClose }: { onClose: () => void }) {
           ))}
         </div>
       )}
+
+      <div
+        className="filexplorer-resize"
+        onPointerDown={onResizeStart}
+        onPointerMove={onResizeMove}
+        onPointerUp={onResizeEnd}
+        title="Drag to resize"
+        data-testid="file-explorer-resize"
+      />
     </aside>
   );
 }
@@ -132,7 +200,7 @@ function FileCard({ entry, activeSessionId }: { entry: Entry; activeSessionId: s
   const [svg, setSvg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const cardRef = useRef<HTMLButtonElement>(null);
-  const textCacheRef = useRef<string | null>(null);
+  const textCacheRef = useRef<string | null>(entry.text ?? null);
 
   const activeName = getSessions().find((s) => s.id === activeSessionId)?.name;
   const isActive = activeName === entry.name;
