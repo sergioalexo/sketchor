@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { dist, freeEndpointEntityIds } from "@sketchor/core";
 import { bus, doc, TOOL_HINTS, useApp, type ToolId } from "./state/store";
-import { openSketchor, saveSketchor } from "./io/sketchorFile";
+import { openDrawing, saveDrawing } from "./io/drawingFile";
 import { Viewport } from "./viewport/Viewport";
 import { CodePanel } from "./code/CodePanel";
 import { FileExplorerPanel } from "./browser/FileExplorerPanel";
@@ -98,10 +98,21 @@ export function App() {
   const [showCode, setShowCode] = useState(false);
   const [showLayers, setShowLayers] = useState(true);
   const [showDiag, setShowDiag] = useState(false);
+  const [showSaveMenu, setShowSaveMenu] = useState(false);
   const showFiles = useApp((s) => s.fileBrowserVisible);
   const setShowFiles = useApp((s) => s.setFileBrowserVisible);
   const showConnectivityHint = useApp((s) => s.showConnectivityHint);
   const setShowConnectivityHint = useApp((s) => s.setShowConnectivityHint);
+
+  // Close the Save-format menu on an outside click.
+  useEffect(() => {
+    if (!showSaveMenu) return;
+    const onClick = (e: MouseEvent) => {
+      if (!(e.target as HTMLElement).closest(".action-menu-wrap")) setShowSaveMenu(false);
+    };
+    document.addEventListener("click", onClick);
+    return () => document.removeEventListener("click", onClick);
+  }, [showSaveMenu]);
 
   const measuredDistance = measurement ? dist(measurement.a, measurement.b) : null;
   // Recomputed every render (cheap, matches the entity-count footer pattern below); `revision` forces the re-render.
@@ -126,9 +137,9 @@ export function App() {
         <div className="topbar-actions">
           <button
             className="action"
-            title="Open .sketchor drawing (Ctrl+O)"
+            title="Open DXF / SVG / DWG drawing (Ctrl+O)"
             data-testid="open-file"
-            onClick={() => void openSketchor()}
+            onClick={() => void openDrawing()}
           >
             <svg viewBox="0 0 24 24" width="18" height="18">
               <path
@@ -140,23 +151,45 @@ export function App() {
               />
             </svg>
           </button>
-          <button
-            className="action"
-            title="Save as .sketchor (Ctrl+S)"
-            data-testid="save-file"
-            onClick={() => void saveSketchor()}
-          >
-            <svg viewBox="0 0 24 24" width="18" height="18">
-              <path
-                d="M5 3h11l3 3v13a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z"
-                stroke="currentColor"
-                strokeWidth="2"
-                fill="none"
-                strokeLinejoin="round"
-              />
-              <path d="M8 3v5h6V3M8 21v-6h8v6" stroke="currentColor" strokeWidth="2" fill="none" strokeLinejoin="round" />
-            </svg>
-          </button>
+          <div className="action-menu-wrap">
+            <button
+              className="action"
+              title="Save as DXF or SVG (Ctrl+S)"
+              data-testid="save-file"
+              onClick={() => setShowSaveMenu((v) => !v)}
+            >
+              <svg viewBox="0 0 24 24" width="18" height="18">
+                <path
+                  d="M5 3h11l3 3v13a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2z"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  fill="none"
+                  strokeLinejoin="round"
+                />
+                <path d="M8 3v5h6V3M8 21v-6h8v6" stroke="currentColor" strokeWidth="2" fill="none" strokeLinejoin="round" />
+              </svg>
+            </button>
+            {showSaveMenu && (
+              <div className="action-menu" data-testid="save-menu">
+                <button
+                  onClick={() => {
+                    setShowSaveMenu(false);
+                    void saveDrawing("dxf");
+                  }}
+                >
+                  Save as DXF
+                </button>
+                <button
+                  onClick={() => {
+                    setShowSaveMenu(false);
+                    void saveDrawing("svg");
+                  }}
+                >
+                  Save as SVG
+                </button>
+              </div>
+            )}
+          </div>
           <div className="action-sep" />
           <button
             className="action"

@@ -74,18 +74,28 @@ constraint tangent L1 C1   # geometric relationship
 dim L1 length = width      # driven/driving dimension
 ```
 
-## Native `.sketchor` files & Explorer previews
+## File formats
 
-Drawings save and load as `.sketchor` documents (the JSON from
-`SketchDocument.toJSON()`). Use the **Open**/**Save** buttons in the topbar or
-`Ctrl+O` / `Ctrl+S`; the File System Access API is used in the browser and in
-Tauri's WebView2, with a download / file-input fallback elsewhere.
+Sketchor has no proprietary file format — everything is a standard interchange
+format:
 
-On Windows, `native/sketchor-shell/` is a Rust COM shell extension that makes
+- **DXF** — read/write (`packages/core/src/dxf.ts` + `dxfExport.ts`).
+- **SVG** — read/write, dimensionally accurate 1:1 world units
+  (`packages/core/src/svg.ts`).
+- **DWG** — read-only, via a GPL-3.0 WebAssembly build of GNU LibreDWG (see
+  `apps/web/src/browser/dwgImport.ts` and `/NOTICE.md`). There is no DWG
+  export.
+
+Use the **Open** button (or `Ctrl+O`) to load any of the three; **Save**
+(`Ctrl+S`) offers a choice of DXF or SVG. The File System Access API is used
+in the browser and in Tauri's WebView2, with a download / file-input fallback
+elsewhere. Opening a file that's already open in a tab switches to that tab
+(and reloads it) instead of opening a duplicate.
+
+On Windows, `native/dxf-thumbnailer/` is a Rust COM shell extension that makes
 Explorer render a **preview of the geometry** — not just the app icon — as the
-file thumbnail (and, when installed elevated, in the reading pane). Install it
-per-user with `native/sketchor-shell/install.ps1`; a few example drawings live
-in `native/sketchor-shell/samples/`.
+`.dxf` file thumbnail (and, when installed elevated, in the reading pane).
+Install it per-user with `native/dxf-thumbnailer/install-thumbnailer.ps1`.
 
 ## Roadmap
 

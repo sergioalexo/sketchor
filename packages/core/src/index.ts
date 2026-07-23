@@ -7,5 +7,7 @@ export * from "./document";
 export * from "./commands";
 export * from "./sketchtext";
 export * from "./dxf";
+export * from "./dxfExport";
+export * from "./svg";
 export * from "./font";
 export * from "./heal";

@@ -24,7 +24,7 @@ import {
   ungroupSelection,
   useApp,
 } from "../state/store";
-import { openSketchor, saveSketchor } from "../io/sketchorFile";
+import { openDrawing, saveDrawing } from "../io/drawingFile";
 import { render } from "./renderer";
 import { findSnap, type Snap } from "./snapping";
 import { fitToBounds, screenToWorld, worldToScreen, zoomAt, type View } from "./view";
@@ -243,7 +243,7 @@ export function Viewport() {
 
   const fitRequestId = useApp((s) => s.fitRequestId);
   const firstFitRequestRef = useRef(true);
-  // Opening a file (importDxfText/loadDrawingJson) bumps fitRequestId so the
+  // Opening a file (importDxfText/importEntities) bumps fitRequestId so the
   // newly-loaded part fills the viewport instead of sitting at whatever pan/zoom was left over.
   useEffect(() => {
     if (firstFitRequestRef.current) {
@@ -262,10 +262,10 @@ export function Viewport() {
       const app = useApp.getState();
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
         e.preventDefault();
-        void saveSketchor();
+        void saveDrawing("dxf");
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "o") {
         e.preventDefault();
-        void openSketchor();
+        void openDrawing();
       } else if (e.ctrlKey && e.key.toLowerCase() === "z" && !e.shiftKey) {
         bus.undo();
         e.preventDefault();

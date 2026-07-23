@@ -11,7 +11,7 @@ createRoot(document.getElementById("root")!).render(
   </React.StrictMode>,
 );
 
-// Wire up "open .dxf / .sketchor from Explorer" when running as the desktop app.
+// Wire up "open .dxf / .svg / .dwg from Explorer" when running as the desktop app.
 initDesktopFileOpen();
 
 // Notify if a newer release is on GitHub (keyless; works on web + desktop).

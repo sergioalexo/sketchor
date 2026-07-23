@@ -1,20 +1,23 @@
-import { dxfToSvg, entitiesToSvg, type Entity, type ThumbnailOptions } from "@sketchor/core";
+import { dxfToSvg, entitiesToSvg, parseSvgText, type ThumbnailOptions } from "@sketchor/core";
 
-/** True for the two drawing file kinds the in-app file browser lists. */
+/**
+ * True for drawing file kinds the in-app file browser lists thumbnails for.
+ * DWG is import-only and not text-readable, so it's opened via the Open
+ * dialog / file association rather than browsed here — see drawingFile.ts.
+ */
 export function isDrawingFile(name: string): boolean {
-  return /\.(dxf|sketchor)$/i.test(name);
+  return /\.(dxf|svg)$/i.test(name);
 }
 
 /**
  * Renders either file kind to a thumbnail SVG string, reusing the same
- * headless renderer that backs the DXF library strip and the native
- * Explorer thumbnailer — so previews here always agree with those.
+ * headless renderer that backs the native Explorer thumbnailer, so previews
+ * everywhere agree.
  */
 export function fileToSvg(name: string, text: string, opts?: ThumbnailOptions): string {
   if (/\.dxf$/i.test(name)) return dxfToSvg(text, opts);
   try {
-    const parsed = JSON.parse(text) as { entities?: unknown };
-    const entities = Array.isArray(parsed.entities) ? (parsed.entities as Entity[]) : [];
+    const { entities } = parseSvgText(text);
     return entitiesToSvg(entities, opts);
   } catch {
     return entitiesToSvg([], opts);

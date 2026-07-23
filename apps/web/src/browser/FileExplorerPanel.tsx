@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { getSessions, importDxfText, loadDrawingJson, openIntoSession, useApp } from "../state/store";
+import { parseSvgText } from "@sketchor/core";
+import { getSessions, importDxfText, importEntities, openIntoSession, useApp } from "../state/store";
 import { fileToSvg, isDrawingFile } from "./thumbnail";
 
 interface Entry {
@@ -32,10 +33,11 @@ async function readEntryText(entry: Entry): Promise<string> {
 }
 
 function openEntry(entry: Entry, text: string): void {
-  if (/\.dxf$/i.test(entry.name)) {
-    openIntoSession(entry.name, () => importDxfText(text));
+  if (/\.svg$/i.test(entry.name)) {
+    const { entities, warnings } = parseSvgText(text);
+    openIntoSession(entry.name, () => importEntities(entities, warnings));
   } else {
-    openIntoSession(entry.name, () => loadDrawingJson(text));
+    openIntoSession(entry.name, () => importDxfText(text));
   }
 }
 
@@ -44,7 +46,7 @@ const MAX_WIDTH = 520;
 const DEFAULT_WIDTH = 240;
 
 /**
- * Left-dock "mini-Explorer" (R9): geometry thumbnails of every .dxf/.sketchor
+ * Left-dock "mini-Explorer" (R9): geometry thumbnails of every .dxf/.svg
  * drawing in a folder, click to open into a new tab. Reuses the same
  * dxfToSvg/entitiesToSvg headless renderer as the native Explorer
  * thumbnailer, so previews everywhere agree. Drag the right edge to resize.
@@ -161,7 +163,7 @@ export function FileExplorerPanel({ onClose }: { onClose: () => void }) {
         <input
           ref={fileInputRef}
           type="file"
-          accept=".dxf,.sketchor"
+          accept=".dxf,.svg"
           multiple
           hidden
           onChange={(e) => void addFiles(e.target.files)}
@@ -171,7 +173,7 @@ export function FileExplorerPanel({ onClose }: { onClose: () => void }) {
       {entries.length === 0 ? (
         <div className="filexplorer-empty">
           {isDesktop
-            ? "Open a .dxf or .sketchor file, or pick a folder, to browse its drawings."
+            ? "Open a .dxf or .svg file, or pick a folder, to browse its drawings."
             : supportsDirPicker
               ? "Use Open folder… or Add files… to browse drawings."
               : "Use Add files… to preview and open drawings."}

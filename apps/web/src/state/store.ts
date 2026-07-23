@@ -21,11 +21,9 @@ import {
   toCode,
   wholeGroupSelected,
   type Command,
-  type Constraint,
   type DxfImportReport,
   type Entity,
   type EntityId,
-  type Group,
   type GroupId,
   type HealIssue,
   type HealOptions,
@@ -122,42 +120,28 @@ export function applySketchCode(text: string): ParseIssue[] {
   return [];
 }
 
-/** Serialise the whole drawing to Sketchor's native `.sketchor` JSON. */
-export function drawingToJson(): string {
-  return JSON.stringify(doc.toJSON(), null, 2);
+/** Shared by every import path: replaces (or adds to) the drawing's entities as one undoable step. */
+function applyImportedEntities(entities: Entity[], replace: boolean): void {
+  const commands: Command[] = [];
+  if (replace) {
+    const ids = doc.all().map((e) => e.id);
+    if (ids.length) commands.push({ type: "delete-entities", ids });
+  }
+  for (const entity of entities) commands.push({ type: "add-entity", entity });
+  if (commands.length === 1) bus.execute(commands[0]);
+  else if (commands.length > 1) bus.execute({ type: "batch", commands });
+  useApp.getState().syncLayersFromDoc(replace);
+  useApp.getState().setTool("select");
+  useApp.getState().requestFit();
 }
 
 /**
- * Loads a native `.sketchor` document (the JSON produced by {@link drawingToJson}
- * / `SketchDocument.toJSON()`): replaces the drawing with the file's entities
- * as one undoable step. Returns the entity count; throws on malformed JSON.
+ * Imports already-parsed entities (SVG, DWG): replaces the drawing as one
+ * undoable step and surfaces any parse warnings via the import banner.
  */
-export function loadDrawingJson(text: string): { count: number } {
-  const parsed = JSON.parse(text) as { entities?: unknown; groups?: unknown; constraints?: unknown };
-  const entities = Array.isArray(parsed.entities) ? (parsed.entities as Entity[]) : [];
-  const groups = Array.isArray(parsed.groups) ? (parsed.groups as Group[]) : [];
-  const constraints = Array.isArray(parsed.constraints) ? (parsed.constraints as Constraint[]) : [];
-  const commands: Command[] = [];
-  for (const c of doc.constraints()) commands.push({ type: "remove-constraint", id: c.id });
-  for (const g of doc.groups()) commands.push({ type: "ungroup", groupId: g.id });
-  const existing = doc.all().map((e) => e.id);
-  if (existing.length) commands.push({ type: "delete-entities", ids: existing });
-  for (const entity of entities) commands.push({ type: "add-entity", entity });
-  for (const g of groups) {
-    commands.push({
-      type: "group-entities",
-      groupId: g.id,
-      ids: g.members,
-      name: g.name,
-      ...(g.parent ? { parent: g.parent } : {}),
-    });
-  }
-  for (const c of constraints) commands.push({ type: "add-constraint", constraint: c });
-  if (commands.length === 1) bus.execute(commands[0]);
-  else if (commands.length > 1) bus.execute({ type: "batch", commands });
-  useApp.getState().syncLayersFromDoc(true);
-  useApp.getState().setTool("select");
-  useApp.getState().requestFit();
+export function importEntities(entities: Entity[], warnings: string[], replace = true): { count: number } {
+  applyImportedEntities(entities, replace);
+  useApp.getState().setFileWarnings(warnings);
   return { count: entities.length };
 }
 
@@ -188,18 +172,8 @@ export function ungroupSelection(): boolean {
  */
 export function importDxfText(text: string, replace = true): { count: number; warnings: string[] } {
   const { entities, warnings, report } = parseDxf(text);
-  const commands = [];
-  if (replace) {
-    const ids = doc.all().map((e) => e.id);
-    if (ids.length) commands.push({ type: "delete-entities" as const, ids });
-  }
-  for (const entity of entities) commands.push({ type: "add-entity" as const, entity });
-  if (commands.length === 1) bus.execute(commands[0]);
-  else if (commands.length > 1) bus.execute({ type: "batch", commands });
-  useApp.getState().syncLayersFromDoc(replace);
+  applyImportedEntities(entities, replace);
   useApp.getState().setImportReport(report);
-  useApp.getState().setTool("select");
-  useApp.getState().requestFit();
   return { count: entities.length, warnings };
 }
 
@@ -333,6 +307,9 @@ interface AppState {
   /** Parsed-vs-skipped tally from the most recent DXF import; null once dismissed. */
   importReport: DxfImportReport | null;
   setImportReport: (report: DxfImportReport | null) => void;
+  /** Warnings from the most recent SVG/DWG import (e.g. curve approximation, unreadable file); [] once dismissed. */
+  fileWarnings: string[];
+  setFileWarnings: (warnings: string[]) => void;
   /** The line entity picked as the straighten tool's reference edge (must be in `selection`). */
   referenceEdgeId: EntityId | null;
   straightenAxis: StraightenAxis;
@@ -396,6 +373,8 @@ export const useApp = create<AppState>((set, get) => ({
   sessionsVersion: 0,
   importReport: null,
   setImportReport: (report) => set({ importReport: report }),
+  fileWarnings: [],
+  setFileWarnings: (warnings) => set({ fileWarnings: warnings }),
   referenceEdgeId: null,
   straightenAxis: "horizontal",
   straightenPivot: "center",
@@ -592,17 +571,25 @@ export function closeTab(id: string): void {
 }
 
 /**
- * Targets a tab for opening a file into: reuses the active tab if it's
- * still blank (a fresh, unmodified "Untitled" tab), otherwise opens a new
+ * Targets a tab for opening a file into: if a tab with this name is already
+ * open, switches to it and re-runs `load` there (so re-opening a file never
+ * duplicates its tab — reloads it instead). Otherwise reuses the active tab
+ * if it's still blank (a fresh, unmodified "Untitled" tab), else opens a new
  * one — matching Ctrl+O / desktop file-association behavior from the spec.
- * `load` runs against whichever tab ends up active.
  */
 export function openIntoSession(name: string, load: () => void): void {
-  let active = sessions.find((s) => s.id === useApp.getState().activeSessionId)!;
-  if (!isSessionBlank(active)) {
-    active = newSession(name);
-    sessions.push(active);
-    switchToSession(active.id);
+  const existing = sessions.find((s) => s.named && s.name === name);
+  let active: DocSession;
+  if (existing) {
+    switchToSession(existing.id);
+    active = existing;
+  } else {
+    active = sessions.find((s) => s.id === useApp.getState().activeSessionId)!;
+    if (!isSessionBlank(active)) {
+      active = newSession(name);
+      sessions.push(active);
+      switchToSession(active.id);
+    }
   }
   load();
   active.name = name;
