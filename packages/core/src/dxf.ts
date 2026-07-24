@@ -73,6 +73,22 @@ function collectRawEntities(pairs: Pair[]): RawEntity[] {
   return raws;
 }
 
+/**
+ * Reads the HEADER section's `$INSUNITS` variable (group 70): the drawing's
+ * real-world unit, per the DXF spec (0 unitless, 1 in, 2 ft, 4 mm, 5 cm,
+ * 6 m, plus values for other units this app doesn't otherwise support).
+ * 0 if the file doesn't specify one.
+ */
+function parseInsUnits(pairs: Pair[]): number {
+  for (let i = 0; i < pairs.length; i++) {
+    if (pairs[i].code === 9 && pairs[i].value.trim() === "$INSUNITS") {
+      const next = pairs[i + 1];
+      if (next && next.code === 70) return parseInt(next.value, 10) || 0;
+    }
+  }
+  return 0;
+}
+
 function num(raw: RawEntity, code: number, fallback = 0): number {
   const p = raw.pairs.find((x) => x.code === code);
   return p ? parseFloat(p.value) : fallback;
@@ -326,12 +342,16 @@ export interface DxfParseResult {
   entities: Entity[];
   warnings: string[];
   report: DxfImportReport;
+  /** The HEADER section's `$INSUNITS` code (0 if unspecified) — see {@link parseInsUnits}. */
+  insUnits: number;
 }
 
 export function parseDxf(text: string): DxfParseResult {
   const warnings: string[] = [];
   const entities: Entity[] = [];
-  const raws = collectRawEntities(tokenize(text));
+  const allPairs = tokenize(text);
+  const insUnits = parseInsUnits(allPairs);
+  const raws = collectRawEntities(allPairs);
 
   for (const raw of raws) {
     const layer = str(raw, 8, "0") || "0";
@@ -420,7 +440,7 @@ export function parseDxf(text: string): DxfParseResult {
   // Second pass for legacy POLYLINE/VERTEX sequences.
   stitchLegacyPolylines(raws, entities);
 
-  return { entities, warnings: dedupe(warnings), report: buildImportReport(raws) };
+  return { entities, warnings: dedupe(warnings), report: buildImportReport(raws), insUnits };
 }
 
 const SUPPORTED_TYPES = new Set([

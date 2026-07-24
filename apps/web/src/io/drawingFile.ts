@@ -1,6 +1,7 @@
 import { entitiesToDxf, entitiesToSvgDocument, parseSvgText } from "@sketchor/core";
 import { importDwgBuffer } from "../browser/dwgImport";
-import { doc, finishSessionSave, importDxfText, importEntities, openIntoSession } from "../state/store";
+import { doc, finishSessionSave, importDxfText, importEntities, openIntoSession, useApp } from "../state/store";
+import { displayUnitToDxfCode } from "../units";
 
 /**
  * Save / open of Sketchor's supported drawing formats: DXF and SVG for
@@ -53,7 +54,10 @@ const OPEN_TYPES: PickerType[] = [
 
 function serialize(format: SaveFormat): string {
   const entities = doc.all();
-  return format === "dxf" ? entitiesToDxf(entities) : entitiesToSvgDocument(entities);
+  if (format === "dxf") {
+    return entitiesToDxf(entities, displayUnitToDxfCode(useApp.getState().displayUnit));
+  }
+  return entitiesToSvgDocument(entities);
 }
 
 /** Saves the current drawing as DXF or SVG, prompting for a location. No-op if cancelled. */

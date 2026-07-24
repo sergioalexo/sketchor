@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { DisplayUnit } from "../units";
+import { dxfCodeToDisplayUnit, type DisplayUnit } from "../units";
 import {
   CommandBus,
   DEFAULT_DUPLICATE_OPTIONS,
@@ -179,9 +179,12 @@ export function ungroupSelection(): boolean {
  * undoable step. Returns the entity count and any parse warnings.
  */
 export function importDxfText(text: string, replace = true): { count: number; warnings: string[] } {
-  const { entities, warnings, report } = parseDxf(text);
+  const { entities, warnings, report, insUnits } = parseDxf(text);
   applyImportedEntities(entities, replace);
   useApp.getState().setImportReport(report);
+  // The file's own $INSUNITS becomes the display unit; unspecified/unmapped units leave it as-is.
+  const unit = dxfCodeToDisplayUnit(insUnits);
+  if (unit) useApp.getState().setDisplayUnit(unit);
   return { count: entities.length, warnings };
 }
 

@@ -36,3 +36,22 @@ export function formatArea(worldValueSquared: number, unit: DisplayUnit): string
   const factor = FACTOR_FROM_MM[unit] ** 2;
   return `${round(worldValueSquared * factor, 3)}${unit}²`;
 }
+
+/**
+ * DXF `$INSUNITS` codes this app can represent as a DisplayUnit (the spec
+ * defines more — miles, mils, angstroms, US survey units, ... — which have
+ * no DisplayUnit equivalent and are left unmapped rather than approximated).
+ */
+const DXF_UNIT_CODE: Record<DisplayUnit, number> = { in: 1, ft: 2, mm: 4, cm: 5, m: 6 };
+const DXF_CODE_TO_UNIT = new Map<number, DisplayUnit>(
+  Object.entries(DXF_UNIT_CODE).map(([unit, code]) => [code, unit as DisplayUnit]),
+);
+
+export function displayUnitToDxfCode(unit: DisplayUnit): number {
+  return DXF_UNIT_CODE[unit];
+}
+
+/** The DisplayUnit for a DXF `$INSUNITS` code, or null if unspecified/unmapped. */
+export function dxfCodeToDisplayUnit(code: number): DisplayUnit | null {
+  return DXF_CODE_TO_UNIT.get(code) ?? null;
+}

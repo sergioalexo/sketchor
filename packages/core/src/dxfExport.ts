@@ -87,7 +87,12 @@ function entityDxf(e: Entity): string {
   }
 }
 
-export function entitiesToDxf(entities: Entity[]): string {
+/**
+ * @param insUnits The HEADER's `$INSUNITS` code to write (0 unitless, 1 in,
+ * 2 ft, 4 mm, 5 cm, 6 m — see dxf.ts's `parseInsUnits`). Defaults to 0
+ * (unspecified) when the caller doesn't track a real-world unit.
+ */
+export function entitiesToDxf(entities: Entity[], insUnits = 0): string {
   const layers = [...new Set(entities.map((e) => layerOf(e)))];
   if (layers.length === 0) layers.push("0");
   const bounds = boundsOf(entities) ?? { minX: 0, minY: 0, maxX: 0, maxY: 0 };
@@ -95,6 +100,7 @@ export function entitiesToDxf(entities: Entity[]): string {
   const header =
     `0\nSECTION\n2\nHEADER\n` +
     `9\n$ACADVER\n1\nAC1009\n` +
+    `9\n$INSUNITS\n70\n${insUnits}\n` +
     `9\n$INSBASE\n10\n0.0\n20\n0.0\n30\n0.0\n` +
     `9\n$EXTMIN\n10\n${n(bounds.minX)}\n20\n${n(bounds.minY)}\n30\n0.0\n` +
     `9\n$EXTMAX\n10\n${n(bounds.maxX)}\n20\n${n(bounds.maxY)}\n30\n0.0\n` +
