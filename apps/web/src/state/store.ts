@@ -1,13 +1,17 @@
 import { create } from "zustand";
+import type { DisplayUnit } from "../units";
 import {
   CommandBus,
+  DEFAULT_DUPLICATE_OPTIONS,
   DEFAULT_HEAL_OPTIONS,
   DEFAULT_LAYER,
   SketchDocument,
   centroidOfEntities,
   diffToCommands,
   dxfToSvg,
+  fixAllDuplicates,
   fixAllIssues,
+  fixDuplicate,
   fixIssue,
   freeEndpointEntityIds,
   issueEntityIds,
@@ -17,10 +21,14 @@ import {
   parseCode,
   parseDxf,
   reduceToHalfTurn,
+  scanForDuplicates,
   scanForIssues,
   toCode,
   wholeGroupSelected,
+  type ClosedRegion,
   type Command,
+  type DuplicateIssue,
+  type DuplicateOptions,
   type DxfImportReport,
   type Entity,
   type EntityId,
@@ -177,13 +185,14 @@ export function importDxfText(text: string, replace = true): { count: number; wa
   return { count: entities.length, warnings };
 }
 
-export type ToolId = "select" | "line" | "circle" | "measure" | "straighten";
+export type ToolId = "select" | "line" | "circle" | "point" | "measure" | "straighten";
 
 export const TOOL_HINTS: Record<ToolId, string> = {
-  select: "Click to select (Shift adds) - drag to move - Del deletes - G groups - U ungroups",
+  select: "Click to select (Shift adds) - drag left-to-right to window-select, right-to-left to crossing-select - drag to move - Del deletes - G groups - U ungroups",
   line: "Click start point, then click next points to chain - Esc to finish",
   circle: "Click center, then click a point on the circle",
-  measure: "Click two points to measure distance and angle - Esc clears",
+  point: "Click to place a point",
+  measure: "Click a line/circle/arc for its length/radius, click inside a closed area for its area, Shift-click more lines to total - else click two points to measure distance",
   straighten: "Select the part with V, switch here, click the reference edge, then Enter to apply",
 };
 
@@ -275,11 +284,37 @@ export function fixAllHeal(): void {
   rescanHeal();
 }
 
-/** A live or frozen measurement between two world points (not geometry). */
-export interface Measurement {
-  a: Point;
-  b: Point;
+/* ---------------------------- duplicate geometry -------------------------- */
+
+/** Re-scans the drawing for duplicate/overlapping geometry under the current tolerance. */
+export function rescanDuplicates(): void {
+  useApp.getState().setDuplicateIssues(scanForDuplicates(doc, useApp.getState().duplicateOptions));
 }
+
+/** Fixes one duplicates-panel finding (deletes the redundant copies), then re-scans. */
+export function fixOneDuplicate(issueId: string): void {
+  const issue = useApp.getState().duplicateIssues.find((i) => i.id === issueId);
+  if (!issue) return;
+  runCommands(fixDuplicate(issue));
+  rescanDuplicates();
+}
+
+/** Fixes every current finding as one undoable step, then re-scans. */
+export function fixAllDuplicatesAction(): void {
+  runCommands(fixAllDuplicates(useApp.getState().duplicateIssues));
+  rescanDuplicates();
+}
+
+/**
+ * A live or frozen result from the measure tool. `distance` is the original
+ * two-point mode (now also carrying delta X/Y); the rest cover clicking an
+ * entity or a closed area directly instead of picking two points.
+ */
+export type MeasureResult =
+  | { kind: "distance"; a: Point; b: Point }
+  | { kind: "length"; ids: EntityId[]; total: number }
+  | { kind: "radius"; id: EntityId; center: Point; radius: number }
+  | { kind: "area"; region: ClosedRegion };
 
 /** A named drawing layer with a visibility toggle. */
 export interface Layer {
@@ -298,7 +333,7 @@ interface AppState {
   revision: number;
   cursor: { x: number; y: number } | null;
   zoom: number;
-  measurement: Measurement | null;
+  measurement: MeasureResult | null;
   layers: Layer[];
   activeLayer: string;
   /** Which tab (see DocSession) is currently shown; bump `sessionsVersion` after mutating the sessions array itself. */
@@ -327,6 +362,14 @@ interface AppState {
   setHealOptions: (options: Partial<HealOptions>) => void;
   setJoinCollinear: (v: boolean) => void;
   setHealFocus: (p: Point | null) => void;
+  /** Findings from the most recent duplicate/overlap scan (see the Duplicates panel). */
+  duplicateIssues: DuplicateIssue[];
+  duplicateOptions: DuplicateOptions;
+  /** World point the Duplicates panel last asked the viewport to frame. */
+  duplicateFocus: Point | null;
+  setDuplicateIssues: (issues: DuplicateIssue[]) => void;
+  setDuplicateOptions: (options: Partial<DuplicateOptions>) => void;
+  setDuplicateFocus: (p: Point | null) => void;
   /** The group currently "entered" for editing individual members (double-click a group, Esc to exit). */
   enteredGroupId: GroupId | null;
   setEnteredGroup: (id: GroupId | null) => void;
@@ -343,6 +386,9 @@ interface AppState {
    */
   showConnectivityHint: boolean;
   setShowConnectivityHint: (v: boolean) => void;
+  /** Fills detected closed loops (lines/arcs chained shut, or circles) with a translucent tint — on by default. */
+  showClosedRegions: boolean;
+  setShowClosedRegions: (v: boolean) => void;
   /** Bumped whenever the viewport should zoom-to-fit (e.g. after opening a file) — Viewport watches this. */
   fitRequestId: number;
   requestFit: () => void;
@@ -350,7 +396,9 @@ interface AppState {
   setSelection: (ids: EntityId[]) => void;
   setCursor: (cursor: { x: number; y: number } | null) => void;
   setZoom: (zoom: number) => void;
-  setMeasurement: (measurement: Measurement | null) => void;
+  setMeasurement: (measurement: MeasureResult | null) => void;
+  displayUnit: DisplayUnit;
+  setDisplayUnit: (unit: DisplayUnit) => void;
   setActiveLayer: (name: string) => void;
   addLayer: () => void;
   deleteLayer: (name: string) => void;
@@ -389,6 +437,12 @@ export const useApp = create<AppState>((set, get) => ({
   setHealOptions: (options) => set((s) => ({ healOptions: { ...s.healOptions, ...options } })),
   setJoinCollinear: (v) => set({ joinCollinear: v }),
   setHealFocus: (p) => set({ healFocus: p }),
+  duplicateIssues: [],
+  duplicateOptions: DEFAULT_DUPLICATE_OPTIONS,
+  duplicateFocus: null,
+  setDuplicateIssues: (duplicateIssues) => set({ duplicateIssues }),
+  setDuplicateOptions: (options) => set((s) => ({ duplicateOptions: { ...s.duplicateOptions, ...options } })),
+  setDuplicateFocus: (p) => set({ duplicateFocus: p }),
   enteredGroupId: null,
   setEnteredGroup: (id) => set({ enteredGroupId: id }),
   fileBrowserVisible: true,
@@ -397,6 +451,8 @@ export const useApp = create<AppState>((set, get) => ({
   setFileBrowserDesktopDir: (dir) => set({ fileBrowserDesktopDir: dir }),
   showConnectivityHint: false,
   setShowConnectivityHint: (v) => set({ showConnectivityHint: v }),
+  showClosedRegions: true,
+  setShowClosedRegions: (v) => set({ showClosedRegions: v }),
   fitRequestId: 0,
   requestFit: () => set((s) => ({ fitRequestId: s.fitRequestId + 1 })),
   // Switching tools invalidates any in-progress reference-edge pick or entered group.
@@ -405,6 +461,8 @@ export const useApp = create<AppState>((set, get) => ({
   setCursor: (cursor) => set({ cursor }),
   setZoom: (zoom) => set({ zoom }),
   setMeasurement: (measurement) => set({ measurement }),
+  displayUnit: "mm",
+  setDisplayUnit: (displayUnit) => set({ displayUnit }),
   setActiveLayer: (name) => set({ activeLayer: name }),
   addLayer: () =>
     set((s) => {
@@ -469,6 +527,7 @@ function syncFromBus(): void {
         s.referenceEdgeId && selection.includes(s.referenceEdgeId) ? s.referenceEdgeId : null,
       // Drop findings that no longer make sense (their entities were edited/removed elsewhere).
       healIssues: s.healIssues.filter((issue) => issueEntityIds(issue).every((id) => doc.has(id))),
+      duplicateIssues: s.duplicateIssues.filter((issue) => issue.entityIds.every((id) => doc.has(id))),
     };
   });
   activeSession().dirty = true;
@@ -535,6 +594,7 @@ export function switchToSession(id: string): void {
     referenceEdgeId: null,
     enteredGroupId: null,
     healIssues: [],
+    duplicateIssues: [],
     measurement: null,
     importReport: null,
   });

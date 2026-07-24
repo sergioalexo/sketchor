@@ -167,6 +167,15 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.unit-select {
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+  padding: 1px 4px;
+}
+
 /* ---------- code panel ---------- */
 
 .codepanel {

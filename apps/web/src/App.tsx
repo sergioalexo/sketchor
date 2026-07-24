@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import { dist, freeEndpointEntityIds } from "@sketchor/core";
-import { bus, doc, TOOL_HINTS, useApp, type ToolId } from "./state/store";
+import { bus, doc, TOOL_HINTS, useApp, type MeasureResult, type ToolId } from "./state/store";
 import { openDrawing, saveDrawing } from "./io/drawingFile";
+import { DISPLAY_UNITS, formatArea, formatLength, type DisplayUnit } from "./units";
 import { Viewport } from "./viewport/Viewport";
 import { CodePanel } from "./code/CodePanel";
 import { FileExplorerPanel } from "./browser/FileExplorerPanel";
 import { DiagnosticsPanel } from "./heal/DiagnosticsPanel";
+import { DuplicatesPanel } from "./heal/DuplicatesPanel";
 import { ImportReportBanner } from "./dxf/ImportReportBanner";
 import { LayerPanel } from "./layers/LayerPanel";
 import { StraightenPanel } from "./viewport/StraightenPanel";
@@ -42,6 +44,16 @@ const TOOLS: { id: ToolId; label: string; keyHint: string; icon: JSX.Element }[]
       <svg viewBox="0 0 24 24" width="20" height="20">
         <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="2" fill="none" />
         <circle cx="12" cy="12" r="1.6" fill="currentColor" />
+      </svg>
+    ),
+  },
+  {
+    id: "point",
+    label: "Point",
+    keyHint: "P",
+    icon: (
+      <svg viewBox="0 0 24 24" width="20" height="20">
+        <path d="M12 4v6M12 14v6M4 12h6M14 12h6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
       </svg>
     ),
   },
@@ -98,11 +110,16 @@ export function App() {
   const [showCode, setShowCode] = useState(false);
   const [showLayers, setShowLayers] = useState(true);
   const [showDiag, setShowDiag] = useState(false);
+  const [showDup, setShowDup] = useState(false);
   const [showSaveMenu, setShowSaveMenu] = useState(false);
   const showFiles = useApp((s) => s.fileBrowserVisible);
   const setShowFiles = useApp((s) => s.setFileBrowserVisible);
   const showConnectivityHint = useApp((s) => s.showConnectivityHint);
   const setShowConnectivityHint = useApp((s) => s.setShowConnectivityHint);
+  const showClosedRegions = useApp((s) => s.showClosedRegions);
+  const setShowClosedRegions = useApp((s) => s.setShowClosedRegions);
+  const displayUnit = useApp((s) => s.displayUnit);
+  const setDisplayUnit = useApp((s) => s.setDisplayUnit);
 
   // Close the Save-format menu on an outside click.
   useEffect(() => {
@@ -114,7 +131,24 @@ export function App() {
     return () => document.removeEventListener("click", onClick);
   }, [showSaveMenu]);
 
-  const measuredDistance = measurement ? dist(measurement.a, measurement.b) : null;
+  const measurementLabel = (m: MeasureResult): string => {
+    switch (m.kind) {
+      case "distance": {
+        const d = dist(m.a, m.b);
+        const dx = Math.abs(m.b.x - m.a.x);
+        const dy = Math.abs(m.b.y - m.a.y);
+        return `distance ${formatLength(d, displayUnit)}  (Δx ${formatLength(dx, displayUnit)}, Δy ${formatLength(dy, displayUnit)})`;
+      }
+      case "length":
+        return m.ids.length > 1
+          ? `total length ${formatLength(m.total, displayUnit)} (${m.ids.length} lines)`
+          : `length ${formatLength(m.total, displayUnit)}`;
+      case "radius":
+        return `radius ${formatLength(m.radius, displayUnit)}  diameter ${formatLength(m.radius * 2, displayUnit)}`;
+      case "area":
+        return `area ${formatArea(m.region.area, displayUnit)}`;
+    }
+  };
   // Recomputed every render (cheap, matches the entity-count footer pattern below); `revision` forces the re-render.
   const freeEndpointCount = showConnectivityHint ? freeEndpointEntityIds(doc).size : 0;
 
@@ -275,6 +309,17 @@ export function App() {
             </svg>
           </button>
           <button
+            className={`action ${showDup ? "toggled" : ""}`}
+            title="Toggle duplicate/overlap detection (double circles, overlapping lines)"
+            data-testid="toggle-duplicates"
+            onClick={() => setShowDup((v) => !v)}
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18">
+              <circle cx="9" cy="12" r="6" stroke="currentColor" strokeWidth="2" fill="none" />
+              <circle cx="15" cy="12" r="6" stroke="currentColor" strokeWidth="2" fill="none" />
+            </svg>
+          </button>
+          <button
             className={`action ${showFiles ? "toggled" : ""}`}
             title="Toggle file browser"
             data-testid="toggle-file-browser"
@@ -309,6 +354,26 @@ export function App() {
               <circle cx="20" cy="4" r="1.8" fill="currentColor" />
             </svg>
           </button>
+          <button
+            className={`action ${showClosedRegions ? "toggled" : ""}`}
+            title="Toggle closed-area highlight — tints any closed loop of lines/arcs/circles so you can see the profile is actually closed"
+            data-testid="toggle-closed-regions"
+            onClick={() => setShowClosedRegions(!showClosedRegions)}
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18">
+              <rect
+                x="4"
+                y="4"
+                width="16"
+                height="16"
+                rx="2"
+                stroke="currentColor"
+                strokeWidth="2"
+                fill="currentColor"
+                fillOpacity="0.25"
+              />
+            </svg>
+          </button>
         </div>
         <div className="hint">{TOOL_HINTS[tool]}</div>
       </header>
@@ -330,7 +395,7 @@ export function App() {
             </button>
           ))}
         </nav>
-        {showFiles && <FileExplorerPanel onClose={() => setShowFiles(false)} />}
+        <FileExplorerPanel hidden={!showFiles} onClose={() => setShowFiles(false)} />
         <div className="center">
           <TabStrip />
           <main className="stage">
@@ -339,20 +404,34 @@ export function App() {
           </main>
         </div>
         {showDiag && <DiagnosticsPanel onClose={() => setShowDiag(false)} />}
+        {showDup && <DuplicatesPanel onClose={() => setShowDup(false)} />}
         {showLayers && <LayerPanel />}
         {showCode && <CodePanel />}
       </div>
 
       <footer className="statusbar" data-revision={revision}>
         <span data-testid="coords">
-          {cursor ? `${cursor.x.toFixed(2)}, ${cursor.y.toFixed(2)}` : "--, --"}
+          {cursor ? `${formatLength(cursor.x, displayUnit)}, ${formatLength(cursor.y, displayUnit)}` : "--, --"}
         </span>
         <span>{Math.round(zoom * 100)}%</span>
+        <select
+          className="unit-select"
+          data-testid="unit-select"
+          title="Display unit"
+          value={displayUnit}
+          onChange={(e) => setDisplayUnit(e.target.value as DisplayUnit)}
+        >
+          {DISPLAY_UNITS.map((u) => (
+            <option key={u.id} value={u.id}>
+              {u.label}
+            </option>
+          ))}
+        </select>
         <span data-testid="entity-count">{doc.all().length} entities</span>
         <span>{selection.length > 0 ? `${selection.length} selected` : ""}</span>
-        {measuredDistance !== null && (
+        {measurement && (
           <span className="measure-readout" data-testid="measure-readout">
-            distance {measuredDistance.toFixed(2)}
+            {measurementLabel(measurement)}
           </span>
         )}
         {showConnectivityHint && (

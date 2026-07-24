@@ -1,15 +1,18 @@
 import { useEffect, useRef } from "react";
-import type { Entity, EntityId, Point } from "@sketchor/core";
+import type { BoxSelectMode, ClosedRegion, Entity, EntityId, Point } from "@sketchor/core";
 import {
   boundsOf,
   dist,
   distToArc,
   distToSegment,
+  entitiesInBox,
+  findClosedRegions,
   freeEndpointEntityIds,
+  regionContainingPoint,
+  resolveSelection,
   layerOf,
   newEntityId,
   nextEntityName,
-  resolveSelection,
   wholeGroupSelected,
 } from "@sketchor/core";
 import {
@@ -25,6 +28,7 @@ import {
   useApp,
 } from "../state/store";
 import { openDrawing, saveDrawing } from "../io/drawingFile";
+import { formatArea, formatLength } from "../units";
 import { render } from "./renderer";
 import { findSnap, type Snap } from "./snapping";
 import { fitToBounds, screenToWorld, worldToScreen, zoomAt, type View } from "./view";
@@ -36,7 +40,8 @@ type Interaction =
   | { kind: "draw-circle"; center: Point }
   | { kind: "measure"; start: Point }
   | { kind: "move"; ids: EntityId[]; startWorld: Point; dx: number; dy: number }
-  | { kind: "rotate-group"; ids: EntityId[]; pivot: Point; startAngle: number; rotation: number };
+  | { kind: "rotate-group"; ids: EntityId[]; pivot: Point; startAngle: number; rotation: number }
+  | { kind: "box-select"; startScreen: Point; startWorld: Point; currentWorld: Point; additive: boolean };
 
 /** Fixed pixel offset above a selected group's bounding box where its rotate handle is drawn/hit-tested. */
 const GROUP_HANDLE_OFFSET_PX = 26;
@@ -64,7 +69,9 @@ function hitTest(view: View, world: Point): EntityId | null {
         ? distToSegment(world, e.a, e.b)
         : e.type === "circle"
           ? Math.abs(dist(world, e.center) - e.radius)
-          : distToArc(world, e.center, e.radius, e.startAngle, e.endAngle, e.ccw);
+          : e.type === "point"
+            ? dist(world, e.p)
+            : distToArc(world, e.center, e.radius, e.startAngle, e.endAngle, e.ccw);
     if (d <= bestDist) {
       best = e.id;
       bestDist = d;
@@ -78,6 +85,7 @@ export function Viewport() {
   const viewRef = useRef<View>({ scale: 2, ox: 0, oy: 0 });
   const interactionRef = useRef<Interaction>({ kind: "idle" });
   const snapRef = useRef<Snap | null>(null);
+  const closedRegionsRef = useRef<ClosedRegion[]>([]);
   const tool = useApp((s) => s.tool);
   const selection = useApp((s) => s.selection);
   const revision = useApp((s) => s.revision);
@@ -142,8 +150,20 @@ export function Viewport() {
           ? { ...straightenPlan, ids: new Set(straightenPlan.ids) }
           : null,
       healMarkers: state.healIssues.map((i) => i.location),
+      duplicateMarkers: state.duplicateIssues.map((i) => i.location),
       groupHandle: groupBounds && groupPivot ? { bounds: groupBounds, pivot: groupPivot } : null,
       freeEndpointIds: state.showConnectivityHint ? freeEndpointEntityIds(doc) : null,
+      closedRegions: state.showClosedRegions ? closedRegionsRef.current.map((r) => r.points) : [],
+      fmtLength: (n: number) => formatLength(n, state.displayUnit),
+      fmtArea: (n: number) => formatArea(n, state.displayUnit),
+      boxSelect:
+        interaction.kind === "box-select"
+          ? {
+              start: interaction.startWorld,
+              end: interaction.currentWorld,
+              mode: (interaction.currentWorld.x >= interaction.startWorld.x ? "window" : "crossing") as BoxSelectMode,
+            }
+          : null,
     });
   };
 
@@ -188,8 +208,19 @@ export function Viewport() {
   const straightenAxis = useApp((s) => s.straightenAxis);
   const straightenPivot = useApp((s) => s.straightenPivot);
   const healIssues = useApp((s) => s.healIssues);
+  const duplicateIssues = useApp((s) => s.duplicateIssues);
   const healFocus = useApp((s) => s.healFocus);
   const showConnectivityHint = useApp((s) => s.showConnectivityHint);
+  const showClosedRegions = useApp((s) => s.showClosedRegions);
+
+  // Closed-loop detection only needs to rerun when the document changes, not
+  // on every redraw (pan/zoom/selection) — cached here. Computed regardless
+  // of the display toggle, since the measure tool's area-click also needs
+  // it even when the highlight fill itself is turned off.
+  useEffect(() => {
+    closedRegionsRef.current = findClosedRegions(doc.all());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revision]);
 
   // Redraw when document, selection, tool, measurement, layers, the straighten pick, or heal findings change
   useEffect(redraw, [
@@ -202,7 +233,9 @@ export function Viewport() {
     straightenAxis,
     straightenPivot,
     healIssues,
+    duplicateIssues,
     showConnectivityHint,
+    showClosedRegions,
   ]);
 
   // Diagnostics panel row click: frame that finding.
@@ -226,6 +259,29 @@ export function Viewport() {
     redraw();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [healFocus]);
+
+  const duplicateFocus = useApp((s) => s.duplicateFocus);
+  // Duplicates panel row click: frame that finding.
+  useEffect(() => {
+    if (!duplicateFocus) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const margin = 15;
+    viewRef.current = fitToBounds(
+      {
+        minX: duplicateFocus.x - margin,
+        minY: duplicateFocus.y - margin,
+        maxX: duplicateFocus.x + margin,
+        maxY: duplicateFocus.y + margin,
+      },
+      canvas.clientWidth,
+      canvas.clientHeight,
+      0.3,
+    );
+    useApp.getState().setZoom(viewRef.current.scale);
+    redraw();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [duplicateFocus]);
 
   /** Zoom-extents: frames `ids` if given and non-empty, else every visible entity. */
   const fitView = (ids?: EntityId[]) => {
@@ -288,6 +344,8 @@ export function Viewport() {
         app.setTool("line");
       } else if (e.key.toLowerCase() === "c") {
         app.setTool("circle");
+      } else if (e.key.toLowerCase() === "p" && !e.ctrlKey && !e.metaKey) {
+        app.setTool("point");
       } else if (e.key.toLowerCase() === "m") {
         app.setTool("measure");
       } else if (e.key.toLowerCase() === "f") {
@@ -390,14 +448,66 @@ export function Viewport() {
         }
         break;
       }
+      case "point": {
+        bus.execute({
+          type: "add-entity",
+          entity: {
+            id: newEntityId(),
+            type: "point",
+            name: nextEntityName(doc, "point"),
+            ...activeLayerProp(app.activeLayer),
+            p: snapped,
+          },
+        });
+        break;
+      }
       case "measure": {
+        const hit = hitTest(view, world);
+        const hitEntity = hit ? doc.get(hit) : null;
+
+        if (hitEntity?.type === "circle" || hitEntity?.type === "arc") {
+          app.setMeasurement({
+            kind: "radius",
+            id: hitEntity.id,
+            center: hitEntity.center,
+            radius: hitEntity.radius,
+          });
+          interactionRef.current = { kind: "idle" };
+          break;
+        }
+
+        if (hitEntity?.type === "line") {
+          const len = dist(hitEntity.a, hitEntity.b);
+          const current = app.measurement;
+          if (e.shiftKey && current?.kind === "length") {
+            if (!current.ids.includes(hitEntity.id)) {
+              app.setMeasurement({ kind: "length", ids: [...current.ids, hitEntity.id], total: current.total + len });
+            }
+          } else {
+            app.setMeasurement({ kind: "length", ids: [hitEntity.id], total: len });
+          }
+          interactionRef.current = { kind: "idle" };
+          break;
+        }
+
+        // Nothing selectable under the cursor: an enclosing closed area
+        // takes priority over starting a two-point distance drag.
+        if (!hitEntity && !e.shiftKey) {
+          const region = regionContainingPoint(closedRegionsRef.current, world);
+          if (region) {
+            app.setMeasurement({ kind: "area", region });
+            interactionRef.current = { kind: "idle" };
+            break;
+          }
+        }
+
         if (interaction.kind === "measure") {
           // second click freezes the measurement
-          app.setMeasurement({ a: interaction.start, b: snapped });
+          app.setMeasurement({ kind: "distance", a: interaction.start, b: snapped });
           interactionRef.current = { kind: "idle" };
         } else {
           interactionRef.current = { kind: "measure", start: snapped };
-          app.setMeasurement({ a: snapped, b: snapped });
+          app.setMeasurement({ kind: "distance", a: snapped, b: snapped });
         }
         break;
       }
@@ -421,8 +531,17 @@ export function Viewport() {
           if (resolved.every((id) => ids.includes(id))) {
             interactionRef.current = { kind: "move", ids, startWorld: world, dx: 0, dy: 0 };
           }
-        } else if (!e.shiftKey) {
-          app.setSelection([]);
+        } else {
+          // Nothing under the cursor: could be a plain click (clears the
+          // selection on release) or the start of a window/crossing
+          // drag-select — onPointerUp decides based on how far it moved.
+          interactionRef.current = {
+            kind: "box-select",
+            startScreen: screen,
+            startWorld: world,
+            currentWorld: world,
+            additive: e.shiftKey,
+          };
         }
         break;
       }
@@ -459,12 +578,14 @@ export function Viewport() {
     } else if (interaction.kind === "rotate-group") {
       const angle = Math.atan2(world.y - interaction.pivot.y, world.x - interaction.pivot.x);
       interactionRef.current = { ...interaction, rotation: angle - interaction.startAngle };
+    } else if (interaction.kind === "box-select") {
+      interactionRef.current = { ...interaction, currentWorld: world };
     }
 
     const snap = findSnap(doc, view, world);
     snapRef.current = snap;
     if (interaction.kind === "measure") {
-      app.setMeasurement({ a: interaction.start, b: snap.point });
+      app.setMeasurement({ kind: "distance", a: interaction.start, b: snap.point });
     }
     const shown = app.tool === "select" ? world : snap.point;
     app.setCursor({ x: shown.x, y: shown.y });
@@ -473,6 +594,35 @@ export function Viewport() {
 
   const onPointerUp = (e: React.PointerEvent) => {
     const interaction = interactionRef.current;
+    if (interaction.kind === "box-select") {
+      const screen = screenPos(e);
+      const app = useApp.getState();
+      if (dist(screen, interaction.startScreen) < 4) {
+        // Barely moved: treat as a plain click on empty canvas.
+        if (!interaction.additive) app.setSelection([]);
+      } else {
+        const { startWorld: s, currentWorld: c } = interaction;
+        const box = {
+          minX: Math.min(s.x, c.x),
+          maxX: Math.max(s.x, c.x),
+          minY: Math.min(s.y, c.y),
+          maxY: Math.max(s.y, c.y),
+        };
+        const mode: BoxSelectMode = c.x >= s.x ? "window" : "crossing";
+        const hidden = hiddenLayerSet();
+        const visible = doc.all().filter((ent) => !hidden.has(layerOf(ent)));
+        const picked = entitiesInBox(visible, box, mode);
+        app.setSelection(interaction.additive ? [...new Set([...app.selection, ...picked])] : picked);
+      }
+      interactionRef.current = { kind: "idle" };
+      redraw();
+      try {
+        canvasRef.current!.releasePointerCapture(e.pointerId);
+      } catch {
+        // see setPointerCapture note
+      }
+      return;
+    }
     if (interaction.kind === "pan") {
       interactionRef.current = { kind: "idle" };
     } else if (interaction.kind === "move") {

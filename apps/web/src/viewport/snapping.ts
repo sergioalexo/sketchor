@@ -37,6 +37,8 @@ export function findSnap(doc: SketchDocument, view: View, cursor: Point): Snap {
       consider({ x: c.x - r, y: c.y }, "quadrant");
       consider({ x: c.x, y: c.y + r }, "quadrant");
       consider({ x: c.x, y: c.y - r }, "quadrant");
+    } else if (e.type === "point") {
+      consider(e.p, "endpoint");
     } else {
       consider(e.center, "center");
       consider(arcPointAt(e.center, e.radius, e.startAngle), "endpoint");

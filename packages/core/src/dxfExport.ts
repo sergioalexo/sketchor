@@ -1,4 +1,4 @@
-import type { ArcEntity, CircleEntity, Entity, LineEntity } from "./entities";
+import type { ArcEntity, CircleEntity, Entity, LineEntity, PointEntity } from "./entities";
 import { layerOf } from "./entities";
 import { boundsOf } from "./dxf";
 
@@ -70,6 +70,10 @@ function arcEntity(e: ArcEntity): string {
   );
 }
 
+function pointEntity(e: PointEntity): string {
+  return `0\nPOINT\n` + pair(8, layerOf(e)) + pair(10, e.p.x) + pair(20, e.p.y) + pair(30, 0);
+}
+
 function entityDxf(e: Entity): string {
   switch (e.type) {
     case "line":
@@ -78,6 +82,8 @@ function entityDxf(e: Entity): string {
       return circleEntity(e);
     case "arc":
       return arcEntity(e);
+    case "point":
+      return pointEntity(e);
   }
 }
 

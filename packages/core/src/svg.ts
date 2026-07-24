@@ -77,6 +77,11 @@ export function entitiesToSvgDocument(entities: Entity[], opts: SvgExportOptions
       } else if (e.type === "circle") {
         const center = toSvg(e.center);
         body.push(`<circle cx="${fmt(center.x)}" cy="${fmt(center.y)}" r="${fmt(e.radius)}"/>`);
+      } else if (e.type === "point") {
+        // SVG has no native point primitive — a small filled dot stands in,
+        // sized off stroke width (not to world scale) like a CAD PDMODE marker.
+        const p = toSvg(e.p);
+        body.push(`<circle cx="${fmt(p.x)}" cy="${fmt(p.y)}" r="${fmt(strokeWidth * 1.5)}" fill="${stroke}" stroke="none"/>`);
       } else {
         body.push(`<path d="${arcPathD(e, toSvg)}"/>`);
       }

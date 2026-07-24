@@ -6,10 +6,13 @@ import { textToStrokes } from "./font";
 
 /**
  * Minimal ASCII DXF support: enough to import and preview typical 2D
- * drawings. Handles LINE, CIRCLE, ARC, LWPOLYLINE and legacy
- * POLYLINE/VERTEX. Arcs and polylines are approximated with line
- * segments so they fit the current line/circle entity model; arcs may
- * become a first-class entity later without changing this API.
+ * drawings. Handles LINE, CIRCLE, ARC, POINT, ELLIPSE, LWPOLYLINE, legacy
+ * POLYLINE/VERTEX, SPLINE, and TEXT/MTEXT. Ellipses, splines, and text are
+ * tessellated into line segments so they fit the current entity model —
+ * they display and export correctly, just decomposed. Entities with no
+ * pure-geometry equivalent (HATCH, DIMENSION, INSERT, LEADER, ...) are
+ * intentionally not imported; they're still tallied and surfaced via
+ * {@link DxfImportReport}'s `skipped` list rather than silently dropped.
  *
  * The same parser feeds two consumers: the in-app DXF browser (thumbnails
  * + open) and the planned native Explorer thumbnail handler.
@@ -362,6 +365,10 @@ export function parseDxf(text: string): DxfParseResult {
         }
         break;
       }
+      case "POINT": {
+        entities.push({ id: newEntityId(), type: "point", layer, p: { x: num(raw, 10), y: num(raw, 20) } });
+        break;
+      }
       case "ELLIPSE": {
         entities.push(
           ...ellipseToLines(
@@ -426,6 +433,7 @@ const SUPPORTED_TYPES = new Set([
   "TEXT",
   "MTEXT",
   "POLYLINE",
+  "POINT",
 ]);
 
 /** Tallies raw DXF entity types into parsed/skipped buckets for the import report. */
@@ -505,6 +513,8 @@ export function boundsOf(entities: Entity[]): Bounds | null {
     } else if (e.type === "circle") {
       acc(e.center.x - e.radius, e.center.y - e.radius);
       acc(e.center.x + e.radius, e.center.y + e.radius);
+    } else if (e.type === "point") {
+      acc(e.p.x, e.p.y);
     } else {
       for (const p of arcExtentPoints(e.center, e.radius, e.startAngle, e.endAngle, e.ccw)) {
         acc(p.x, p.y);
@@ -557,6 +567,8 @@ export function entitiesToSvg(entities: Entity[], opts: ThumbnailOptions = {}): 
         body.push(
           `<circle cx="${f(sx(e.center.x))}" cy="${f(sy(e.center.y))}" r="${f(e.radius * scale)}" fill="none"/>`,
         );
+      } else if (e.type === "point") {
+        body.push(`<circle cx="${f(sx(e.p.x))}" cy="${f(sy(e.p.y))}" r="1.5" fill="${stroke}"/>`);
       } else {
         // Tessellated for display only — the document keeps the arc as one entity.
         const sweep = arcSweep(e.startAngle, e.endAngle, e.ccw);

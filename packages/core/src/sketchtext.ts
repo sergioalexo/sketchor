@@ -35,6 +35,9 @@ const CIRCLE_RE = new RegExp(
 const ARC_RE = new RegExp(
   String.raw`^arc\s+([A-Za-z_]\w*)\s+at\s*\(\s*(${NUM})\s*,\s*(${NUM})\s*\)\s*r\s+(${NUM})\s+from\s+(${NUM})\s+to\s+(${NUM})(\s+cw)?$`,
 );
+const POINT_RE = new RegExp(
+  String.raw`^point\s+([A-Za-z_]\w*)\s+at\s*\(\s*(${NUM})\s*,\s*(${NUM})\s*\)$`,
+);
 
 function fmt(n: number): string {
   const rounded = Math.round(n * 10000) / 10000;
@@ -54,7 +57,7 @@ export function assignNames(doc: SketchDocument): Map<EntityId, string> {
       used.add(e.name);
     }
   }
-  const counters: Record<Entity["type"], number> = { line: 1, circle: 1, arc: 1 };
+  const counters: Record<Entity["type"], number> = { line: 1, circle: 1, arc: 1, point: 1 };
   for (const e of doc.all()) {
     if (names.has(e.id)) continue;
     const prefix = NAME_PREFIX[e.type];
@@ -67,7 +70,7 @@ export function assignNames(doc: SketchDocument): Map<EntityId, string> {
   return names;
 }
 
-const NAME_PREFIX: Record<Entity["type"], string> = { line: "L", circle: "C", arc: "A" };
+const NAME_PREFIX: Record<Entity["type"], string> = { line: "L", circle: "C", arc: "A", point: "P" };
 
 /** Next free name for a newly drawn entity (used by the tools). */
 export function nextEntityName(doc: SketchDocument, type: Entity["type"]): string {
@@ -93,11 +96,13 @@ export function toCode(doc: SketchDocument): string {
       out.push(
         `circle ${name} at (${fmt(e.center.x)}, ${fmt(e.center.y)}) r ${fmt(e.radius)}`,
       );
-    } else {
+    } else if (e.type === "arc") {
       out.push(
         `arc ${name} at (${fmt(e.center.x)}, ${fmt(e.center.y)}) r ${fmt(e.radius)} ` +
           `from ${fmt(toDeg(e.startAngle))} to ${fmt(toDeg(e.endAngle))}${e.ccw ? "" : " cw"}`,
       );
+    } else {
+      out.push(`point ${name} at (${fmt(e.p.x)}, ${fmt(e.p.y)})`);
     }
   }
   return out.join("\n") + "\n";
@@ -115,7 +120,8 @@ export type ParsedEntity =
       startAngle: number;
       endAngle: number;
       ccw: boolean;
-    };
+    }
+  | { type: "point"; name: string; p: { x: number; y: number } };
 
 export interface ParseIssue {
   line: number;
@@ -178,19 +184,23 @@ export function parseCode(text: string): { entities: ParsedEntity[]; errors: Par
         endAngle: (Number(match[6]) * Math.PI) / 180,
         ccw: !match[7],
       };
+    } else if ((match = row.match(POINT_RE))) {
+      parsed = { type: "point", name: match[1], p: { x: Number(match[2]), y: Number(match[3]) } };
     }
 
     if (!parsed) {
       errors.push({
         line: lineNo,
         message:
-          keyword === "line" || keyword === "circle" || keyword === "arc"
+          keyword === "line" || keyword === "circle" || keyword === "arc" || keyword === "point"
             ? `could not parse ${keyword} — expected: ` +
               (keyword === "line"
                 ? "line NAME from (x, y) to (x, y)"
                 : keyword === "circle"
                   ? "circle NAME at (x, y) r RADIUS"
-                  : "arc NAME at (x, y) r RADIUS from DEG to DEG [cw]")
+                  : keyword === "arc"
+                    ? "arc NAME at (x, y) r RADIUS from DEG to DEG [cw]"
+                    : "point NAME at (x, y)")
             : `unknown statement '${keyword}'`,
       });
       continue;
@@ -235,6 +245,9 @@ function sameGeometry(existing: Entity, parsed: ParsedEntity): boolean {
       existing.ccw === parsed.ccw
     );
   }
+  if (existing.type === "point" && parsed.type === "point") {
+    return Math.abs(existing.p.x - parsed.p.x) < EPS && Math.abs(existing.p.y - parsed.p.y) < EPS;
+  }
   return false;
 }
 
@@ -264,6 +277,8 @@ function toEntity(parsed: ParsedEntity, id: EntityId, layer?: string): Entity {
         endAngle: parsed.endAngle,
         ccw: parsed.ccw,
       };
+    case "point":
+      return { id, type: "point", name: parsed.name, ...layerProp, p: parsed.p };
   }
 }
 

@@ -11,3 +11,6 @@ export * from "./dxfExport";
 export * from "./svg";
 export * from "./font";
 export * from "./heal";
+export * from "./boxSelect";
+export * from "./regions";
+export * from "./duplicates";

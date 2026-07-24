@@ -1,5 +1,6 @@
-import type { Bounds, Entity, EntityId, Point, SketchDocument } from "@sketchor/core";
+import type { Bounds, BoxSelectMode, ClosedRegion, Entity, EntityId, Point, SketchDocument } from "@sketchor/core";
 import { dist, entityPoints, layerOf, transformed, translated } from "@sketchor/core";
+import type { MeasureResult } from "../state/store";
 import { gridStep, worldToScreen, type View } from "./view";
 import type { Snap } from "./snapping";
 
@@ -17,8 +18,8 @@ export interface RenderUiState {
   snap: Snap | null;
   /** Live offset while dragging a selection. */
   moveOffset: { dx: number; dy: number } | null;
-  /** Active distance measurement overlay, if any. */
-  measurement: { a: Point; b: Point } | null;
+  /** Active measure-tool result overlay, if any. */
+  measurement: MeasureResult | null;
   /** Names of layers to skip drawing. */
   hiddenLayers: ReadonlySet<string>;
   /** The straighten tool's chosen reference edge, highlighted distinctly. */
@@ -27,6 +28,8 @@ export interface RenderUiState {
   transformPreview: TransformPreview | null;
   /** World locations of current heal-diagnostics findings. */
   healMarkers: readonly Point[];
+  /** World locations of current duplicate/overlap findings. */
+  duplicateMarkers: readonly Point[];
   /** Dashed bbox + rotate handle shown when the selection is exactly one whole group. */
   groupHandle: { bounds: Bounds; pivot: Point } | null;
   /**
@@ -35,6 +38,13 @@ export interface RenderUiState {
    * connectivity.ts. Null when the hint is turned off.
    */
   freeEndpointIds: ReadonlySet<EntityId> | null;
+  /** Live window/crossing drag-select rectangle, while dragging. */
+  boxSelect: { start: Point; end: Point; mode: BoxSelectMode } | null;
+  /** Boundary polygons of detected closed loops (lines/arcs chained shut, or circles) — filled with a translucent tint. */
+  closedRegions: readonly (readonly Point[])[];
+  /** Formats a world-unit length/area for on-canvas labels, honoring the current display unit. */
+  fmtLength: (worldValue: number) => string;
+  fmtArea: (worldValueSquared: number) => string;
 }
 
 /** Must match GROUP_HANDLE_OFFSET_PX in Viewport.tsx, which hit-tests this same handle. */
@@ -54,6 +64,10 @@ const COLORS = {
   measureLabelBg: "#0c2b28",
   reference: "#ff5c5c",
   connectivityHint: "#4d7ac7",
+  windowSelect: "#5b96ff",
+  crossingSelect: "#5adc7a",
+  closedRegionFill: "rgba(180, 190, 205, 0.16)",
+  duplicateMarker: "#f0b968",
 };
 
 function fmtNum(n: number): string {
@@ -73,6 +87,8 @@ export function render(
   ctx.fillRect(0, 0, width, height);
 
   drawGrid(ctx, width, height, view);
+
+  if (ui.closedRegions.length > 0) drawClosedRegions(ctx, view, ui.closedRegions);
 
   for (const entity of doc.all()) {
     if (ui.hiddenLayers.has(layerOf(entity))) continue;
@@ -113,11 +129,56 @@ export function render(
     ctx.setLineDash([]);
   }
 
-  if (ui.measurement) drawMeasurement(ctx, view, ui.measurement);
+  if (ui.measurement) drawMeasurement(ctx, view, doc, ui.measurement, ui.fmtLength, ui.fmtArea);
 
   for (const p of ui.healMarkers) drawHealMarker(ctx, view, p);
+  for (const p of ui.duplicateMarkers) drawHealMarker(ctx, view, p, COLORS.duplicateMarker);
 
   if (ui.snap) drawSnapMarker(ctx, view, ui.snap);
+
+  if (ui.boxSelect) drawBoxSelect(ctx, view, ui.boxSelect);
+}
+
+/** Window selection (blue, solid, filled) vs crossing selection (green, dashed) — the standard CAD convention. */
+function drawBoxSelect(
+  ctx: CanvasRenderingContext2D,
+  view: View,
+  box: { start: Point; end: Point; mode: BoxSelectMode },
+): void {
+  const a = worldToScreen(view, box.start);
+  const b = worldToScreen(view, box.end);
+  const x = Math.min(a.x, b.x);
+  const y = Math.min(a.y, b.y);
+  const w = Math.abs(b.x - a.x);
+  const h = Math.abs(b.y - a.y);
+  const color = box.mode === "window" ? COLORS.windowSelect : COLORS.crossingSelect;
+
+  ctx.fillStyle = color;
+  ctx.globalAlpha = 0.1;
+  ctx.fillRect(x, y, w, h);
+  ctx.globalAlpha = 1;
+
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1;
+  ctx.setLineDash(box.mode === "window" ? [] : [5, 4]);
+  ctx.strokeRect(x + 0.5, y + 0.5, w, h);
+  ctx.setLineDash([]);
+}
+
+function drawClosedRegions(ctx: CanvasRenderingContext2D, view: View, regions: readonly (readonly Point[])[]): void {
+  ctx.fillStyle = COLORS.closedRegionFill;
+  for (const polygon of regions) {
+    if (polygon.length < 3) continue;
+    ctx.beginPath();
+    const p0 = worldToScreen(view, polygon[0]);
+    ctx.moveTo(p0.x, p0.y);
+    for (let i = 1; i < polygon.length; i++) {
+      const p = worldToScreen(view, polygon[i]);
+      ctx.lineTo(p.x, p.y);
+    }
+    ctx.closePath();
+    ctx.fill();
+  }
 }
 
 function drawGroupHandle(
@@ -152,9 +213,9 @@ function drawGroupHandle(
   ctx.stroke();
 }
 
-function drawHealMarker(ctx: CanvasRenderingContext2D, view: View, p: Point): void {
+function drawHealMarker(ctx: CanvasRenderingContext2D, view: View, p: Point, color: string = COLORS.reference): void {
   const s = worldToScreen(view, p);
-  ctx.strokeStyle = COLORS.reference;
+  ctx.strokeStyle = color;
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.arc(s.x, s.y, 7, 0, Math.PI * 2);
@@ -168,10 +229,60 @@ function drawHealMarker(ctx: CanvasRenderingContext2D, view: View, p: Point): vo
 function drawMeasurement(
   ctx: CanvasRenderingContext2D,
   view: View,
-  m: { a: Point; b: Point },
+  doc: SketchDocument,
+  m: MeasureResult,
+  fmtLength: (n: number) => string,
+  fmtArea: (n: number) => string,
 ): void {
-  const a = worldToScreen(view, m.a);
-  const b = worldToScreen(view, m.b);
+  switch (m.kind) {
+    case "distance":
+      drawDistanceMeasurement(ctx, view, m.a, m.b, fmtLength);
+      break;
+    case "length":
+      drawLengthMeasurement(ctx, view, doc, m, fmtLength);
+      break;
+    case "radius":
+      drawRadiusMeasurement(ctx, view, m, fmtLength);
+      break;
+    case "area":
+      drawAreaMeasurement(ctx, view, m.region, fmtArea);
+      break;
+  }
+}
+
+/** A small rounded pill, one or more lines of text, centered at a screen point. */
+function drawLabel(ctx: CanvasRenderingContext2D, cx: number, cy: number, lines: string[]): void {
+  ctx.font = "12px 'Segoe UI', system-ui, sans-serif";
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "center";
+  const padX = 7;
+  const lineH = 15;
+  const w = Math.max(...lines.map((l) => ctx.measureText(l).width)) + padX * 2;
+  const h = lineH * lines.length + 6;
+
+  ctx.fillStyle = COLORS.measureLabelBg;
+  ctx.strokeStyle = COLORS.measure;
+  ctx.lineWidth = 1;
+  roundRect(ctx, cx - w / 2, cy - h / 2, w, h, 5);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.fillStyle = COLORS.measure;
+  const top = cy - h / 2 + lineH / 2 + 3;
+  lines.forEach((line, i) => ctx.fillText(line, cx, top + i * lineH));
+  ctx.textAlign = "start";
+  ctx.textBaseline = "alphabetic";
+}
+
+function drawDistanceMeasurement(
+  ctx: CanvasRenderingContext2D,
+  view: View,
+  wa: Point,
+  wb: Point,
+  fmtLength: (n: number) => string,
+): void {
+  const a = worldToScreen(view, wa);
+  const b = worldToScreen(view, wb);
 
   ctx.strokeStyle = COLORS.measure;
   ctx.fillStyle = COLORS.measure;
@@ -189,33 +300,97 @@ function drawMeasurement(
     ctx.fill();
   }
 
-  const d = dist(m.a, m.b);
+  const d = dist(wa, wb);
   if (d < 1e-9) return;
 
   // World Y grows upward, so negate dy for a screen-consistent angle.
-  const angle = (Math.atan2(m.b.y - m.a.y, m.b.x - m.a.x) * 180) / Math.PI;
-  const label = `${fmtNum(d)}  ${fmtNum(angle)}°`;
-
-  ctx.font = "12px 'Segoe UI', system-ui, sans-serif";
-  ctx.textBaseline = "middle";
-  ctx.textAlign = "center";
-  const padX = 7;
-  const w = ctx.measureText(label).width + padX * 2;
-  const h = 20;
+  const angle = (Math.atan2(wb.y - wa.y, wb.x - wa.x) * 180) / Math.PI;
+  const dx = Math.abs(wb.x - wa.x);
+  const dy = Math.abs(wb.y - wa.y);
   const cx = (a.x + b.x) / 2;
-  const cy = (a.y + b.y) / 2 - 14;
+  const cy = (a.y + b.y) / 2 - 18;
+  drawLabel(ctx, cx, cy, [`${fmtLength(d)}  ${fmtNum(angle)}°`, `Δx ${fmtLength(dx)}  Δy ${fmtLength(dy)}`]);
+}
 
-  ctx.fillStyle = COLORS.measureLabelBg;
+function drawLengthMeasurement(
+  ctx: CanvasRenderingContext2D,
+  view: View,
+  doc: SketchDocument,
+  m: Extract<MeasureResult, { kind: "length" }>,
+  fmtLength: (n: number) => string,
+): void {
+  let lastMid: Point | null = null;
   ctx.strokeStyle = COLORS.measure;
-  ctx.lineWidth = 1;
-  roundRect(ctx, cx - w / 2, cy - h / 2, w, h, 5);
-  ctx.fill();
-  ctx.stroke();
+  ctx.lineWidth = 3;
+  for (const id of m.ids) {
+    const entity = doc.get(id);
+    if (!entity || entity.type !== "line") continue;
+    const a = worldToScreen(view, entity.a);
+    const b = worldToScreen(view, entity.b);
+    ctx.beginPath();
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+    ctx.stroke();
+    lastMid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  }
+  if (!lastMid) return;
+  const label =
+    m.ids.length > 1 ? `Total ${fmtLength(m.total)}  (${m.ids.length} lines)` : `Length ${fmtLength(m.total)}`;
+  drawLabel(ctx, lastMid.x, lastMid.y - 14, [label]);
+}
 
+function drawRadiusMeasurement(
+  ctx: CanvasRenderingContext2D,
+  view: View,
+  m: Extract<MeasureResult, { kind: "radius" }>,
+  fmtLength: (n: number) => string,
+): void {
+  const c = worldToScreen(view, m.center);
+  const edge = worldToScreen(view, { x: m.center.x + m.radius, y: m.center.y });
+
+  ctx.strokeStyle = COLORS.measure;
   ctx.fillStyle = COLORS.measure;
-  ctx.fillText(label, cx, cy);
-  ctx.textAlign = "start";
-  ctx.textBaseline = "alphabetic";
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([5, 4]);
+  ctx.beginPath();
+  ctx.moveTo(c.x, c.y);
+  ctx.lineTo(edge.x, edge.y);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.beginPath();
+  ctx.arc(c.x, c.y, 3, 0, Math.PI * 2);
+  ctx.fill();
+
+  drawLabel(ctx, (c.x + edge.x) / 2, (c.y + edge.y) / 2 - 14, [`R ${fmtLength(m.radius)}   Ø ${fmtLength(m.radius * 2)}`]);
+}
+
+function drawAreaMeasurement(
+  ctx: CanvasRenderingContext2D,
+  view: View,
+  region: ClosedRegion,
+  fmtArea: (n: number) => string,
+): void {
+  if (region.points.length < 3) return;
+  ctx.fillStyle = COLORS.measure;
+  ctx.globalAlpha = 0.18;
+  ctx.beginPath();
+  const p0 = worldToScreen(view, region.points[0]);
+  ctx.moveTo(p0.x, p0.y);
+  let cx = p0.x;
+  let cy = p0.y;
+  for (let i = 1; i < region.points.length; i++) {
+    const p = worldToScreen(view, region.points[i]);
+    ctx.lineTo(p.x, p.y);
+    cx += p.x;
+    cy += p.y;
+  }
+  ctx.closePath();
+  ctx.fill();
+  ctx.globalAlpha = 1;
+  cx /= region.points.length;
+  cy /= region.points.length;
+  drawLabel(ctx, cx, cy, [`Area ${fmtArea(region.area)}`]);
 }
 
 function roundRect(
@@ -287,6 +462,13 @@ function drawEntity(
   } else if (entity.type === "circle") {
     const c = worldToScreen(view, entity.center);
     ctx.arc(c.x, c.y, entity.radius * view.scale, 0, Math.PI * 2);
+  } else if (entity.type === "point") {
+    // Fixed screen size regardless of zoom, like a CAD PDMODE marker.
+    const p = worldToScreen(view, entity.p);
+    ctx.moveTo(p.x - 5, p.y);
+    ctx.lineTo(p.x + 5, p.y);
+    ctx.moveTo(p.x, p.y - 5);
+    ctx.lineTo(p.x, p.y + 5);
   } else {
     // World angles increase CCW in a Y-up plane; screen Y is flipped, so
     // angles negate and the sweep direction flips (canvas's own

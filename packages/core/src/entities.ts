@@ -41,6 +41,16 @@ export interface ArcEntity {
   ccw: boolean;
 }
 
+export interface PointEntity {
+  id: EntityId;
+  type: "point";
+  /** Human-readable handle used in the sketch code view (e.g. "P1"). */
+  name?: string;
+  /** Layer this entity belongs to; absent means the default layer "0". */
+  layer?: string;
+  p: Point;
+}
+
 /** The layer an entity is drawn on, defaulting to "0" (DXF convention). */
 export function layerOf(entity: Entity): string {
   return entity.layer ?? DEFAULT_LAYER;
@@ -48,7 +58,7 @@ export function layerOf(entity: Entity): string {
 
 export const DEFAULT_LAYER = "0";
 
-export type Entity = LineEntity | CircleEntity | ArcEntity;
+export type Entity = LineEntity | CircleEntity | ArcEntity | PointEntity;
 
 let counter = 0;
 
@@ -75,6 +85,8 @@ export function translated<T extends Entity>(entity: T, dx: number, dy: number):
         ...entity,
         center: { x: entity.center.x + dx, y: entity.center.y + dy },
       };
+    case "point":
+      return { ...entity, p: { x: entity.p.x + dx, y: entity.p.y + dy } };
   }
 }
 
@@ -96,6 +108,8 @@ export function rotated<T extends Entity>(entity: T, pivot: Point, angle: number
         startAngle: entity.startAngle + angle,
         endAngle: entity.endAngle + angle,
       };
+    case "point":
+      return { ...entity, p: rotatePoint(entity.p, pivot, angle) };
   }
 }
 
@@ -130,6 +144,8 @@ export function transformed<T extends Entity>(
         startAngle: entity.startAngle + rotation,
         endAngle: entity.endAngle + rotation,
       };
+    case "point":
+      return { ...entity, p: movePoint(entity.p) };
   }
 }
 
@@ -150,6 +166,8 @@ export function entityPoints(entity: Entity): Point[] {
         arcPointAt(entity.center, entity.radius, entity.startAngle),
         arcPointAt(entity.center, entity.radius, entity.endAngle),
       ];
+    case "point":
+      return [entity.p];
   }
 }
 

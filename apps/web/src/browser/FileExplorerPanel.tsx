@@ -55,8 +55,12 @@ const DEFAULT_WIDTH = 240;
  * file opened via Explorer/file-association) is read in Rust with no
  * sandbox limits; on the web, a one-time `showDirectoryPicker()` grant, or
  * (always available) picking individual files.
+ *
+ * Stays mounted even while toggled off (`hidden`, shown via CSS) — its
+ * loaded entries/thumbnails are local state, so unmounting on every toggle
+ * would throw them away and re-browse from scratch each time it's reopened.
  */
-export function FileExplorerPanel({ onClose }: { onClose: () => void }) {
+export function FileExplorerPanel({ hidden, onClose }: { hidden: boolean; onClose: () => void }) {
   const [entries, setEntries] = useState<Entry[]>([]);
   const [folderLabel, setFolderLabel] = useState<string | null>(null);
   const [width, setWidth] = useState(DEFAULT_WIDTH);
@@ -144,7 +148,11 @@ export function FileExplorerPanel({ onClose }: { onClose: () => void }) {
   }, [desktopDir]);
 
   return (
-    <aside className="filexplorer" data-testid="file-explorer" style={{ width }}>
+    <aside
+      className="filexplorer"
+      data-testid="file-explorer"
+      style={{ width, display: hidden ? "none" : undefined }}
+    >
       <div className="filexplorer-header">
         <span className="filexplorer-title">{folderLabel ?? "Files"}</span>
         <div className="filexplorer-actions">
