@@ -1,5 +1,5 @@
 import type { Point } from "./geometry";
-import { arcPointAt, rotatePoint } from "./geometry";
+import { arcPointAt, arcSweep, bulgeToArc, dist, rotatePoint } from "./geometry";
 
 export type EntityId = string;
 
@@ -51,6 +51,27 @@ export interface PointEntity {
   p: Point;
 }
 
+export interface PolylineEntity {
+  id: EntityId;
+  type: "polyline";
+  /** Human-readable handle used in the sketch code view (e.g. "PL1"). */
+  name?: string;
+  /** Layer this entity belongs to; absent means the default layer "0". */
+  layer?: string;
+  /** Ordered vertices. Does not repeat the first point when `closed`. */
+  points: Point[];
+  /**
+   * Per-segment bulge (DXF convention): `bulges[i]` is the bulge of the
+   * segment from `points[i]` to `points[i+1]` (wrapping to `points[0]` for
+   * the closing segment when `closed`). 0 or absent = straight segment;
+   * otherwise `tan(includedAngle / 4)`, signed by sweep direction — see
+   * {@link bulgeToArc}. Absent entirely means every segment is straight.
+   */
+  bulges?: number[];
+  /** True if the last vertex connects back to the first. */
+  closed: boolean;
+}
+
 /** The layer an entity is drawn on, defaulting to "0" (DXF convention). */
 export function layerOf(entity: Entity): string {
   return entity.layer ?? DEFAULT_LAYER;
@@ -58,7 +79,22 @@ export function layerOf(entity: Entity): string {
 
 export const DEFAULT_LAYER = "0";
 
-export type Entity = LineEntity | CircleEntity | ArcEntity | PointEntity;
+export type Entity = LineEntity | CircleEntity | ArcEntity | PointEntity | PolylineEntity;
+
+/** `entity.points[i]` to `entity.points[i+1]` for every segment, wrapping once more if `closed`. Bulge defaults to 0 (straight). */
+export function polylineSegments(entity: PolylineEntity): { a: Point; b: Point; bulge: number }[] {
+  const n = entity.points.length;
+  const segCount = entity.closed ? n : n - 1;
+  const segments: { a: Point; b: Point; bulge: number }[] = [];
+  for (let i = 0; i < segCount; i++) {
+    segments.push({
+      a: entity.points[i],
+      b: entity.points[(i + 1) % n],
+      bulge: entity.bulges?.[i] ?? 0,
+    });
+  }
+  return segments;
+}
 
 let counter = 0;
 
@@ -87,6 +123,8 @@ export function translated<T extends Entity>(entity: T, dx: number, dy: number):
       };
     case "point":
       return { ...entity, p: { x: entity.p.x + dx, y: entity.p.y + dy } };
+    case "polyline":
+      return { ...entity, points: entity.points.map((p) => ({ x: p.x + dx, y: p.y + dy })) };
   }
 }
 
@@ -110,6 +148,9 @@ export function rotated<T extends Entity>(entity: T, pivot: Point, angle: number
       };
     case "point":
       return { ...entity, p: rotatePoint(entity.p, pivot, angle) };
+    case "polyline":
+      // Bulge is a ratio of angle, not position, so it's unaffected by rotation.
+      return { ...entity, points: entity.points.map((p) => rotatePoint(p, pivot, angle)) };
   }
 }
 
@@ -146,6 +187,9 @@ export function transformed<T extends Entity>(
       };
     case "point":
       return { ...entity, p: movePoint(entity.p) };
+    case "polyline":
+      // Uniform scale changes segment length but not the angle bulge encodes, so bulges carry over unchanged.
+      return { ...entity, points: entity.points.map(movePoint) };
   }
 }
 
@@ -168,7 +212,21 @@ export function entityPoints(entity: Entity): Point[] {
       ];
     case "point":
       return [entity.p];
+    case "polyline":
+      return entity.points;
   }
+}
+
+/** Total run length of a polyline, following each segment's real curve (bulged segments contribute arc length, not chord length). */
+export function polylineLength(entity: PolylineEntity): number {
+  let total = 0;
+  for (const seg of polylineSegments(entity)) {
+    const bulgeArc = bulgeToArc(seg.a, seg.b, seg.bulge);
+    total += bulgeArc
+      ? bulgeArc.radius * arcSweep(bulgeArc.startAngle, bulgeArc.endAngle, bulgeArc.ccw)
+      : dist(seg.a, seg.b);
+  }
+  return total;
 }
 
 /** Arithmetic mean of every entity's defining points — the pivot the straighten tool and group-rotate use by default. */

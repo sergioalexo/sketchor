@@ -14,3 +14,4 @@ export * from "./heal";
 export * from "./boxSelect";
 export * from "./regions";
 export * from "./duplicates";
+export * from "./crossings";

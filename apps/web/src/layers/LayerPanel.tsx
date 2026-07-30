@@ -17,6 +17,8 @@ export function LayerPanel() {
   const addLayer = useApp((s) => s.addLayer);
   const deleteLayer = useApp((s) => s.deleteLayer);
   const renameLayer = useApp((s) => s.renameLayer);
+  const flattenLayers = useApp((s) => s.flattenLayers);
+  const deleteEmptyLayers = useApp((s) => s.deleteEmptyLayers);
 
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -28,6 +30,9 @@ export function LayerPanel() {
     return m;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [revision]);
+
+  const emptyLayerCount = layers.filter((l) => l.name !== DEFAULT_LAYER && (counts.get(l.name) ?? 0) === 0).length;
+  const canFlatten = layers.length > 1;
 
   const commitRename = (from: string) => {
     if (draft.trim() && draft.trim() !== from) renameLayer(from, draft);
@@ -45,6 +50,26 @@ export function LayerPanel() {
           data-testid="layer-add"
         >
           + Add
+        </button>
+      </div>
+      <div className="layerpanel-toolbar">
+        <button
+          className="btn ghost sm"
+          onClick={deleteEmptyLayers}
+          title="Remove every layer with nothing on it"
+          data-testid="layer-clean-empty"
+          disabled={emptyLayerCount === 0}
+        >
+          Clean up{emptyLayerCount > 0 ? ` (${emptyLayerCount})` : ""}
+        </button>
+        <button
+          className="btn ghost sm"
+          onClick={flattenLayers}
+          title="Move everything onto the default layer and remove the rest"
+          data-testid="layer-flatten"
+          disabled={!canFlatten}
+        >
+          Flatten
         </button>
       </div>
       <div className="layerpanel-list">
@@ -100,7 +125,11 @@ export function LayerPanel() {
               <span className="layer-count">{counts.get(layer.name) ?? 0}</span>
               <button
                 className="layer-del"
-                title={layer.name === DEFAULT_LAYER ? "The default layer can't be removed" : "Delete layer + its geometry"}
+                title={
+                  layer.name === DEFAULT_LAYER
+                    ? "The default layer can't be removed"
+                    : "Delete layer (its geometry moves to the default layer)"
+                }
                 data-testid={`layer-delete-${layer.name}`}
                 disabled={layer.name === DEFAULT_LAYER}
                 onClick={(e) => {

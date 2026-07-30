@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { dxfCodeToDisplayUnit, type DisplayUnit } from "../units";
+import { dxfCodeToDisplayUnit, formatArea, formatLength, type DisplayUnit } from "../units";
 import {
   CommandBus,
   DEFAULT_DUPLICATE_OPTIONS,
@@ -8,6 +8,7 @@ import {
   SketchDocument,
   centroidOfEntities,
   diffToCommands,
+  dist,
   dxfToSvg,
   fixAllDuplicates,
   fixAllIssues,
@@ -21,12 +22,14 @@ import {
   parseCode,
   parseDxf,
   reduceToHalfTurn,
+  scanForCrossings,
   scanForDuplicates,
   scanForIssues,
   toCode,
   wholeGroupSelected,
   type ClosedRegion,
   type Command,
+  type CrossingIssue,
   type DuplicateIssue,
   type DuplicateOptions,
   type DxfImportReport,
@@ -60,6 +63,8 @@ export interface DocSession {
   activeLayer: string;
   /** Saved pan/zoom, restored when this tab becomes active again; null until the viewport has set one. */
   view: { scale: number; ox: number; oy: number } | null;
+  /** Display unit for this tab (e.g. from a DXF's $INSUNITS on open), restored when it becomes active again. */
+  displayUnit: DisplayUnit;
 }
 
 let sessionCounter = 0;
@@ -81,6 +86,7 @@ function newSession(name: string): DocSession {
     layers: [{ name: DEFAULT_LAYER, visible: true }],
     activeLayer: DEFAULT_LAYER,
     view: null,
+    displayUnit: "mm",
   };
 }
 
@@ -188,14 +194,15 @@ export function importDxfText(text: string, replace = true): { count: number; wa
   return { count: entities.length, warnings };
 }
 
-export type ToolId = "select" | "line" | "circle" | "point" | "measure" | "straighten";
+export type ToolId = "select" | "line" | "polyline" | "circle" | "point" | "measure" | "straighten";
 
 export const TOOL_HINTS: Record<ToolId, string> = {
   select: "Click to select (Shift adds) - drag left-to-right to window-select, right-to-left to crossing-select - drag to move - Del deletes - G groups - U ungroups",
   line: "Click start point, then click next points to chain - Esc to finish",
+  polyline: "Click each vertex - Enter or double-click to finish, C to close the shape, Backspace undoes the last vertex, Esc cancels",
   circle: "Click center, then click a point on the circle",
   point: "Click to place a point",
-  measure: "Click a line/circle/arc for its length/radius, click inside a closed area for its area, Shift-click more lines to total - else click two points to measure distance",
+  measure: "Click two points to measure distance (snaps to endpoints, midpoints, centers, on-line points, intersections) - Ctrl-click a line to set it as the angle reference - Alt-click a line/circle/arc for its whole length/radius, Shift-Alt-click more lines/arcs to total - click inside a closed area for its area+perimeter - Ctrl+C copies the readout",
   straighten: "Select the part with V, switch here, click the reference edge, then Enter to apply",
 };
 
@@ -289,9 +296,10 @@ export function fixAllHeal(): void {
 
 /* ---------------------------- duplicate geometry -------------------------- */
 
-/** Re-scans the drawing for duplicate/overlapping geometry under the current tolerance. */
+/** Re-scans the drawing for duplicate/overlapping geometry under the current tolerance, and for line crossings. */
 export function rescanDuplicates(): void {
   useApp.getState().setDuplicateIssues(scanForDuplicates(doc, useApp.getState().duplicateOptions));
+  useApp.getState().setCrossingIssues(scanForCrossings(doc));
 }
 
 /** Fixes one duplicates-panel finding (deletes the redundant copies), then re-scans. */
@@ -316,8 +324,51 @@ export function fixAllDuplicatesAction(): void {
 export type MeasureResult =
   | { kind: "distance"; a: Point; b: Point }
   | { kind: "length"; ids: EntityId[]; total: number }
-  | { kind: "radius"; id: EntityId; center: Point; radius: number }
+  | { kind: "radius"; id: EntityId; center: Point; radius: number; arcLength?: number }
   | { kind: "area"; region: ClosedRegion };
+
+function wrapDeg(deg: number): number {
+  let d = deg % 360;
+  if (d <= -180) d += 360;
+  if (d > 180) d -= 360;
+  return d;
+}
+
+/** Plain-text rendering of a measurement (status bar readout, and what Ctrl+C copies). `referenceAngleDeg` is the measure tool's Ctrl-clicked reference edge, if any. */
+export function measurementText(m: MeasureResult, unit: DisplayUnit, referenceAngleDeg: number | null = null): string {
+  switch (m.kind) {
+    case "distance": {
+      const d = dist(m.a, m.b);
+      const dx = Math.abs(m.b.x - m.a.x);
+      const dy = Math.abs(m.b.y - m.a.y);
+      const angle = (Math.atan2(m.b.y - m.a.y, m.b.x - m.a.x) * 180) / Math.PI;
+      const angleText = referenceAngleDeg === null ? "" : `  ∠ edge ${wrapDeg(angle - referenceAngleDeg).toFixed(2)}°`;
+      return `distance ${formatLength(d, unit)}  (Δx ${formatLength(dx, unit)}, Δy ${formatLength(dy, unit)})${angleText}`;
+    }
+    case "length":
+      return m.ids.length > 1
+        ? `total length ${formatLength(m.total, unit)} (${m.ids.length} entities)`
+        : `length ${formatLength(m.total, unit)}`;
+    case "radius":
+      return (
+        `radius ${formatLength(m.radius, unit)}  diameter ${formatLength(m.radius * 2, unit)}` +
+        (m.arcLength !== undefined ? `  arc length ${formatLength(m.arcLength, unit)}` : "")
+      );
+    case "area": {
+      let perimeter = 0;
+      const pts = m.region.points;
+      for (let i = 0; i < pts.length; i++) perimeter += dist(pts[i], pts[(i + 1) % pts.length]);
+      return `area ${formatArea(m.region.area, unit)}  perimeter ${formatLength(perimeter, unit)}`;
+    }
+  }
+}
+
+/** Direction (degrees) of the measure/straighten tool's Ctrl/click-picked reference edge, or null if none/not a line. */
+export function referenceEdgeAngleDeg(): number | null {
+  const id = useApp.getState().referenceEdgeId;
+  const edge = id ? doc.get(id) : null;
+  return edge?.type === "line" ? (Math.atan2(edge.b.y - edge.a.y, edge.b.x - edge.a.x) * 180) / Math.PI : null;
+}
 
 /** A named drawing layer with a visibility toggle. */
 export interface Layer {
@@ -337,6 +388,8 @@ interface AppState {
   cursor: { x: number; y: number } | null;
   zoom: number;
   measurement: MeasureResult | null;
+  /** Measurements kept on screen alongside the live one (measure tool's "pin" action), newest last. */
+  pinnedMeasurements: MeasureResult[];
   layers: Layer[];
   activeLayer: string;
   /** Which tab (see DocSession) is currently shown; bump `sessionsVersion` after mutating the sessions array itself. */
@@ -373,6 +426,9 @@ interface AppState {
   setDuplicateIssues: (issues: DuplicateIssue[]) => void;
   setDuplicateOptions: (options: Partial<DuplicateOptions>) => void;
   setDuplicateFocus: (p: Point | null) => void;
+  /** Read-only findings from the most recent line-crossing scan — no auto-fix (see crossings.ts). */
+  crossingIssues: CrossingIssue[];
+  setCrossingIssues: (issues: CrossingIssue[]) => void;
   /** The group currently "entered" for editing individual members (double-click a group, Esc to exit). */
   enteredGroupId: GroupId | null;
   setEnteredGroup: (id: GroupId | null) => void;
@@ -400,6 +456,9 @@ interface AppState {
   setCursor: (cursor: { x: number; y: number } | null) => void;
   setZoom: (zoom: number) => void;
   setMeasurement: (measurement: MeasureResult | null) => void;
+  /** Adds the current live measurement to the pinned list (capped, drops the oldest). No-op if there's nothing live. */
+  pinMeasurement: () => void;
+  clearPinnedMeasurements: () => void;
   displayUnit: DisplayUnit;
   setDisplayUnit: (unit: DisplayUnit) => void;
   setActiveLayer: (name: string) => void;
@@ -409,6 +468,16 @@ interface AppState {
   toggleLayer: (name: string) => void;
   /** Rebuild the layer list from the document (used after DXF import). */
   syncLayersFromDoc: (reset?: boolean) => void;
+  /** Moves every entity onto the default layer and drops all other layer definitions, as one undo step. */
+  flattenLayers: () => void;
+  /** Removes every layer with no entities on it (never the default layer). */
+  deleteEmptyLayers: () => void;
+}
+
+/** entity with its `layer` field cleared (falls back to the default layer via layerOf). */
+function withoutLayer(e: Entity): Entity {
+  const { layer: _layer, ...rest } = e;
+  return rest as Entity;
 }
 
 export const useApp = create<AppState>((set, get) => ({
@@ -418,6 +487,7 @@ export const useApp = create<AppState>((set, get) => ({
   cursor: null,
   zoom: 1,
   measurement: null,
+  pinnedMeasurements: [],
   layers: [{ name: DEFAULT_LAYER, visible: true }],
   activeLayer: DEFAULT_LAYER,
   activeSessionId: sessions[0].id,
@@ -446,6 +516,8 @@ export const useApp = create<AppState>((set, get) => ({
   setDuplicateIssues: (duplicateIssues) => set({ duplicateIssues }),
   setDuplicateOptions: (options) => set((s) => ({ duplicateOptions: { ...s.duplicateOptions, ...options } })),
   setDuplicateFocus: (p) => set({ duplicateFocus: p }),
+  crossingIssues: [],
+  setCrossingIssues: (crossingIssues) => set({ crossingIssues }),
   enteredGroupId: null,
   setEnteredGroup: (id) => set({ enteredGroupId: id }),
   fileBrowserVisible: true,
@@ -464,6 +536,9 @@ export const useApp = create<AppState>((set, get) => ({
   setCursor: (cursor) => set({ cursor }),
   setZoom: (zoom) => set({ zoom }),
   setMeasurement: (measurement) => set({ measurement }),
+  pinMeasurement: () =>
+    set((s) => (s.measurement ? { pinnedMeasurements: [...s.pinnedMeasurements, s.measurement].slice(-5) } : s)),
+  clearPinnedMeasurements: () => set({ pinnedMeasurements: [] }),
   displayUnit: "mm",
   setDisplayUnit: (displayUnit) => set({ displayUnit }),
   setActiveLayer: (name) => set({ activeLayer: name }),
@@ -477,9 +552,13 @@ export const useApp = create<AppState>((set, get) => ({
     }),
   deleteLayer: (name) => {
     if (name === DEFAULT_LAYER) return; // the default layer is permanent
-    // Remove the layer's geometry as one undoable step.
-    const ids = doc.all().filter((e) => layerOf(e) === name).map((e) => e.id);
-    if (ids.length > 0) bus.execute({ type: "delete-entities", ids });
+    // Deleting a layer removes the grouping, not the geometry: its entities
+    // move to the default layer as one undoable step rather than being
+    // destroyed along with the layer.
+    const entities = doc.all().filter((e) => layerOf(e) === name);
+    if (entities.length > 0) {
+      bus.execute({ type: "batch", commands: entities.map((e) => ({ type: "update-entity", entity: withoutLayer(e) })) });
+    }
     set((s) => {
       const layers = s.layers.filter((l) => l.name !== name);
       const activeLayer = s.activeLayer === name ? DEFAULT_LAYER : s.activeLayer;
@@ -518,6 +597,21 @@ export const useApp = create<AppState>((set, get) => ({
       : DEFAULT_LAYER;
     set({ layers, activeLayer });
   },
+  flattenLayers: () => {
+    const toMove = doc.all().filter((e) => layerOf(e) !== DEFAULT_LAYER);
+    if (toMove.length > 0) {
+      bus.execute({ type: "batch", commands: toMove.map((e) => ({ type: "update-entity", entity: withoutLayer(e) })) });
+    }
+    set({ layers: [{ name: DEFAULT_LAYER, visible: true }], activeLayer: DEFAULT_LAYER });
+  },
+  deleteEmptyLayers: () => {
+    set((s) => {
+      const used = new Set(doc.all().map((e) => layerOf(e)));
+      const layers = s.layers.filter((l) => l.name === DEFAULT_LAYER || used.has(l.name));
+      const activeLayer = layers.some((l) => l.name === s.activeLayer) ? s.activeLayer : DEFAULT_LAYER;
+      return { layers, activeLayer };
+    });
+  },
 }));
 
 function syncFromBus(): void {
@@ -526,11 +620,16 @@ function syncFromBus(): void {
     return {
       revision: doc.revision,
       selection,
-      referenceEdgeId:
-        s.referenceEdgeId && selection.includes(s.referenceEdgeId) ? s.referenceEdgeId : null,
+      // The straighten tool's reference edge must stay part of the selection;
+      // the measure tool's angle-reference edge (Ctrl-click) isn't selection-bound,
+      // so it only needs to still exist.
+      referenceEdgeId: s.referenceEdgeId && doc.has(s.referenceEdgeId) && (s.tool === "measure" || selection.includes(s.referenceEdgeId))
+        ? s.referenceEdgeId
+        : null,
       // Drop findings that no longer make sense (their entities were edited/removed elsewhere).
       healIssues: s.healIssues.filter((issue) => issueEntityIds(issue).every((id) => doc.has(id))),
       duplicateIssues: s.duplicateIssues.filter((issue) => issue.entityIds.every((id) => doc.has(id))),
+      crossingIssues: s.crossingIssues.filter((issue) => issue.entityIds.every((id) => doc.has(id))),
     };
   });
   activeSession().dirty = true;
@@ -584,21 +683,28 @@ export function switchToSession(id: string): void {
     outgoing.selection = state.selection;
     outgoing.layers = state.layers;
     outgoing.activeLayer = state.activeLayer;
+    outgoing.displayUnit = state.displayUnit;
   }
-  const incoming = sessions.find((s) => s.id === id);
-  if (!incoming) return;
+  const incomingIdx = sessions.findIndex((s) => s.id === id);
+  if (incomingIdx === -1) return;
+  // Most-recently-used ordering: the tab being switched to moves to the front of the strip.
+  const [incoming] = sessions.splice(incomingIdx, 1);
+  sessions.unshift(incoming);
   useApp.setState({
     activeSessionId: id,
     selection: incoming.selection,
     layers: incoming.layers,
     activeLayer: incoming.activeLayer,
+    displayUnit: incoming.displayUnit,
     revision: incoming.doc.revision,
     // Tool-scoped state doesn't carry meaning across a document switch.
     referenceEdgeId: null,
     enteredGroupId: null,
     healIssues: [],
     duplicateIssues: [],
+    crossingIssues: [],
     measurement: null,
+    pinnedMeasurements: [],
     importReport: null,
   });
   rebindBus();

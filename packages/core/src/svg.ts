@@ -1,7 +1,7 @@
-import type { ArcEntity, CircleEntity, Entity, LineEntity } from "./entities";
-import { layerOf, newEntityId } from "./entities";
+import type { ArcEntity, CircleEntity, Entity, LineEntity, PolylineEntity } from "./entities";
+import { layerOf, newEntityId, polylineSegments } from "./entities";
 import type { Point } from "./geometry";
-import { arcPointAt, arcSweep, dist } from "./geometry";
+import { arcPointAt, arcSweep, bulgeToArc, dist } from "./geometry";
 import { boundsOf } from "./dxf";
 
 /**
@@ -40,6 +40,32 @@ function arcPathD(e: ArcEntity, toSvg: (p: Point) => Point): string {
     pts.push(`${i === 0 ? "M" : "L"}${fmt(p.x)} ${fmt(p.y)}`);
   }
   return pts.join(" ");
+}
+
+/** A polyline's segments (straight or bulge-arc) as one SVG path `d` attribute. */
+function polylinePathD(e: PolylineEntity, toSvg: (p: Point) => Point): string {
+  const parts: string[] = [];
+  polylineSegments(e).forEach((seg, i) => {
+    const a = toSvg(seg.a);
+    if (i === 0) parts.push(`M${fmt(a.x)} ${fmt(a.y)}`);
+    const bulgeArc = bulgeToArc(seg.a, seg.b, seg.bulge);
+    if (!bulgeArc) {
+      const b = toSvg(seg.b);
+      parts.push(`L${fmt(b.x)} ${fmt(b.y)}`);
+      return;
+    }
+    const sweep = arcSweep(bulgeArc.startAngle, bulgeArc.endAngle, bulgeArc.ccw);
+    const steps = Math.min(48, Math.max(2, Math.ceil((sweep / (2 * Math.PI)) * 96)));
+    for (let s = 1; s <= steps; s++) {
+      const t = bulgeArc.ccw
+        ? bulgeArc.startAngle + sweep * (s / steps)
+        : bulgeArc.startAngle - sweep * (s / steps);
+      const p = toSvg(arcPointAt(bulgeArc.center, bulgeArc.radius, t));
+      parts.push(`L${fmt(p.x)} ${fmt(p.y)}`);
+    }
+  });
+  if (e.closed) parts.push("Z");
+  return parts.join(" ");
 }
 
 /**
@@ -82,8 +108,10 @@ export function entitiesToSvgDocument(entities: Entity[], opts: SvgExportOptions
         // sized off stroke width (not to world scale) like a CAD PDMODE marker.
         const p = toSvg(e.p);
         body.push(`<circle cx="${fmt(p.x)}" cy="${fmt(p.y)}" r="${fmt(strokeWidth * 1.5)}" fill="${stroke}" stroke="none"/>`);
-      } else {
+      } else if (e.type === "arc") {
         body.push(`<path d="${arcPathD(e, toSvg)}"/>`);
+      } else {
+        body.push(`<path d="${polylinePathD(e, toSvg)}"/>`);
       }
     }
     groups.push(`<g data-layer="${escapeXml(layer)}">${body.join("")}</g>`);
@@ -227,10 +255,27 @@ function parsePathD(d: string, m: Mat, layer: string | undefined, out: Entity[],
   let cmd = "";
   let sawCurve = false;
   const num = () => parseFloat(tokens[i++]);
+
+  // Each subpath (a run between M commands, or split by Z) becomes ONE
+  // polyline entity — not one line entity per segment — so the whole shape
+  // stays selectable as a single thing.
+  let subpath: Point[] = [];
+  let subpathClosed = false;
+  const toWorld = (p: Point): Point => fromSvgPoint(applyMat(m, p.x, p.y));
+  const flush = () => {
+    if (subpath.length >= 2) {
+      const closed = subpathClosed && dist(subpath[0], subpath[subpath.length - 1]) < 1e-9;
+      const points = closed ? subpath.slice(0, -1) : subpath;
+      if (points.length >= 2) {
+        out.push({ id: newEntityId(), type: "polyline", ...(layer ? { layer } : {}), points, closed });
+      }
+    }
+    subpath = [];
+    subpathClosed = false;
+  };
   const line = (to: Point) => {
-    const a = applyMat(m, cur.x, cur.y);
-    const b = applyMat(m, to.x, to.y);
-    out.push({ id: newEntityId(), type: "line", ...(layer ? { layer } : {}), a: fromSvgPoint(a), b: fromSvgPoint(b) });
+    if (subpath.length === 0) subpath.push(toWorld(cur));
+    subpath.push(toWorld(to));
     cur = to;
   };
 
@@ -240,6 +285,7 @@ function parsePathD(d: string, m: Mat, layer: string | undefined, out: Entity[],
     const C = cmd.toUpperCase();
     switch (C) {
       case "M": {
+        flush(); // a new subpath starts — the previous one is done
         const x = num();
         const y = num();
         cur = relative ? { x: cur.x + x, y: cur.y + y } : { x, y };
@@ -264,6 +310,7 @@ function parsePathD(d: string, m: Mat, layer: string | undefined, out: Entity[],
         break;
       }
       case "Z": {
+        subpathClosed = true;
         line(start);
         break;
       }
@@ -282,7 +329,6 @@ function parsePathD(d: string, m: Mat, layer: string | undefined, out: Entity[],
           break;
         }
         const steps = Math.min(96, Math.max(2, Math.ceil((Math.abs(params.dtheta) / (2 * Math.PI)) * 96)));
-        let prev = cur;
         for (let s = 1; s <= steps; s++) {
           const t = params.theta1 + params.dtheta * (s / steps);
           const ex = params.rx * Math.cos(t);
@@ -290,10 +336,7 @@ function parsePathD(d: string, m: Mat, layer: string | undefined, out: Entity[],
           const cosPhi = Math.cos(params.phi);
           const sinPhi = Math.sin(params.phi);
           const p = { x: params.cx + ex * cosPhi - ey * sinPhi, y: params.cy + ex * sinPhi + ey * cosPhi };
-          const a = applyMat(m, prev.x, prev.y);
-          const b = applyMat(m, p.x, p.y);
-          out.push({ id: newEntityId(), type: "line", ...(layer ? { layer } : {}), a: fromSvgPoint(a), b: fromSvgPoint(b) });
-          prev = p;
+          line(p);
         }
         cur = to;
         break;
@@ -318,6 +361,7 @@ function parsePathD(d: string, m: Mat, layer: string | undefined, out: Entity[],
       }
     }
   }
+  flush();
   if (sawCurve) warn("a path used curves (C/S/Q/T) — approximated as straight segments");
 }
 
@@ -410,15 +454,13 @@ export function parseSvgText(text: string): SvgImportResult {
             { x: x + w, y: y + h },
             { x, y: y + h },
           ].map((p) => fromSvgPoint(applyMat(m, p.x, p.y)));
-          for (let k = 0; k < 4; k++) {
-            entities.push({
-              id: newEntityId(),
-              type: "line",
-              ...(layer ? { layer } : {}),
-              a: corners[k],
-              b: corners[(k + 1) % 4],
-            } as LineEntity);
-          }
+          entities.push({
+            id: newEntityId(),
+            type: "polyline",
+            ...(layer ? { layer } : {}),
+            points: corners,
+            closed: true,
+          });
           break;
         }
         case "polyline":
@@ -426,15 +468,14 @@ export function parseSvgText(text: string): SvgImportResult {
           const raw = (child.getAttribute("points") ?? "").trim().split(/[\s,]+/).map(Number);
           const pts: Point[] = [];
           for (let k = 0; k + 1 < raw.length; k += 2) pts.push(fromSvgPoint(applyMat(m, raw[k], raw[k + 1])));
-          const segs = child.tagName.toLowerCase() === "polygon" ? pts.length : pts.length - 1;
-          for (let k = 0; k < segs; k++) {
+          if (pts.length >= 2) {
             entities.push({
               id: newEntityId(),
-              type: "line",
+              type: "polyline",
               ...(layer ? { layer } : {}),
-              a: pts[k],
-              b: pts[(k + 1) % pts.length],
-            } as LineEntity);
+              points: pts,
+              closed: child.tagName.toLowerCase() === "polygon",
+            });
           }
           break;
         }

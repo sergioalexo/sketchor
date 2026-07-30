@@ -1,4 +1,4 @@
-import type { ArcEntity, CircleEntity, Entity, LineEntity, PointEntity } from "./entities";
+import type { ArcEntity, CircleEntity, Entity, LineEntity, PointEntity, PolylineEntity } from "./entities";
 import { layerOf } from "./entities";
 import { boundsOf } from "./dxf";
 
@@ -74,6 +74,20 @@ function pointEntity(e: PointEntity): string {
   return `0\nPOINT\n` + pair(8, layerOf(e)) + pair(10, e.p.x) + pair(20, e.p.y) + pair(30, 0);
 }
 
+/** As LWPOLYLINE (the inverse of dxf.ts's `lwpolylineVertices`/`emitPolylineWithBulges`). */
+function polylineEntity(e: PolylineEntity): string {
+  const verts = e.points
+    .map((p, i) => pair(10, p.x) + pair(20, p.y) + pair(30, 0) + pair(42, e.bulges?.[i] ?? 0))
+    .join("");
+  return (
+    `0\nLWPOLYLINE\n` +
+    pair(8, layerOf(e)) +
+    `90\n${e.points.length}\n` +
+    `70\n${e.closed ? 1 : 0}\n` +
+    verts
+  );
+}
+
 function entityDxf(e: Entity): string {
   switch (e.type) {
     case "line":
@@ -84,6 +98,8 @@ function entityDxf(e: Entity): string {
       return arcEntity(e);
     case "point":
       return pointEntity(e);
+    case "polyline":
+      return polylineEntity(e);
   }
 }
 

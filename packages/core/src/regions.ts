@@ -1,5 +1,6 @@
 import type { Entity, EntityId } from "./entities";
-import { arcPointAt, arcSweep, dist, type Point } from "./geometry";
+import { polylineSegments } from "./entities";
+import { arcPointAt, arcSweep, bulgeToArc, dist, type Point } from "./geometry";
 
 /**
  * Finds simple closed loops in a drawing — circles (trivially, on their
@@ -30,6 +31,22 @@ interface EdgeRef {
   path: Point[];
 }
 
+/** A single segment (straight or bulge-arc) tessellated from `a` to `b` inclusive. */
+function segmentPath(a: Point, b: Point, bulge: number): Point[] {
+  const bulgeArc = bulgeToArc(a, b, bulge);
+  if (!bulgeArc) return [a, b];
+  const sweep = arcSweep(bulgeArc.startAngle, bulgeArc.endAngle, bulgeArc.ccw);
+  const steps = Math.min(64, Math.max(4, Math.ceil((sweep / (2 * Math.PI)) * 64)));
+  const path: Point[] = [];
+  for (let i = 0; i <= steps; i++) {
+    const t = bulgeArc.ccw
+      ? bulgeArc.startAngle + sweep * (i / steps)
+      : bulgeArc.startAngle - sweep * (i / steps);
+    path.push(arcPointAt(bulgeArc.center, bulgeArc.radius, t));
+  }
+  return path;
+}
+
 function edgesOf(entities: Entity[]): EdgeRef[] {
   const edges: EdgeRef[] = [];
   for (const e of entities) {
@@ -44,8 +61,16 @@ function edgesOf(entities: Entity[]): EdgeRef[] {
         path.push(arcPointAt(e.center, e.radius, t));
       }
       edges.push({ entityId: e.id, a: path[0], b: path[path.length - 1], path });
+    } else if (e.type === "polyline" && !e.closed) {
+      // An open polyline contributes one edge per segment, so its two loose
+      // ends can still join up with other lines/arcs into a closed loop.
+      for (const seg of polylineSegments(e)) {
+        edges.push({ entityId: e.id, a: seg.a, b: seg.b, path: segmentPath(seg.a, seg.b, seg.bulge) });
+      }
     }
-    // Circles are handled separately (always their own region); points contribute no edges.
+    // Circles and closed polylines are always their own region (handled
+    // separately, see polylineRegion); circles/points/closed-polylines
+    // otherwise contribute no chainable edges.
   }
   return edges;
 }
@@ -135,10 +160,22 @@ function circleRegion(id: EntityId, center: Point, radius: number): ClosedRegion
   return { entityIds: [id], points, area: Math.PI * radius * radius };
 }
 
+/** A closed polyline is always its own region — no chaining needed, it already loops back on itself. */
+function polylineRegion(entity: Extract<Entity, { type: "polyline" }>): ClosedRegion {
+  const points: Point[] = [];
+  const segs = polylineSegments(entity);
+  segs.forEach((seg, i) => {
+    const path = segmentPath(seg.a, seg.b, seg.bulge);
+    points.push(...(i === 0 ? path : path.slice(1)));
+  });
+  return { entityIds: [entity.id], points, area: Math.abs(shoelaceArea(points)) };
+}
+
 export function findClosedRegions(entities: Entity[], tolerance = 1e-3): ClosedRegion[] {
   const regions: ClosedRegion[] = [];
   for (const e of entities) {
     if (e.type === "circle") regions.push(circleRegion(e.id, e.center, e.radius));
+    else if (e.type === "polyline" && e.closed) regions.push(polylineRegion(e));
   }
 
   const edges = edgesOf(entities);

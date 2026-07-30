@@ -1,7 +1,7 @@
 import type { Entity } from "./entities";
-import { newEntityId } from "./entities";
+import { newEntityId, polylineSegments } from "./entities";
 import type { Point } from "./geometry";
-import { arcExtentPoints, arcPointAt, arcSweep } from "./geometry";
+import { arcExtentPoints, arcPointAt, arcSweep, bulgeToArc, dist } from "./geometry";
 import { textToStrokes } from "./font";
 
 /**
@@ -39,10 +39,10 @@ function tokenize(text: string): Pair[] {
   return pairs;
 }
 
-/** Collects raw entities from the ENTITIES section (and any BLOCK bodies). */
-function collectRawEntities(pairs: Pair[]): RawEntity[] {
+/** Collects raw records from one named section (ENTITIES, BLOCKS, ...), in document order. */
+function collectSectionRecords(pairs: Pair[], section: string): RawEntity[] {
   const raws: RawEntity[] = [];
-  let inEntities = false;
+  let inSection = false;
   let current: RawEntity | null = null;
 
   for (let i = 0; i < pairs.length; i++) {
@@ -51,16 +51,16 @@ function collectRawEntities(pairs: Pair[]): RawEntity[] {
 
     if (code === 0 && v === "SECTION") {
       const name = pairs[i + 1]?.value.trim();
-      inEntities = name === "ENTITIES";
+      inSection = name === section;
       continue;
     }
     if (code === 0 && v === "ENDSEC") {
       if (current) raws.push(current);
       current = null;
-      inEntities = false;
+      inSection = false;
       continue;
     }
-    if (!inEntities) continue;
+    if (!inSection) continue;
 
     if (code === 0) {
       if (current) raws.push(current);
@@ -71,6 +71,43 @@ function collectRawEntities(pairs: Pair[]): RawEntity[] {
   }
   if (current) raws.push(current);
   return raws;
+}
+
+/** Collects raw entities from the ENTITIES section. */
+function collectRawEntities(pairs: Pair[]): RawEntity[] {
+  return collectSectionRecords(pairs, "ENTITIES");
+}
+
+/** A reusable block definition from the BLOCKS section — its body plus the base point that lands on an INSERT's insertion point. */
+interface BlockDef {
+  base: Point;
+  body: RawEntity[];
+}
+
+/**
+ * Parses the BLOCKS section into named, reusable definitions. A block's
+ * geometry is written in its own coordinate space; `base` (the BLOCK
+ * record's code 10/20) is the origin that gets placed at each INSERT's
+ * insertion point.
+ */
+function collectBlocks(pairs: Pair[]): Map<string, BlockDef> {
+  const blocks = new Map<string, BlockDef>();
+  let name: string | null = null;
+  let def: BlockDef | null = null;
+
+  for (const raw of collectSectionRecords(pairs, "BLOCKS")) {
+    if (raw.type === "BLOCK") {
+      name = str(raw, 2, "");
+      def = { base: { x: num(raw, 10), y: num(raw, 20) }, body: [] };
+      if (name) blocks.set(name, def);
+    } else if (raw.type === "ENDBLK") {
+      name = null;
+      def = null;
+    } else if (def) {
+      def.body.push(raw);
+    }
+  }
+  return blocks;
 }
 
 /**
@@ -109,9 +146,27 @@ function line(a: Point, b: Point, layer?: string): Entity {
   return { id: newEntityId(), type: "line", a, b, ...(layer ? { layer } : {}) };
 }
 
-/** Emits a polyline through `pts` as individual line entities. */
+/** Builds one polyline entity from `points`, or null if there aren't enough points to draw anything. */
+function polylineEntity(points: Point[], closed: boolean, bulges: number[] | undefined, layer?: string): Entity | null {
+  if (points.length < 2) return null;
+  const hasBulge = bulges?.some((b) => Math.abs(b) > 1e-9);
+  return {
+    id: newEntityId(),
+    type: "polyline",
+    points,
+    closed,
+    ...(hasBulge ? { bulges } : {}),
+    ...(layer ? { layer } : {}),
+  };
+}
+
+/** Emits a tessellated point run (SPLINE, ELLIPSE, a text stroke, ...) as one polyline entity — auto-closes if the first and last points coincide. */
 function polyline(pts: Point[], out: Entity[], layer?: string): void {
-  for (let i = 0; i + 1 < pts.length; i++) out.push(line(pts[i], pts[i + 1], layer));
+  if (pts.length < 2) return;
+  const closed = pts.length > 2 && dist(pts[0], pts[pts.length - 1]) < 1e-6;
+  const points = closed ? pts.slice(0, -1) : pts;
+  const entity = polylineEntity(points, closed, undefined, layer);
+  if (entity) out.push(entity);
 }
 
 function arc(
@@ -137,32 +192,6 @@ function arc(
 /** DXF ARC (angles in degrees, always swept counterclockwise from code 50 to code 51). */
 function dxfArc(cx: number, cy: number, r: number, a0deg: number, a1deg: number, layer?: string): Entity {
   return arc({ x: cx, y: cy }, r, (a0deg * Math.PI) / 180, (a1deg * Math.PI) / 180, true, layer);
-}
-
-/**
- * A polyline segment defined by a DXF *bulge* (the tangent of a quarter of
- * the arc's included angle) between two vertices — a zero bulge is a
- * straight segment, a nonzero one a real first-class arc between a and b.
- */
-function bulgeToEntity(a: Point, b: Point, bulge: number, layer?: string): Entity {
-  if (!bulge || Math.abs(bulge) < 1e-9) return line(a, b, layer);
-  const theta = 4 * Math.atan(bulge); // signed included angle (CCW positive)
-  const dx = b.x - a.x;
-  const dy = b.y - a.y;
-  const chord = Math.hypot(dx, dy);
-  if (chord < 1e-9) return line(a, b, layer);
-  const r = chord / (2 * Math.sin(theta / 2)); // signed radius
-  const m = r * Math.cos(theta / 2); // midpoint -> center distance
-  const midx = (a.x + b.x) / 2;
-  const midy = (a.y + b.y) / 2;
-  const nx = -dy / chord; // left normal of the chord
-  const ny = dx / chord;
-  const cx = midx + nx * m;
-  const cy = midy + ny * m;
-  const rad = Math.abs(r);
-  const a0 = Math.atan2(a.y - cy, a.x - cx);
-  const a1 = Math.atan2(b.y - cy, b.x - cx);
-  return arc({ x: cx, y: cy }, rad, a0, a1, theta >= 0, layer);
 }
 
 /** DXF ELLIPSE -> polyline. Major axis is an endpoint relative to center. */
@@ -226,19 +255,14 @@ function lwpolylineVertices(raw: RawEntity): Vertex[] {
   return verts;
 }
 
-/** Emits polyline segments, turning any bulged segment into a first-class arc. */
-function emitPolylineWithBulges(
-  verts: Vertex[],
-  closed: boolean,
-  out: Entity[],
-  layer?: string,
-): void {
-  const segs = closed ? verts.length : verts.length - 1;
-  for (let i = 0; i < segs; i++) {
-    const a = verts[i];
-    const b = verts[(i + 1) % verts.length];
-    out.push(bulgeToEntity({ x: a.x, y: a.y }, { x: b.x, y: b.y }, a.bulge, layer));
-  }
+/** Builds one polyline entity from LWPOLYLINE/POLYLINE vertices, preserving each segment's bulge (curved segments stay real arcs on render/export). */
+function emitPolylineWithBulges(verts: Vertex[], closed: boolean, out: Entity[], layer?: string): void {
+  if (verts.length < 2) return;
+  const points = verts.map((v) => ({ x: v.x, y: v.y }));
+  // A vertex's bulge belongs to the segment leaving it; the last vertex's bulge only matters for the closing segment.
+  const bulges = closed ? verts.map((v) => v.bulge) : verts.slice(0, -1).map((v) => v.bulge);
+  const entity = polylineEntity(points, closed, bulges, layer);
+  if (entity) out.push(entity);
 }
 
 /* ------------------------- SPLINE tessellation ------------------------ */
@@ -346,15 +370,106 @@ export interface DxfParseResult {
   insUnits: number;
 }
 
-export function parseDxf(text: string): DxfParseResult {
-  const warnings: string[] = [];
+/**
+ * Places a block's entity into world space for one INSERT:
+ * `world = insertion + Rz(rotation) · S(sx, sy) · (blockPoint − base)`.
+ * Always assigns a fresh id, so the same definition can be stamped many times.
+ *
+ * Non-uniform scaling of a circle/arc is really an ellipse, which the entity
+ * model can't express — those fall back to the geometric-mean radius and warn.
+ * A negative scale on one axis mirrors, which flips an arc's sweep direction.
+ */
+function placeEntity(
+  entity: Entity,
+  base: Point,
+  insertion: Point,
+  sx: number,
+  sy: number,
+  rotation: number,
+  warn: (msg: string) => void,
+): Entity {
+  const cos = Math.cos(rotation);
+  const sin = Math.sin(rotation);
+  const map = (p: Point): Point => {
+    const x = (p.x - base.x) * sx;
+    const y = (p.y - base.y) * sy;
+    return { x: insertion.x + x * cos - y * sin, y: insertion.y + x * sin + y * cos };
+  };
+  const mirrored = sx * sy < 0;
+  const radiusScale = Math.sqrt(Math.abs(sx * sy));
+  const id = newEntityId();
+
+  switch (entity.type) {
+    case "line":
+      return { ...entity, id, a: map(entity.a), b: map(entity.b) };
+    case "point":
+      return { ...entity, id, p: map(entity.p) };
+    case "polyline":
+      // Bulge is a signed ratio of the included angle: mirroring reverses the
+      // sweep, so each bulge flips sign; scaling leaves the angle unchanged.
+      return {
+        ...entity,
+        id,
+        points: entity.points.map(map),
+        ...(entity.bulges ? { bulges: mirrored ? entity.bulges.map((b) => -b) : entity.bulges } : {}),
+      };
+    case "circle": {
+      if (Math.abs(Math.abs(sx) - Math.abs(sy)) > 1e-9) {
+        warn("a block was inserted with non-uniform scale — its circles/arcs are approximated as circular");
+      }
+      return { ...entity, id, center: map(entity.center), radius: entity.radius * radiusScale };
+    }
+    case "arc": {
+      if (Math.abs(Math.abs(sx) - Math.abs(sy)) > 1e-9) {
+        warn("a block was inserted with non-uniform scale — its circles/arcs are approximated as circular");
+      }
+      // Re-derive the endpoints through the same map, so rotation and any
+      // mirroring land correctly without special-casing each reflection axis.
+      const center = map(entity.center);
+      const startPt = map(arcPointAt(entity.center, entity.radius, entity.startAngle));
+      const endPt = map(arcPointAt(entity.center, entity.radius, entity.endAngle));
+      return {
+        ...entity,
+        id,
+        center,
+        radius: entity.radius * radiusScale,
+        startAngle: Math.atan2(startPt.y - center.y, startPt.x - center.x),
+        endAngle: Math.atan2(endPt.y - center.y, endPt.x - center.x),
+        ccw: mirrored ? !entity.ccw : entity.ccw,
+      };
+    }
+  }
+}
+
+/** Nested INSERTs are legal; this caps how deep instantiation will follow them. */
+const MAX_BLOCK_DEPTH = 8;
+
+interface ConvertContext {
+  blocks: Map<string, BlockDef>;
+  warnings: string[];
+  depth: number;
+  /** Block names currently being instantiated, to break self-referential definitions. */
+  stack: ReadonlySet<string>;
+  /**
+   * The layer of the INSERT that's instantiating these records, if any.
+   * Entities drawn on layer "0" inside a block inherit the INSERT's layer —
+   * standard DXF behavior, and what makes block geometry respect the layer
+   * it was placed on.
+   */
+  insertLayer?: string;
+}
+
+/**
+ * Converts a run of raw DXF records into entities. Used for the ENTITIES
+ * section and, recursively, for each block body an INSERT instantiates.
+ */
+function convertRecords(raws: RawEntity[], ctx: ConvertContext): Entity[] {
   const entities: Entity[] = [];
-  const allPairs = tokenize(text);
-  const insUnits = parseInsUnits(allPairs);
-  const raws = collectRawEntities(allPairs);
+  const warnings = ctx.warnings;
 
   for (const raw of raws) {
-    const layer = str(raw, 8, "0") || "0";
+    const rawLayer = str(raw, 8, "0") || "0";
+    const layer = rawLayer === "0" && ctx.insertLayer ? ctx.insertLayer : rawLayer;
     switch (raw.type) {
       case "LINE":
         entities.push(
@@ -429,6 +544,57 @@ export function parseDxf(text: string): DxfParseResult {
         }
         break;
       }
+      case "INSERT": {
+        const name = str(raw, 2, "");
+        const block = ctx.blocks.get(name);
+        if (!block) {
+          warnings.push(`a block reference points at a missing block definition ('${name}')`);
+          break;
+        }
+        if (ctx.stack.has(name)) {
+          warnings.push(`block '${name}' inserts itself — skipped to avoid infinite nesting`);
+          break;
+        }
+        if (ctx.depth >= MAX_BLOCK_DEPTH) {
+          warnings.push(`blocks nested deeper than ${MAX_BLOCK_DEPTH} levels were not expanded`);
+          break;
+        }
+
+        const insertion = { x: num(raw, 10), y: num(raw, 20) };
+        const sx = num(raw, 41, 1) || 1;
+        const sy = num(raw, 42, 1) || 1;
+        const rotation = (num(raw, 50, 0) * Math.PI) / 180;
+        // A single INSERT can stamp a rectangular array of copies.
+        const cols = Math.max(1, Math.round(num(raw, 70, 1)) || 1);
+        const rows = Math.max(1, Math.round(num(raw, 71, 1)) || 1);
+        const colSpacing = num(raw, 44, 0);
+        const rowSpacing = num(raw, 45, 0);
+
+        // Convert the body once, then stamp transformed copies (fresh ids each).
+        const body = convertRecords(block.body, {
+          ...ctx,
+          depth: ctx.depth + 1,
+          stack: new Set([...ctx.stack, name]),
+          insertLayer: layer,
+        });
+        const cos = Math.cos(rotation);
+        const sin = Math.sin(rotation);
+        for (let c = 0; c < cols; c++) {
+          for (let r = 0; r < rows; r++) {
+            // Array offsets are along the INSERT's own rotated axes.
+            const ox = c * colSpacing;
+            const oy = r * rowSpacing;
+            const at = {
+              x: insertion.x + ox * cos - oy * sin,
+              y: insertion.y + ox * sin + oy * cos,
+            };
+            for (const e of body) {
+              entities.push(placeEntity(e, block.base, at, sx, sy, rotation, (m) => warnings.push(m)));
+            }
+          }
+        }
+        break;
+      }
       // POLYLINE / VERTEX / SEQEND are handled in the legacy second pass below.
       default:
         if (!KNOWN_IGNORED.has(raw.type)) {
@@ -438,7 +604,19 @@ export function parseDxf(text: string): DxfParseResult {
   }
 
   // Second pass for legacy POLYLINE/VERTEX sequences.
-  stitchLegacyPolylines(raws, entities);
+  stitchLegacyPolylines(raws, entities, ctx.insertLayer);
+
+  return entities;
+}
+
+export function parseDxf(text: string): DxfParseResult {
+  const warnings: string[] = [];
+  const allPairs = tokenize(text);
+  const insUnits = parseInsUnits(allPairs);
+  const raws = collectRawEntities(allPairs);
+  const blocks = collectBlocks(allPairs);
+
+  const entities = convertRecords(raws, { blocks, warnings, depth: 0, stack: new Set() });
 
   return { entities, warnings: dedupe(warnings), report: buildImportReport(raws), insUnits };
 }
@@ -454,14 +632,17 @@ const SUPPORTED_TYPES = new Set([
   "MTEXT",
   "POLYLINE",
   "POINT",
+  "INSERT",
 ]);
 
 /** Tallies raw DXF entity types into parsed/skipped buckets for the import report. */
 function buildImportReport(raws: RawEntity[]): DxfImportReport {
   const counts = new Map<string, number>();
   for (const raw of raws) {
-    // VERTEX/SEQEND are sub-records of a POLYLINE, not distinct entities to report.
-    if (raw.type === "VERTEX" || raw.type === "SEQEND") continue;
+    // Records that aren't drawable geometry in the first place (POLYLINE's own
+    // VERTEX/SEQEND sub-records, paper-space VIEWPORTs) aren't losses, so they
+    // don't belong in either bucket.
+    if (raw.type === "POLYLINE" ? false : KNOWN_IGNORED.has(raw.type)) continue;
     counts.set(raw.type, (counts.get(raw.type) ?? 0) + 1);
   }
   const parsed: { type: string; count: number }[] = [];
@@ -474,13 +655,19 @@ function buildImportReport(raws: RawEntity[]): DxfImportReport {
   return { parsed, skipped };
 }
 
-const KNOWN_IGNORED = new Set(["SEQEND", "POLYLINE", "VERTEX"]);
+/**
+ * Records that carry no drawable geometry, so they're skipped without a
+ * warning. POLYLINE/VERTEX/SEQEND are handled by the legacy second pass;
+ * VIEWPORT and paper-space layout records describe *how* a drawing is
+ * presented on a sheet, not what it contains.
+ */
+const KNOWN_IGNORED = new Set(["SEQEND", "POLYLINE", "VERTEX", "VIEWPORT"]);
 
 function dedupe(list: string[]): string[] {
   return [...new Set(list)];
 }
 
-function stitchLegacyPolylines(raws: RawEntity[], entities: Entity[]): void {
+function stitchLegacyPolylines(raws: RawEntity[], entities: Entity[], insertLayer?: string): void {
   let verts: Vertex[] | null = null;
   let closed = false;
   let layer = "0";
@@ -496,7 +683,8 @@ function stitchLegacyPolylines(raws: RawEntity[], entities: Entity[]): void {
       flush();
       verts = [];
       closed = (num(raw, 70) & 1) === 1;
-      layer = str(raw, 8, "0") || "0";
+      const own = str(raw, 8, "0") || "0";
+      layer = own === "0" && insertLayer ? insertLayer : own;
     } else if (raw.type === "VERTEX" && verts) {
       verts.push({ x: num(raw, 10), y: num(raw, 20), bulge: num(raw, 42) });
     } else if (raw.type === "SEQEND") {
@@ -535,9 +723,20 @@ export function boundsOf(entities: Entity[]): Bounds | null {
       acc(e.center.x + e.radius, e.center.y + e.radius);
     } else if (e.type === "point") {
       acc(e.p.x, e.p.y);
-    } else {
+    } else if (e.type === "arc") {
       for (const p of arcExtentPoints(e.center, e.radius, e.startAngle, e.endAngle, e.ccw)) {
         acc(p.x, p.y);
+      }
+    } else {
+      for (const seg of polylineSegments(e)) {
+        acc(seg.a.x, seg.a.y);
+        acc(seg.b.x, seg.b.y);
+        const bulgeArc = bulgeToArc(seg.a, seg.b, seg.bulge);
+        if (bulgeArc) {
+          for (const p of arcExtentPoints(bulgeArc.center, bulgeArc.radius, bulgeArc.startAngle, bulgeArc.endAngle, bulgeArc.ccw)) {
+            acc(p.x, p.y);
+          }
+        }
       }
     }
   }
@@ -589,7 +788,7 @@ export function entitiesToSvg(entities: Entity[], opts: ThumbnailOptions = {}): 
         );
       } else if (e.type === "point") {
         body.push(`<circle cx="${f(sx(e.p.x))}" cy="${f(sy(e.p.y))}" r="1.5" fill="${stroke}"/>`);
-      } else {
+      } else if (e.type === "arc") {
         // Tessellated for display only — the document keeps the arc as one entity.
         const sweep = arcSweep(e.startAngle, e.endAngle, e.ccw);
         const steps = Math.min(64, Math.max(2, Math.ceil((sweep / (2 * Math.PI)) * 64)));
@@ -601,6 +800,28 @@ export function entitiesToSvg(entities: Entity[], opts: ThumbnailOptions = {}): 
           const p = arcPointAt(e.center, e.radius, t);
           d.push(`${i === 0 ? "M" : "L"}${f(sx(p.x))} ${f(sy(p.y))}`);
         }
+        body.push(`<path d="${d.join(" ")}" fill="none"/>`);
+      } else {
+        // Tessellated for display only — the document keeps each segment's true geometry (line or bulge-arc).
+        const d: string[] = [];
+        polylineSegments(e).forEach((seg, i) => {
+          if (i === 0) d.push(`M${f(sx(seg.a.x))} ${f(sy(seg.a.y))}`);
+          const bulgeArc = bulgeToArc(seg.a, seg.b, seg.bulge);
+          if (!bulgeArc) {
+            d.push(`L${f(sx(seg.b.x))} ${f(sy(seg.b.y))}`);
+            return;
+          }
+          const sweep = arcSweep(bulgeArc.startAngle, bulgeArc.endAngle, bulgeArc.ccw);
+          const steps = Math.min(32, Math.max(2, Math.ceil((sweep / (2 * Math.PI)) * 64)));
+          for (let s = 1; s <= steps; s++) {
+            const t = bulgeArc.ccw
+              ? bulgeArc.startAngle + sweep * (s / steps)
+              : bulgeArc.startAngle - sweep * (s / steps);
+            const p = arcPointAt(bulgeArc.center, bulgeArc.radius, t);
+            d.push(`L${f(sx(p.x))} ${f(sy(p.y))}`);
+          }
+        });
+        if (e.closed) d.push("Z");
         body.push(`<path d="${d.join(" ")}" fill="none"/>`);
       }
     }

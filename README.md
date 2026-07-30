@@ -15,13 +15,33 @@ npm run desktop    # native desktop window via Tauri (needs Rust toolchain)
 | Action | Input |
 |---|---|
 | Line tool | `L` — click points to chain, `Esc` to finish |
+| Polyline tool | `W` — click each vertex; `Enter` or double-click finishes, `C` closes the shape, `Backspace` undoes a vertex |
 | Circle tool | `C` — click center, then a point on the circle |
 | Select tool | `V` — click (Shift adds), drag to move, `Del` deletes |
+| Measure tool | `M` — see below |
 | Pan | middle- or right-button drag |
 | Zoom | mouse wheel (at cursor) |
+| Save / Save As | `Ctrl+S` overwrites the tab's file; the Save menu has Save As and Save a Copy |
 | Undo / Redo | `Ctrl+Z` / `Ctrl+Y` |
 
-Snapping is automatic: endpoints, midpoints, centers, quadrants, then grid.
+Snapping is automatic, in priority order: endpoints, centers, quadrants and
+**intersections**, then midpoints, then the nearest point **along** a
+line/segment, then the grid.
+
+### Measure tool
+
+A plain click measures point-to-point using the snaps above. The modifiers
+cover whole-entity and reference measurements:
+
+| Action | Input |
+|---|---|
+| Distance between two points | click, then click |
+| Whole length / radius of one entity | `Alt`-click it (arcs also report arc length) |
+| Running total across lines *and* arcs | `Shift`+`Alt`-click each one |
+| Area **and perimeter** of a closed region | click inside it |
+| Angle relative to a chosen edge | `Ctrl`-click a line to set the reference |
+| Keep a measurement on screen | `Enter` (up to 5 pinned) |
+| Copy the readout | `Ctrl+C` |
 
 ## Architecture
 
@@ -52,9 +72,14 @@ sketch v1
 line L1 from (0, 0) to (100, 0)
 line L2 from (100, 0) to (100, 60)
 circle C1 at (50, 30) r 15
+polyline PL1 pts (0, 0) (40, 0) (40, 30) closed
 ```
 
-Every entity has a stable handle (`L1`, `C1`, ...). Editing is a *diff*:
+Code doesn't express a polyline's per-segment arc bulge (just as it doesn't
+express layers) — both are preserved through an edit rather than lost, but a
+bulged segment reads as straight in the text.
+
+Every entity has a stable handle (`L1`, `C1`, `PL1`, ...). Editing is a *diff*:
 matching names are updated in place (keeping their identity and undo
 history), new names are added, and dropped names are deleted — so an edit
 that changes one number moves exactly one entity.
@@ -79,7 +104,12 @@ dim L1 length = width      # driven/driving dimension
 Sketchor has no proprietary file format — everything is a standard interchange
 format:
 
-- **DXF** — read/write (`packages/core/src/dxf.ts` + `dxfExport.ts`).
+- **DXF** — read/write (`packages/core/src/dxf.ts` + `dxfExport.ts`). Reads
+  LINE, CIRCLE, ARC, POINT, ELLIPSE, LWPOLYLINE/POLYLINE (including bulged
+  arc segments), SPLINE, TEXT/MTEXT, and **INSERT** — block references are
+  expanded with their insertion point, scale, rotation and row/column arrays,
+  including blocks nested inside other blocks. Geometry drawn on layer `0`
+  inside a block inherits the layer the block was placed on, as CAD expects.
 - **SVG** — read/write, dimensionally accurate 1:1 world units
   (`packages/core/src/svg.ts`).
 - **DWG** — read-only, via a GPL-3.0 WebAssembly build of GNU LibreDWG (see
@@ -92,6 +122,25 @@ in the browser and in Tauri's WebView2, with a download / file-input fallback
 elsewhere. Opening a file that's already open in a tab switches to that tab
 (and reloads it) instead of opening a duplicate.
 
+### The file browser
+
+The left panel browses a folder of drawings as geometry thumbnails. It sorts
+by name or date, switches between the thumbnail grid and a list view with
+Name / Modified / Size columns, and filters as you type (`Ctrl+F`).
+
+Files can be **tagged** (right-click one, or select several and use **Tag…**);
+the tag chips along the top filter the list, and multiple active tags narrow
+rather than widen. Tags persist in `localStorage`, keyed by full path on the
+desktop build and by filename in the browser — the File System Access API's
+handles aren't a durable identifier across sessions, so in the browser two
+same-named files from different folders share tags.
+
+**Dragging a file out** of the panel copies it to the desktop, Explorer, or
+another app. This rides Chromium's `DownloadURL` drag protocol (also honored
+by Tauri's WebView2); other engines get a `text/plain` fallback. That protocol
+carries one file per drag, which is why selecting several and pressing
+**Export** — not a multi-file drag — is how you get a batch out.
+
 On Windows, `native/dxf-thumbnailer/` is a Rust COM shell extension that makes
 Explorer render a **preview of the geometry** — not just the app icon — as the
 `.dxf` file thumbnail (and, when installed elevated, in the reading pane).
@@ -99,7 +148,10 @@ Install it per-user with `native/dxf-thumbnailer/install-thumbnailer.ps1`.
 
 ## Roadmap
 
-1. **More geometry** — arcs, polylines, rectangles; trim/extend/offset.
+1. **More geometry** — rectangles; trim/extend/offset. (Arcs and polylines are
+   done: a polyline is one entity with optional per-segment arc bulge, so an
+   imported spline or polyline selects as a single object rather than N
+   segments.)
 2. **Parametric constraints** — integrate `planegcs` (FreeCAD's 2D
    constraint solver, compiled to WASM, available on npm). Constraints
    (coincident, parallel, tangent, dimensions) become part of the document;

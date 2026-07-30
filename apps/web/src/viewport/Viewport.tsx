@@ -1,10 +1,13 @@
 import { useEffect, useRef } from "react";
 import type { BoxSelectMode, ClosedRegion, Entity, EntityId, Point } from "@sketchor/core";
 import {
+  arcSweep,
   boundsOf,
+  bulgeToArc,
   dist,
   distToArc,
   distToSegment,
+  polylineSegments,
   entitiesInBox,
   findClosedRegions,
   freeEndpointEntityIds,
@@ -13,6 +16,7 @@ import {
   layerOf,
   newEntityId,
   nextEntityName,
+  polylineLength,
   wholeGroupSelected,
 } from "@sketchor/core";
 import {
@@ -23,11 +27,13 @@ import {
   getSessionView,
   groupSelection,
   hiddenLayerSet,
+  measurementText,
+  referenceEdgeAngleDeg,
   setSessionView,
   ungroupSelection,
   useApp,
 } from "../state/store";
-import { openDrawing, saveDrawing } from "../io/drawingFile";
+import { openDrawing, saveCurrent } from "../io/drawingFile";
 import { formatArea, formatLength } from "../units";
 import { render } from "./renderer";
 import { findSnap, type Snap } from "./snapping";
@@ -37,6 +43,7 @@ type Interaction =
   | { kind: "idle" }
   | { kind: "pan"; lastX: number; lastY: number }
   | { kind: "draw-line"; start: Point }
+  | { kind: "draw-polyline"; points: Point[] }
   | { kind: "draw-circle"; center: Point }
   | { kind: "measure"; start: Point }
   | { kind: "move"; ids: EntityId[]; startWorld: Point; dx: number; dy: number }
@@ -71,7 +78,24 @@ function hitTest(view: View, world: Point): EntityId | null {
           ? Math.abs(dist(world, e.center) - e.radius)
           : e.type === "point"
             ? dist(world, e.p)
-            : distToArc(world, e.center, e.radius, e.startAngle, e.endAngle, e.ccw);
+            : e.type === "arc"
+              ? distToArc(world, e.center, e.radius, e.startAngle, e.endAngle, e.ccw)
+              : // Polyline: whichever of its segments the cursor is nearest to.
+                Math.min(
+                  ...polylineSegments(e).map((seg) => {
+                    const bulgeArc = bulgeToArc(seg.a, seg.b, seg.bulge);
+                    return bulgeArc
+                      ? distToArc(
+                          world,
+                          bulgeArc.center,
+                          bulgeArc.radius,
+                          bulgeArc.startAngle,
+                          bulgeArc.endAngle,
+                          bulgeArc.ccw,
+                        )
+                      : distToSegment(world, seg.a, seg.b);
+                  }),
+                );
     if (d <= bestDist) {
       best = e.id;
       bestDist = d;
@@ -85,6 +109,7 @@ export function Viewport() {
   const viewRef = useRef<View>({ scale: 2, ox: 0, oy: 0 });
   const interactionRef = useRef<Interaction>({ kind: "idle" });
   const snapRef = useRef<Snap | null>(null);
+  const hoverRef = useRef<EntityId | null>(null);
   const closedRegionsRef = useRef<ClosedRegion[]>([]);
   const tool = useApp((s) => s.tool);
   const selection = useApp((s) => s.selection);
@@ -119,6 +144,10 @@ export function Viewport() {
         center: interaction.center,
         radius: dist(interaction.center, snap.point),
       };
+    } else if (interaction.kind === "draw-polyline") {
+      // Committed vertices plus a rubber-band leg to the cursor.
+      const points = snap ? [...interaction.points, snap.point] : interaction.points;
+      if (points.length >= 2) preview = { id: "preview", type: "polyline", points, closed: false };
     }
 
     const straightenPlan = state.tool === "straighten" ? computeStraightenTransform() : null;
@@ -142,8 +171,10 @@ export function Viewport() {
       moveOffset:
         interaction.kind === "move" ? { dx: interaction.dx, dy: interaction.dy } : null,
       measurement: state.measurement,
+      pinnedMeasurements: state.pinnedMeasurements,
       hiddenLayers: hiddenLayerSet(),
-      referenceEdgeId: state.tool === "straighten" ? state.referenceEdgeId : null,
+      referenceEdgeId: state.tool === "straighten" || state.tool === "measure" ? state.referenceEdgeId : null,
+      hoverId: state.tool === "measure" ? hoverRef.current : null,
       transformPreview: rotating
         ? { ids: new Set(rotating.ids), pivot: rotating.pivot, rotation: rotating.rotation }
         : straightenPlan
@@ -151,6 +182,7 @@ export function Viewport() {
           : null,
       healMarkers: state.healIssues.map((i) => i.location),
       duplicateMarkers: state.duplicateIssues.map((i) => i.location),
+      crossingMarkers: state.crossingIssues.map((i) => i.location),
       groupHandle: groupBounds && groupPivot ? { bounds: groupBounds, pivot: groupPivot } : null,
       freeEndpointIds: state.showConnectivityHint ? freeEndpointEntityIds(doc) : null,
       closedRegions: state.showClosedRegions ? closedRegionsRef.current.map((r) => r.points) : [],
@@ -204,11 +236,13 @@ export function Viewport() {
   }, [activeSessionId]);
 
   const measurement = useApp((s) => s.measurement);
+  const pinnedMeasurements = useApp((s) => s.pinnedMeasurements);
   const referenceEdgeId = useApp((s) => s.referenceEdgeId);
   const straightenAxis = useApp((s) => s.straightenAxis);
   const straightenPivot = useApp((s) => s.straightenPivot);
   const healIssues = useApp((s) => s.healIssues);
   const duplicateIssues = useApp((s) => s.duplicateIssues);
+  const crossingIssues = useApp((s) => s.crossingIssues);
   const healFocus = useApp((s) => s.healFocus);
   const showConnectivityHint = useApp((s) => s.showConnectivityHint);
   const showClosedRegions = useApp((s) => s.showClosedRegions);
@@ -228,12 +262,14 @@ export function Viewport() {
     selection,
     tool,
     measurement,
+    pinnedMeasurements,
     layers,
     referenceEdgeId,
     straightenAxis,
     straightenPivot,
     healIssues,
     duplicateIssues,
+    crossingIssues,
     showConnectivityHint,
     showClosedRegions,
   ]);
@@ -316,9 +352,12 @@ export function Viewport() {
       const target = e.target as HTMLElement;
       if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
       const app = useApp.getState();
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c" && app.tool === "measure" && app.measurement) {
         e.preventDefault();
-        void saveDrawing("dxf");
+        void navigator.clipboard.writeText(measurementText(app.measurement, app.displayUnit, referenceEdgeAngleDeg()));
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        void saveCurrent();
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "o") {
         e.preventDefault();
         void openDrawing();
@@ -328,6 +367,15 @@ export function Viewport() {
       } else if (e.ctrlKey && (e.key.toLowerCase() === "y" || (e.key.toLowerCase() === "z" && e.shiftKey))) {
         bus.redo();
         e.preventDefault();
+      } else if (e.key === "Enter" && interactionRef.current.kind === "draw-polyline") {
+        finishPolyline(false);
+      } else if (e.key.toLowerCase() === "c" && interactionRef.current.kind === "draw-polyline") {
+        // While drawing, C closes the shape rather than switching to the circle tool.
+        finishPolyline(true);
+      } else if (e.key === "Backspace" && interactionRef.current.kind === "draw-polyline") {
+        const points = interactionRef.current.points.slice(0, -1);
+        interactionRef.current = points.length > 0 ? { kind: "draw-polyline", points } : { kind: "idle" };
+        redraw();
       } else if (e.key === "Delete" || e.key === "Backspace") {
         if (app.selection.length > 0) {
           bus.execute({ type: "delete-entities", ids: app.selection });
@@ -342,6 +390,8 @@ export function Viewport() {
         app.setTool("select");
       } else if (e.key.toLowerCase() === "l") {
         app.setTool("line");
+      } else if (e.key.toLowerCase() === "w") {
+        app.setTool("polyline");
       } else if (e.key.toLowerCase() === "c") {
         app.setTool("circle");
       } else if (e.key.toLowerCase() === "p" && !e.ctrlKey && !e.metaKey) {
@@ -354,6 +404,8 @@ export function Viewport() {
         app.setTool("straighten");
       } else if (e.key === "Enter" && app.tool === "straighten") {
         applyStraighten();
+      } else if (e.key === "Enter" && app.tool === "measure" && app.measurement) {
+        app.pinMeasurement();
       } else if (e.key.toLowerCase() === "g" && !e.ctrlKey && !e.metaKey && app.tool === "select") {
         groupSelection();
       } else if (e.key.toLowerCase() === "u" && !e.ctrlKey && !e.metaKey && app.tool === "select") {
@@ -364,6 +416,28 @@ export function Viewport() {
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /** Commits an in-progress polyline (needs 2+ vertices) and resets the interaction. No-op otherwise. */
+  const finishPolyline = (closed: boolean): void => {
+    const interaction = interactionRef.current;
+    if (interaction.kind !== "draw-polyline") return;
+    const app = useApp.getState();
+    if (interaction.points.length >= 2) {
+      bus.execute({
+        type: "add-entity",
+        entity: {
+          id: newEntityId(),
+          type: "polyline",
+          name: nextEntityName(doc, "polyline"),
+          ...activeLayerProp(app.activeLayer),
+          points: interaction.points,
+          closed: closed && interaction.points.length >= 3,
+        },
+      });
+    }
+    interactionRef.current = { kind: "idle" };
+    redraw();
+  };
 
   const screenPos = (e: React.PointerEvent): Point => {
     const rect = canvasRef.current!.getBoundingClientRect();
@@ -426,6 +500,18 @@ export function Viewport() {
         }
         break;
       }
+      case "polyline": {
+        if (interaction.kind === "draw-polyline") {
+          // Ignore a repeat click on the vertex just placed (double-click finishes instead, see onDoubleClick).
+          const last = interaction.points[interaction.points.length - 1];
+          if (dist(last, snapped) > 0) {
+            interactionRef.current = { kind: "draw-polyline", points: [...interaction.points, snapped] };
+          }
+        } else {
+          interactionRef.current = { kind: "draw-polyline", points: [snapped] };
+        }
+        break;
+      }
       case "circle": {
         if (interaction.kind === "draw-circle") {
           const radius = dist(interaction.center, snapped);
@@ -465,19 +551,51 @@ export function Viewport() {
         const hit = hitTest(view, world);
         const hitEntity = hit ? doc.get(hit) : null;
 
-        if (hitEntity?.type === "circle" || hitEntity?.type === "arc") {
-          app.setMeasurement({
-            kind: "radius",
-            id: hitEntity.id,
-            center: hitEntity.center,
-            radius: hitEntity.radius,
-          });
+        // Ctrl-click a line to pick it as the angle reference edge for
+        // distance measurements (click it again to clear). Independent of
+        // the straighten tool's own reference edge — each is reset when you
+        // switch into that tool.
+        if (e.ctrlKey && hitEntity?.type === "line") {
+          app.setReferenceEdge(app.referenceEdgeId === hitEntity.id ? null : hitEntity.id);
           interactionRef.current = { kind: "idle" };
           break;
         }
 
-        if (hitEntity?.type === "line") {
-          const len = dist(hitEntity.a, hitEntity.b);
+        // Alt-click is the explicit "measure this whole entity" gesture —
+        // a plain click always measures point-to-point (see below), snapping
+        // to endpoints/midpoints/centers/intersections/on-line points, so it
+        // isn't shadowed by clicking anywhere near a line. Shift-Alt-click
+        // chains a running total across lines AND arcs (a mixed profile);
+        // plain Alt-click always reports just the one entity clicked.
+        if (e.altKey && hitEntity?.type === "arc") {
+          const len = hitEntity.radius * arcSweep(hitEntity.startAngle, hitEntity.endAngle, hitEntity.ccw);
+          const current = app.measurement;
+          if (e.shiftKey && current?.kind === "length") {
+            if (!current.ids.includes(hitEntity.id)) {
+              app.setMeasurement({ kind: "length", ids: [...current.ids, hitEntity.id], total: current.total + len });
+            }
+          } else {
+            app.setMeasurement({
+              kind: "radius",
+              id: hitEntity.id,
+              center: hitEntity.center,
+              radius: hitEntity.radius,
+              arcLength: len,
+            });
+          }
+          interactionRef.current = { kind: "idle" };
+          break;
+        }
+
+        if (e.altKey && hitEntity?.type === "circle") {
+          app.setMeasurement({ kind: "radius", id: hitEntity.id, center: hitEntity.center, radius: hitEntity.radius });
+          interactionRef.current = { kind: "idle" };
+          break;
+        }
+
+        if (e.altKey && (hitEntity?.type === "line" || hitEntity?.type === "polyline")) {
+          const len =
+            hitEntity.type === "line" ? dist(hitEntity.a, hitEntity.b) : polylineLength(hitEntity);
           const current = app.measurement;
           if (e.shiftKey && current?.kind === "length") {
             if (!current.ids.includes(hitEntity.id)) {
@@ -490,9 +608,9 @@ export function Viewport() {
           break;
         }
 
-        // Nothing selectable under the cursor: an enclosing closed area
-        // takes priority over starting a two-point distance drag.
-        if (!hitEntity && !e.shiftKey) {
+        // Nothing under the cursor at all: an enclosing closed area takes
+        // priority over starting a two-point distance drag.
+        if (!hitEntity) {
           const region = regionContainingPoint(closedRegionsRef.current, world);
           if (region) {
             app.setMeasurement({ kind: "area", region });
@@ -584,6 +702,7 @@ export function Viewport() {
 
     const snap = findSnap(doc, view, world);
     snapRef.current = snap;
+    hoverRef.current = app.tool === "measure" ? hitTest(view, world) : null;
     if (interaction.kind === "measure") {
       app.setMeasurement({ kind: "distance", a: interaction.start, b: snap.point });
     }
@@ -671,6 +790,12 @@ export function Viewport() {
     const world = screenToWorld(viewRef.current, screen);
     const hit = hitTest(viewRef.current, world);
     const app = useApp.getState();
+
+    // Finishing a polyline takes priority over the zoom-to-fit / enter-group behavior below.
+    if (interactionRef.current.kind === "draw-polyline") {
+      finishPolyline(false);
+      return;
+    }
 
     if (hit && app.tool === "select") {
       const top = doc.topLevelGroupOf(hit);

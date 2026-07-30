@@ -1,6 +1,7 @@
 import type { Bounds } from "./dxf";
 import { boundsOf } from "./dxf";
 import type { Entity, EntityId } from "./entities";
+import { polylineSegments } from "./entities";
 import type { Point } from "./geometry";
 import { dist } from "./geometry";
 
@@ -79,6 +80,11 @@ export function entityInBox(entity: Entity, box: Bounds, mode: BoxSelectMode): b
       // Approximated as its full circle — simpler and a reasonable, slightly
       // generous match for how crossing-select behaves on curved entities.
       return circleCrossesBox(entity.center, entity.radius, box);
+    case "polyline":
+      // Each segment as a straight chord — a slightly tighter match than the
+      // arc case above for bulged segments, but consistent with how the rest
+      // of crossing-select treats curves as an approximation.
+      return polylineSegments(entity).some((seg) => segmentCrossesBox(seg.a, seg.b, box));
   }
 }
 

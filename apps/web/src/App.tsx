@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { dist, freeEndpointEntityIds } from "@sketchor/core";
-import { bus, doc, TOOL_HINTS, useApp, type MeasureResult, type ToolId } from "./state/store";
-import { openDrawing, saveDrawing } from "./io/drawingFile";
-import { DISPLAY_UNITS, formatArea, formatLength, type DisplayUnit } from "./units";
+import { freeEndpointEntityIds } from "@sketchor/core";
+import { bus, doc, measurementText, TOOL_HINTS, useApp, type ToolId } from "./state/store";
+import { openDrawing, saveCurrent, saveDrawing } from "./io/drawingFile";
+import { DISPLAY_UNITS, formatLength, type DisplayUnit } from "./units";
 import { Viewport } from "./viewport/Viewport";
 import { CodePanel } from "./code/CodePanel";
 import { FileExplorerPanel } from "./browser/FileExplorerPanel";
@@ -33,6 +33,20 @@ const TOOLS: { id: ToolId; label: string; keyHint: string; icon: JSX.Element }[]
         <path d="M4 20L20 4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
         <circle cx="4" cy="20" r="2.4" fill="currentColor" />
         <circle cx="20" cy="4" r="2.4" fill="currentColor" />
+      </svg>
+    ),
+  },
+  {
+    id: "polyline",
+    label: "Polyline",
+    keyHint: "W",
+    icon: (
+      <svg viewBox="0 0 24 24" width="20" height="20">
+        <path d="M3 18l5-9 5 5 8-9" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+        <circle cx="3" cy="18" r="2" fill="currentColor" />
+        <circle cx="8" cy="9" r="2" fill="currentColor" />
+        <circle cx="13" cy="14" r="2" fill="currentColor" />
+        <circle cx="21" cy="5" r="2" fill="currentColor" />
       </svg>
     ),
   },
@@ -107,6 +121,10 @@ export function App() {
   const revision = useApp((s) => s.revision);
   const selection = useApp((s) => s.selection);
   const measurement = useApp((s) => s.measurement);
+  const pinnedMeasurements = useApp((s) => s.pinnedMeasurements);
+  const pinMeasurement = useApp((s) => s.pinMeasurement);
+  const clearPinnedMeasurements = useApp((s) => s.clearPinnedMeasurements);
+  const referenceEdgeId = useApp((s) => s.referenceEdgeId);
   const [showCode, setShowCode] = useState(false);
   const [showLayers, setShowLayers] = useState(true);
   const [showDiag, setShowDiag] = useState(false);
@@ -131,26 +149,37 @@ export function App() {
     return () => document.removeEventListener("click", onClick);
   }, [showSaveMenu]);
 
-  const measurementLabel = (m: MeasureResult): string => {
-    switch (m.kind) {
-      case "distance": {
-        const d = dist(m.a, m.b);
-        const dx = Math.abs(m.b.x - m.a.x);
-        const dy = Math.abs(m.b.y - m.a.y);
-        return `distance ${formatLength(d, displayUnit)}  (Δx ${formatLength(dx, displayUnit)}, Δy ${formatLength(dy, displayUnit)})`;
-      }
-      case "length":
-        return m.ids.length > 1
-          ? `total length ${formatLength(m.total, displayUnit)} (${m.ids.length} lines)`
-          : `length ${formatLength(m.total, displayUnit)}`;
-      case "radius":
-        return `radius ${formatLength(m.radius, displayUnit)}  diameter ${formatLength(m.radius * 2, displayUnit)}`;
-      case "area":
-        return `area ${formatArea(m.region.area, displayUnit)}`;
-    }
+  const referenceEdge = referenceEdgeId ? doc.get(referenceEdgeId) : null;
+  const referenceAngleDeg =
+    referenceEdge?.type === "line" ? (Math.atan2(referenceEdge.b.y - referenceEdge.a.y, referenceEdge.b.x - referenceEdge.a.x) * 180) / Math.PI : null;
+
+  const [justCopied, setJustCopied] = useState(false);
+  const copyMeasurement = () => {
+    if (!measurement) return;
+    void navigator.clipboard.writeText(measurementText(measurement, displayUnit, referenceAngleDeg)).then(() => {
+      setJustCopied(true);
+      setTimeout(() => setJustCopied(false), 1200);
+    });
   };
+
   // Recomputed every render (cheap, matches the entity-count footer pattern below); `revision` forces the re-render.
   const freeEndpointCount = showConnectivityHint ? freeEndpointEntityIds(doc).size : 0;
+
+  // `revision` (read via the hook above) forces this to recompute after edits/undo.
+  const selectionLabel = (ids: string[]): string => {
+    if (ids.length === 0) return "";
+    const counts = new Map<string, number>();
+    for (const id of ids) {
+      const e = doc.get(id);
+      if (e) counts.set(e.type, (counts.get(e.type) ?? 0) + 1);
+    }
+    if (counts.size === 1) {
+      const [[type, n]] = counts;
+      return ids.length === 1 ? `1 ${type} selected` : `${n} ${type}s selected`;
+    }
+    const parts = [...counts.entries()].map(([type, n]) => `${n} ${type}${n > 1 ? "s" : ""}`);
+    return `${ids.length} selected (${parts.join(", ")})`;
+  };
 
   return (
     <div className="app">
@@ -188,7 +217,7 @@ export function App() {
           <div className="action-menu-wrap">
             <button
               className="action"
-              title="Save as DXF or SVG (Ctrl+S)"
+              title="Save (Ctrl+S) — or Save As / Save a Copy as DXF/SVG"
               data-testid="save-file"
               onClick={() => setShowSaveMenu((v) => !v)}
             >
@@ -206,20 +235,45 @@ export function App() {
             {showSaveMenu && (
               <div className="action-menu" data-testid="save-menu">
                 <button
+                  data-testid="save-now"
                   onClick={() => {
                     setShowSaveMenu(false);
-                    void saveDrawing("dxf");
+                    void saveCurrent();
                   }}
                 >
-                  Save as DXF
+                  Save
                 </button>
                 <button
                   onClick={() => {
                     setShowSaveMenu(false);
-                    void saveDrawing("svg");
+                    void saveDrawing("dxf", undefined, "save-as");
                   }}
                 >
-                  Save as SVG
+                  Save As DXF...
+                </button>
+                <button
+                  onClick={() => {
+                    setShowSaveMenu(false);
+                    void saveDrawing("svg", undefined, "save-as");
+                  }}
+                >
+                  Save As SVG...
+                </button>
+                <button
+                  onClick={() => {
+                    setShowSaveMenu(false);
+                    void saveDrawing("dxf", undefined, "save-copy");
+                  }}
+                >
+                  Save a Copy as DXF...
+                </button>
+                <button
+                  onClick={() => {
+                    setShowSaveMenu(false);
+                    void saveDrawing("svg", undefined, "save-copy");
+                  }}
+                >
+                  Save a Copy as SVG...
                 </button>
               </div>
             )}
@@ -310,7 +364,7 @@ export function App() {
           </button>
           <button
             className={`action ${showDup ? "toggled" : ""}`}
-            title="Toggle duplicate/overlap detection (double circles, overlapping lines)"
+            title="Toggle duplicate/overlap detection (double circles, overlapping lines, line crossings)"
             data-testid="toggle-duplicates"
             onClick={() => setShowDup((v) => !v)}
           >
@@ -428,10 +482,39 @@ export function App() {
           ))}
         </select>
         <span data-testid="entity-count">{doc.all().length} entities</span>
-        <span>{selection.length > 0 ? `${selection.length} selected` : ""}</span>
+        <span data-testid="selection-hint">{selectionLabel(selection)}</span>
         {measurement && (
           <span className="measure-readout" data-testid="measure-readout">
-            {measurementLabel(measurement)}
+            {measurementText(measurement, displayUnit, referenceAngleDeg)}
+            <button
+              className="measure-copy"
+              title="Copy measurement (Ctrl+C)"
+              data-testid="measure-copy"
+              onClick={copyMeasurement}
+            >
+              {justCopied ? "Copied" : "Copy"}
+            </button>
+            <button
+              className="measure-copy"
+              title="Pin this measurement so it stays on screen (Enter)"
+              data-testid="measure-pin"
+              onClick={pinMeasurement}
+            >
+              Pin
+            </button>
+          </span>
+        )}
+        {pinnedMeasurements.length > 0 && (
+          <span className="measure-readout" data-testid="measure-pinned-count">
+            {pinnedMeasurements.length} pinned
+            <button
+              className="measure-copy"
+              title="Clear pinned measurements"
+              data-testid="measure-clear-pins"
+              onClick={clearPinnedMeasurements}
+            >
+              Clear
+            </button>
           </span>
         )}
         {showConnectivityHint && (

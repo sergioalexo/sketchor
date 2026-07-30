@@ -6,9 +6,15 @@ import { fixAllDuplicatesAction, fixOneDuplicate, rescanDuplicates, useApp } fro
  * overlapping/duplicate lines) from the most recent scan — the "holes on
  * holes" case — with a tolerance input and fix-selected / fix-all / re-scan
  * actions. Mirrors DiagnosticsPanel's layout for the unjointed-line scan.
+ *
+ * Also lists line crossings from the same scan — two edges that cross
+ * mid-span. These are read-only: unlike a duplicate, a genuine crossing has
+ * no unambiguous "extra" copy to delete, so there's no Fix button here, only
+ * "frame this finding" for manual review.
  */
 export function DuplicatesPanel({ onClose }: { onClose: () => void }) {
   const issues = useApp((s) => s.duplicateIssues);
+  const crossings = useApp((s) => s.crossingIssues);
   const options = useApp((s) => s.duplicateOptions);
   const setOptions = useApp((s) => s.setDuplicateOptions);
   const setFocus = useApp((s) => s.setDuplicateFocus);
@@ -72,6 +78,28 @@ export function DuplicatesPanel({ onClose }: { onClose: () => void }) {
           ))
         )}
       </div>
+
+      {crossings.length > 0 && (
+        <>
+          <div className="diagpanel-header">
+            <span>Crossings ({crossings.length})</span>
+          </div>
+          <div className="diagpanel-list">
+            {crossings.map((issue) => (
+              <div key={issue.id} className="diag-row" data-testid="crossing-row">
+                <button
+                  className="diag-row-main"
+                  onClick={() => setFocus({ ...issue.location })}
+                  title="Frame this finding — review manually, nothing here auto-fixes"
+                >
+                  <span className="diag-row-label">Line crossing</span>
+                  <span className="diag-row-entities">{issue.entityIds.length} entities</span>
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </aside>
   );
 }

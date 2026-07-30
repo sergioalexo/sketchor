@@ -111,6 +111,36 @@ export function distToArc(
   return Math.min(dist(p, startPt), dist(p, endPt));
 }
 
+/**
+ * A polyline segment's DXF *bulge* (tangent of a quarter of the arc's
+ * included angle) between two vertices, resolved to real arc parameters —
+ * null for a straight segment (zero/negligible bulge, or coincident points).
+ */
+export function bulgeToArc(
+  a: Point,
+  b: Point,
+  bulge: number,
+): { center: Point; radius: number; startAngle: number; endAngle: number; ccw: boolean } | null {
+  if (!bulge || Math.abs(bulge) < 1e-9) return null;
+  const theta = 4 * Math.atan(bulge); // signed included angle (CCW positive)
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const chord = Math.hypot(dx, dy);
+  if (chord < 1e-9) return null;
+  const r = chord / (2 * Math.sin(theta / 2)); // signed radius
+  const m = r * Math.cos(theta / 2); // midpoint -> center distance
+  const midx = (a.x + b.x) / 2;
+  const midy = (a.y + b.y) / 2;
+  const nx = -dy / chord; // left normal of the chord
+  const ny = dx / chord;
+  const cx = midx + nx * m;
+  const cy = midy + ny * m;
+  const radius = Math.abs(r);
+  const startAngle = Math.atan2(a.y - cy, a.x - cx);
+  const endAngle = Math.atan2(b.y - cy, b.x - cx);
+  return { center: { x: cx, y: cy }, radius, startAngle, endAngle, ccw: theta >= 0 };
+}
+
 /** Points needed to bound an arc precisely: its two ends plus any axis-aligned extrema it sweeps through. */
 export function arcExtentPoints(
   center: Point,

@@ -38,6 +38,14 @@ const ARC_RE = new RegExp(
 const POINT_RE = new RegExp(
   String.raw`^point\s+([A-Za-z_]\w*)\s+at\s*\(\s*(${NUM})\s*,\s*(${NUM})\s*\)$`,
 );
+// Note: sketch code doesn't express per-segment bulge — a polyline with
+// curved (bulged) segments round-trips through code with those segments
+// straightened, same as how layers already aren't expressed in code.
+const POINT_PAIR = String.raw`\(\s*${NUM}\s*,\s*${NUM}\s*\)`;
+const POLYLINE_RE = new RegExp(
+  String.raw`^polyline\s+(?<name>[A-Za-z_]\w*)\s+pts\s+(?<pts>(?:${POINT_PAIR}\s*)+)(?<closed>closed)?$`,
+);
+const POINT_PAIR_CAPTURE = new RegExp(String.raw`\(\s*(${NUM})\s*,\s*(${NUM})\s*\)`, "g");
 
 function fmt(n: number): string {
   const rounded = Math.round(n * 10000) / 10000;
@@ -57,7 +65,7 @@ export function assignNames(doc: SketchDocument): Map<EntityId, string> {
       used.add(e.name);
     }
   }
-  const counters: Record<Entity["type"], number> = { line: 1, circle: 1, arc: 1, point: 1 };
+  const counters: Record<Entity["type"], number> = { line: 1, circle: 1, arc: 1, point: 1, polyline: 1 };
   for (const e of doc.all()) {
     if (names.has(e.id)) continue;
     const prefix = NAME_PREFIX[e.type];
@@ -70,7 +78,7 @@ export function assignNames(doc: SketchDocument): Map<EntityId, string> {
   return names;
 }
 
-const NAME_PREFIX: Record<Entity["type"], string> = { line: "L", circle: "C", arc: "A", point: "P" };
+const NAME_PREFIX: Record<Entity["type"], string> = { line: "L", circle: "C", arc: "A", point: "P", polyline: "PL" };
 
 /** Next free name for a newly drawn entity (used by the tools). */
 export function nextEntityName(doc: SketchDocument, type: Entity["type"]): string {
@@ -101,8 +109,11 @@ export function toCode(doc: SketchDocument): string {
         `arc ${name} at (${fmt(e.center.x)}, ${fmt(e.center.y)}) r ${fmt(e.radius)} ` +
           `from ${fmt(toDeg(e.startAngle))} to ${fmt(toDeg(e.endAngle))}${e.ccw ? "" : " cw"}`,
       );
-    } else {
+    } else if (e.type === "point") {
       out.push(`point ${name} at (${fmt(e.p.x)}, ${fmt(e.p.y)})`);
+    } else {
+      const pts = e.points.map((p) => `(${fmt(p.x)}, ${fmt(p.y)})`).join(" ");
+      out.push(`polyline ${name} pts ${pts}${e.closed ? " closed" : ""}`);
     }
   }
   return out.join("\n") + "\n";
@@ -121,7 +132,8 @@ export type ParsedEntity =
       endAngle: number;
       ccw: boolean;
     }
-  | { type: "point"; name: string; p: { x: number; y: number } };
+  | { type: "point"; name: string; p: { x: number; y: number } }
+  | { type: "polyline"; name: string; points: { x: number; y: number }[]; closed: boolean };
 
 export interface ParseIssue {
   line: number;
@@ -186,22 +198,36 @@ export function parseCode(text: string): { entities: ParsedEntity[]; errors: Par
       };
     } else if ((match = row.match(POINT_RE))) {
       parsed = { type: "point", name: match[1], p: { x: Number(match[2]), y: Number(match[3]) } };
+    } else if ((match = row.match(POLYLINE_RE))) {
+      const points: { x: number; y: number }[] = [];
+      POINT_PAIR_CAPTURE.lastIndex = 0;
+      let pm: RegExpExecArray | null;
+      while ((pm = POINT_PAIR_CAPTURE.exec(match.groups!.pts))) {
+        points.push({ x: Number(pm[1]), y: Number(pm[2]) });
+      }
+      if (points.length < 2) {
+        errors.push({ line: lineNo, message: "polyline needs at least 2 points" });
+        continue;
+      }
+      parsed = { type: "polyline", name: match.groups!.name, points, closed: !!match.groups!.closed };
     }
 
     if (!parsed) {
+      const known = ["line", "circle", "arc", "point", "polyline"];
       errors.push({
         line: lineNo,
-        message:
-          keyword === "line" || keyword === "circle" || keyword === "arc" || keyword === "point"
-            ? `could not parse ${keyword} — expected: ` +
-              (keyword === "line"
-                ? "line NAME from (x, y) to (x, y)"
-                : keyword === "circle"
-                  ? "circle NAME at (x, y) r RADIUS"
-                  : keyword === "arc"
-                    ? "arc NAME at (x, y) r RADIUS from DEG to DEG [cw]"
-                    : "point NAME at (x, y)")
-            : `unknown statement '${keyword}'`,
+        message: known.includes(keyword)
+          ? `could not parse ${keyword} — expected: ` +
+            (keyword === "line"
+              ? "line NAME from (x, y) to (x, y)"
+              : keyword === "circle"
+                ? "circle NAME at (x, y) r RADIUS"
+                : keyword === "arc"
+                  ? "arc NAME at (x, y) r RADIUS from DEG to DEG [cw]"
+                  : keyword === "point"
+                    ? "point NAME at (x, y)"
+                    : "polyline NAME pts (x, y) (x, y) ... [closed]")
+          : `unknown statement '${keyword}'`,
       });
       continue;
     }
@@ -248,10 +274,20 @@ function sameGeometry(existing: Entity, parsed: ParsedEntity): boolean {
   if (existing.type === "point" && parsed.type === "point") {
     return Math.abs(existing.p.x - parsed.p.x) < EPS && Math.abs(existing.p.y - parsed.p.y) < EPS;
   }
+  if (existing.type === "polyline" && parsed.type === "polyline") {
+    return (
+      existing.closed === parsed.closed &&
+      existing.points.length === parsed.points.length &&
+      existing.points.every(
+        (p, i) => Math.abs(p.x - parsed.points[i].x) < EPS && Math.abs(p.y - parsed.points[i].y) < EPS,
+      )
+    );
+  }
   return false;
 }
 
-function toEntity(parsed: ParsedEntity, id: EntityId, layer?: string): Entity {
+/** `bulges` only applies when re-emitting an existing polyline whose points came back unchanged apart from being re-typed in code — sketch code itself never specifies bulge. */
+function toEntity(parsed: ParsedEntity, id: EntityId, layer?: string, bulges?: number[]): Entity {
   const layerProp = layer ? { layer } : {};
   switch (parsed.type) {
     case "line":
@@ -279,6 +315,16 @@ function toEntity(parsed: ParsedEntity, id: EntityId, layer?: string): Entity {
       };
     case "point":
       return { id, type: "point", name: parsed.name, ...layerProp, p: parsed.p };
+    case "polyline":
+      return {
+        id,
+        type: "polyline",
+        name: parsed.name,
+        ...layerProp,
+        points: parsed.points,
+        closed: parsed.closed,
+        ...(bulges ? { bulges } : {}),
+      };
   }
 }
 
@@ -300,8 +346,11 @@ export function diffToCommands(doc: SketchDocument, parsed: ParsedEntity[]): Com
     if (existing) {
       keep.add(p.name);
       if (!sameGeometry(existing, p) || existing.name !== p.name) {
-        // Preserve the entity's layer — sketch code doesn't express layers.
-        commands.push({ type: "update-entity", entity: toEntity(p, existing.id, existing.layer) });
+        // Preserve the entity's layer (and a polyline's bulges) — sketch code doesn't express either.
+        commands.push({
+          type: "update-entity",
+          entity: toEntity(p, existing.id, existing.layer, existing.type === "polyline" ? existing.bulges : undefined),
+        });
       }
     } else {
       commands.push({ type: "add-entity", entity: toEntity(p, newEntityId()) });

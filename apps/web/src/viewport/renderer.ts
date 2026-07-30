@@ -1,5 +1,15 @@
 import type { Bounds, BoxSelectMode, ClosedRegion, Entity, EntityId, Point, SketchDocument } from "@sketchor/core";
-import { dist, entityPoints, layerOf, transformed, translated } from "@sketchor/core";
+import {
+  arcPointAt,
+  arcSweep,
+  bulgeToArc,
+  dist,
+  entityPoints,
+  layerOf,
+  polylineSegments,
+  transformed,
+  translated,
+} from "@sketchor/core";
 import type { MeasureResult } from "../state/store";
 import { gridStep, worldToScreen, type View } from "./view";
 import type { Snap } from "./snapping";
@@ -20,16 +30,22 @@ export interface RenderUiState {
   moveOffset: { dx: number; dy: number } | null;
   /** Active measure-tool result overlay, if any. */
   measurement: MeasureResult | null;
+  /** Measurements pinned to stay on screen alongside the live one, drawn dimmed. */
+  pinnedMeasurements: readonly MeasureResult[];
   /** Names of layers to skip drawing. */
   hiddenLayers: ReadonlySet<string>;
   /** The straighten tool's chosen reference edge, highlighted distinctly. */
   referenceEdgeId: EntityId | null;
+  /** Entity currently under the cursor (measure tool), highlighted distinctly from selection. */
+  hoverId: EntityId | null;
   /** The straighten tool's live preview of the rotated selection. */
   transformPreview: TransformPreview | null;
   /** World locations of current heal-diagnostics findings. */
   healMarkers: readonly Point[];
   /** World locations of current duplicate/overlap findings. */
   duplicateMarkers: readonly Point[];
+  /** World locations of current line-crossing findings (read-only — see crossings.ts). */
+  crossingMarkers: readonly Point[];
   /** Dashed bbox + rotate handle shown when the selection is exactly one whole group. */
   groupHandle: { bounds: Bounds; pivot: Point } | null;
   /**
@@ -61,6 +77,7 @@ const COLORS = {
   snap: "#ffb02e",
   handle: "#5b96ff",
   measure: "#5ad1c5",
+  hover: "#8fd9ff",
   measureLabelBg: "#0c2b28",
   reference: "#ff5c5c",
   connectivityHint: "#4d7ac7",
@@ -68,6 +85,7 @@ const COLORS = {
   crossingSelect: "#5adc7a",
   closedRegionFill: "rgba(180, 190, 205, 0.16)",
   duplicateMarker: "#f0b968",
+  crossingMarker: "#c77dff",
 };
 
 function fmtNum(n: number): string {
@@ -95,6 +113,7 @@ export function render(
     const selected = ui.selection.has(entity.id);
     const isReference = entity.id === ui.referenceEdgeId;
     const isFreeEndpoint = !!ui.freeEndpointIds?.has(entity.id);
+    const isHovered = !selected && !isReference && entity.id === ui.hoverId;
     const shown =
       selected && ui.moveOffset
         ? translated(entity, ui.moveOffset.dx, ui.moveOffset.dy)
@@ -103,10 +122,12 @@ export function render(
       ? COLORS.reference
       : selected
         ? COLORS.selected
-        : isFreeEndpoint
-          ? COLORS.connectivityHint
-          : COLORS.entity;
-    drawEntity(ctx, view, shown, color, selected || isReference ? 2 : 1.5);
+        : isHovered
+          ? COLORS.hover
+          : isFreeEndpoint
+            ? COLORS.connectivityHint
+            : COLORS.entity;
+    drawEntity(ctx, view, shown, color, selected || isReference || isHovered ? 2 : 1.5);
     if (selected) drawHandles(ctx, view, shown);
   }
 
@@ -129,10 +150,22 @@ export function render(
     ctx.setLineDash([]);
   }
 
-  if (ui.measurement) drawMeasurement(ctx, view, doc, ui.measurement, ui.fmtLength, ui.fmtArea);
+  if (ui.pinnedMeasurements.length > 0) {
+    ctx.globalAlpha = 0.5;
+    for (const pinned of ui.pinnedMeasurements) drawMeasurement(ctx, view, doc, pinned, ui.fmtLength, ui.fmtArea, null);
+    ctx.globalAlpha = 1;
+  }
+
+  if (ui.measurement) {
+    const refEdge = ui.referenceEdgeId ? doc.get(ui.referenceEdgeId) : null;
+    const referenceAngleDeg =
+      refEdge?.type === "line" ? (Math.atan2(refEdge.b.y - refEdge.a.y, refEdge.b.x - refEdge.a.x) * 180) / Math.PI : null;
+    drawMeasurement(ctx, view, doc, ui.measurement, ui.fmtLength, ui.fmtArea, referenceAngleDeg);
+  }
 
   for (const p of ui.healMarkers) drawHealMarker(ctx, view, p);
   for (const p of ui.duplicateMarkers) drawHealMarker(ctx, view, p, COLORS.duplicateMarker);
+  for (const p of ui.crossingMarkers) drawHealMarker(ctx, view, p, COLORS.crossingMarker);
 
   if (ui.snap) drawSnapMarker(ctx, view, ui.snap);
 
@@ -233,10 +266,11 @@ function drawMeasurement(
   m: MeasureResult,
   fmtLength: (n: number) => string,
   fmtArea: (n: number) => string,
+  referenceAngleDeg: number | null,
 ): void {
   switch (m.kind) {
     case "distance":
-      drawDistanceMeasurement(ctx, view, m.a, m.b, fmtLength);
+      drawDistanceMeasurement(ctx, view, m.a, m.b, fmtLength, referenceAngleDeg);
       break;
     case "length":
       drawLengthMeasurement(ctx, view, doc, m, fmtLength);
@@ -245,7 +279,7 @@ function drawMeasurement(
       drawRadiusMeasurement(ctx, view, m, fmtLength);
       break;
     case "area":
-      drawAreaMeasurement(ctx, view, m.region, fmtArea);
+      drawAreaMeasurement(ctx, view, m.region, fmtLength, fmtArea);
       break;
   }
 }
@@ -274,12 +308,21 @@ function drawLabel(ctx: CanvasRenderingContext2D, cx: number, cy: number, lines:
   ctx.textBaseline = "alphabetic";
 }
 
+/** Normalizes a difference of two degree angles to (-180, 180]. */
+function wrapDeg(deg: number): number {
+  let d = deg % 360;
+  if (d <= -180) d += 360;
+  if (d > 180) d -= 360;
+  return d;
+}
+
 function drawDistanceMeasurement(
   ctx: CanvasRenderingContext2D,
   view: View,
   wa: Point,
   wb: Point,
   fmtLength: (n: number) => string,
+  referenceAngleDeg: number | null,
 ): void {
   const a = worldToScreen(view, wa);
   const b = worldToScreen(view, wb);
@@ -309,7 +352,11 @@ function drawDistanceMeasurement(
   const dy = Math.abs(wb.y - wa.y);
   const cx = (a.x + b.x) / 2;
   const cy = (a.y + b.y) / 2 - 18;
-  drawLabel(ctx, cx, cy, [`${fmtLength(d)}  ${fmtNum(angle)}°`, `Δx ${fmtLength(dx)}  Δy ${fmtLength(dy)}`]);
+  const angleLine =
+    referenceAngleDeg === null
+      ? `${fmtLength(d)}  ${fmtNum(angle)}°`
+      : `${fmtLength(d)}  ${fmtNum(angle)}°  (∠ edge ${fmtNum(wrapDeg(angle - referenceAngleDeg))}°)`;
+  drawLabel(ctx, cx, cy, [angleLine, `Δx ${fmtLength(dx)}  Δy ${fmtLength(dy)}`]);
 }
 
 function drawLengthMeasurement(
@@ -320,22 +367,24 @@ function drawLengthMeasurement(
   fmtLength: (n: number) => string,
 ): void {
   let lastMid: Point | null = null;
-  ctx.strokeStyle = COLORS.measure;
-  ctx.lineWidth = 3;
   for (const id of m.ids) {
     const entity = doc.get(id);
-    if (!entity || entity.type !== "line") continue;
-    const a = worldToScreen(view, entity.a);
-    const b = worldToScreen(view, entity.b);
-    ctx.beginPath();
-    ctx.moveTo(a.x, a.y);
-    ctx.lineTo(b.x, b.y);
-    ctx.stroke();
-    lastMid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+    if (!entity || (entity.type !== "line" && entity.type !== "arc" && entity.type !== "polyline")) continue;
+    drawEntity(ctx, view, entity, COLORS.measure, 3);
+    if (entity.type === "line") {
+      lastMid = worldToScreen(view, { x: (entity.a.x + entity.b.x) / 2, y: (entity.a.y + entity.b.y) / 2 });
+    } else if (entity.type === "arc") {
+      const sweep = arcSweep(entity.startAngle, entity.endAngle, entity.ccw);
+      const midAngle = entity.ccw ? entity.startAngle + sweep / 2 : entity.startAngle - sweep / 2;
+      lastMid = worldToScreen(view, arcPointAt(entity.center, entity.radius, midAngle));
+    } else {
+      // Label near the middle vertex — good enough to sit on the run without extra arc-length math.
+      lastMid = worldToScreen(view, entity.points[Math.floor(entity.points.length / 2)]);
+    }
   }
   if (!lastMid) return;
   const label =
-    m.ids.length > 1 ? `Total ${fmtLength(m.total)}  (${m.ids.length} lines)` : `Length ${fmtLength(m.total)}`;
+    m.ids.length > 1 ? `Total ${fmtLength(m.total)}  (${m.ids.length} entities)` : `Length ${fmtLength(m.total)}`;
   drawLabel(ctx, lastMid.x, lastMid.y - 14, [label]);
 }
 
@@ -362,13 +411,24 @@ function drawRadiusMeasurement(
   ctx.arc(c.x, c.y, 3, 0, Math.PI * 2);
   ctx.fill();
 
-  drawLabel(ctx, (c.x + edge.x) / 2, (c.y + edge.y) / 2 - 14, [`R ${fmtLength(m.radius)}   Ø ${fmtLength(m.radius * 2)}`]);
+  const lines = [`R ${fmtLength(m.radius)}   Ø ${fmtLength(m.radius * 2)}`];
+  if (m.arcLength !== undefined) lines.push(`Arc length ${fmtLength(m.arcLength)}`);
+  drawLabel(ctx, (c.x + edge.x) / 2, (c.y + edge.y) / 2 - 14, lines);
+}
+
+function perimeterOf(points: readonly Point[]): number {
+  let total = 0;
+  for (let i = 0; i < points.length; i++) {
+    total += dist(points[i], points[(i + 1) % points.length]);
+  }
+  return total;
 }
 
 function drawAreaMeasurement(
   ctx: CanvasRenderingContext2D,
   view: View,
   region: ClosedRegion,
+  fmtLength: (n: number) => string,
   fmtArea: (n: number) => string,
 ): void {
   if (region.points.length < 3) return;
@@ -390,7 +450,7 @@ function drawAreaMeasurement(
   ctx.globalAlpha = 1;
   cx /= region.points.length;
   cy /= region.points.length;
-  drawLabel(ctx, cx, cy, [`Area ${fmtArea(region.area)}`]);
+  drawLabel(ctx, cx, cy, [`Area ${fmtArea(region.area)}`, `Perimeter ${fmtLength(perimeterOf(region.points))}`]);
 }
 
 function roundRect(
@@ -469,12 +529,28 @@ function drawEntity(
     ctx.lineTo(p.x + 5, p.y);
     ctx.moveTo(p.x, p.y - 5);
     ctx.lineTo(p.x, p.y + 5);
-  } else {
+  } else if (entity.type === "arc") {
     // World angles increase CCW in a Y-up plane; screen Y is flipped, so
     // angles negate and the sweep direction flips (canvas's own
     // "counterclockwise" flag already matches our ccw once negated).
     const c = worldToScreen(view, entity.center);
     ctx.arc(c.x, c.y, entity.radius * view.scale, -entity.startAngle, -entity.endAngle, entity.ccw);
+  } else {
+    // One continuous stroke through every vertex; a bulged segment draws as
+    // its real arc rather than the straight chord.
+    polylineSegments(entity).forEach((seg, i) => {
+      const a = worldToScreen(view, seg.a);
+      if (i === 0) ctx.moveTo(a.x, a.y);
+      const bulgeArc = bulgeToArc(seg.a, seg.b, seg.bulge);
+      if (!bulgeArc) {
+        const b = worldToScreen(view, seg.b);
+        ctx.lineTo(b.x, b.y);
+        return;
+      }
+      const c = worldToScreen(view, bulgeArc.center);
+      ctx.arc(c.x, c.y, bulgeArc.radius * view.scale, -bulgeArc.startAngle, -bulgeArc.endAngle, bulgeArc.ccw);
+    });
+    if (entity.closed) ctx.closePath();
   }
   ctx.stroke();
 }
@@ -506,6 +582,15 @@ function drawSnapMarker(ctx: CanvasRenderingContext2D, view: View, snap: Snap): 
       break;
     case "center":
       ctx.arc(s.x, s.y, 5, 0, Math.PI * 2);
+      break;
+    case "intersection":
+      ctx.moveTo(s.x - 5, s.y - 5);
+      ctx.lineTo(s.x + 5, s.y + 5);
+      ctx.moveTo(s.x + 5, s.y - 5);
+      ctx.lineTo(s.x - 5, s.y + 5);
+      break;
+    case "on-line":
+      ctx.arc(s.x, s.y, 2.5, 0, Math.PI * 2);
       break;
     case "grid":
       ctx.moveTo(s.x - 4, s.y);
