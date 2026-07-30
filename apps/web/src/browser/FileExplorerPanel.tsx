@@ -11,24 +11,34 @@ interface Entry {
   handle?: FileSystemFileHandle;
   /** Desktop: a full path passed to the Rust `read_drawing_file` command. */
   path?: string;
-  /** Last-modified time (ms epoch), when known — desktop folder listing doesn't report it yet, so date sort falls back to name order for those entries. */
+  /** Last-modified time (ms epoch), when known. */
   mtime?: number;
   /** File size in bytes, when known. */
   size?: number;
 }
 
-type SortMode = "name" | "date";
+type SortMode = "name" | "date" | "size";
+type SortDir = "asc" | "desc";
 type ViewMode = "grid" | "list";
 
-function sortEntries(list: Entry[], mode: SortMode): Entry[] {
+/** Default direction per column: names read A-Z, but dates and sizes are most useful largest/newest first. */
+const DEFAULT_DIR: Record<SortMode, SortDir> = { name: "asc", date: "desc", size: "desc" };
+
+function sortEntries(list: Entry[], mode: SortMode, dir: SortDir): Entry[] {
+  const sign = dir === "asc" ? 1 : -1;
   return [...list].sort((a, b) => {
-    if (mode === "date") {
-      const ad = a.mtime;
-      const bd = b.mtime;
-      if (ad !== undefined && bd !== undefined && ad !== bd) return bd - ad; // newest first
-      if (ad !== bd) return ad === undefined ? 1 : -1; // unknown dates sort after known ones
+    if (mode === "date" || mode === "size") {
+      const av = mode === "date" ? a.mtime : a.size;
+      const bv = mode === "date" ? b.mtime : b.size;
+      // Entries with no value (e.g. a desktop listing that couldn't stat the
+      // file) always sink to the bottom rather than flipping with direction.
+      if (av === undefined || bv === undefined) {
+        if (av !== bv) return av === undefined ? 1 : -1;
+      } else if (av !== bv) {
+        return (av - bv) * sign;
+      }
     }
-    return a.name.localeCompare(b.name);
+    return a.name.localeCompare(b.name) * (mode === "name" ? sign : 1);
   });
 }
 
@@ -108,21 +118,42 @@ const MIME_FOR = (name: string): string =>
   /\.svg$/i.test(name) ? "image/svg+xml" : /\.dwg$/i.test(name) ? "application/acad" : "application/dxf";
 
 /**
- * Starts a native drag carrying the file itself, so it can be dropped on the
- * desktop / Explorer / another app. Uses Chromium's `DownloadURL` protocol
- * (also honored by Tauri's WebView2); other engines get plain text/uri-list,
- * which most apps accept as a fallback. `DownloadURL` carries one file per
- * drag, which is why multi-select uses the Export button instead.
+ * Starts a drag carrying real files out of the panel.
+ *
+ * Two mechanisms, because drop targets read different things and no single
+ * one covers both:
+ *
+ * - **Real `File` objects** on `dataTransfer.items`. This is what any *web*
+ *   drop target (a chat's upload box, a file input, a drag-and-drop zone)
+ *   reads via `dataTransfer.files`. Without these a web target sees no files
+ *   at all and falls back to whatever text it can find — which is why a drag
+ *   into a chat used to paste the filename instead of attaching the drawing.
+ *   Supports any number of files.
+ * - **`DownloadURL`**, which is what lets a drop onto the *OS* (Explorer, the
+ *   desktop) actually write a file. It's Chromium-only (WebView2 included)
+ *   and carries exactly one file, so it's set only for single-file drags.
+ *
+ * `text/plain` is deliberately NOT set: with files present, some targets
+ * prefer the text flavor and would paste a filename over attaching the file.
  */
-function startFileDrag(e: React.DragEvent, name: string, text: string): void {
-  const mime = MIME_FOR(name);
-  const url = URL.createObjectURL(new Blob([text], { type: mime }));
-  e.dataTransfer.setData("DownloadURL", `${mime}:${name}:${url}`);
-  e.dataTransfer.setData("text/plain", name);
-  e.dataTransfer.effectAllowed = "copy";
-  // The blob has to outlive the drag; a timeout is the only hook available
-  // since there's no "drop completed on the OS" event.
-  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+function startFileDrag(e: React.DragEvent, files: { name: string; text: string }[]): void {
+  if (files.length === 0) return;
+  const dt = e.dataTransfer;
+  dt.effectAllowed = "copy";
+
+  for (const f of files) {
+    dt.items.add(new File([f.text], f.name, { type: MIME_FOR(f.name) }));
+  }
+
+  if (files.length === 1) {
+    const { name, text } = files[0];
+    const mime = MIME_FOR(name);
+    const url = URL.createObjectURL(new Blob([text], { type: mime }));
+    dt.setData("DownloadURL", `${mime}:${name}:${url}`);
+    // The blob has to outlive the drag; a timeout is the only hook available
+    // since there's no "drop completed on the OS" event.
+    setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  }
 }
 
 const MIN_WIDTH = 160;
@@ -149,6 +180,7 @@ export function FileExplorerPanel({ hidden, onClose }: { hidden: boolean; onClos
   const [folderLabel, setFolderLabel] = useState<string | null>(null);
   const [width, setWidth] = useState(DEFAULT_WIDTH);
   const [sortMode, setSortMode] = useState<SortMode>("name");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [query, setQuery] = useState("");
   const [tags, setTags] = useState<Record<string, string[]>>(loadTags);
@@ -157,6 +189,12 @@ export function FileExplorerPanel({ hidden, onClose }: { hidden: boolean; onClos
   const [selected, setSelected] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  /**
+   * File contents, cached per entry. Shared across the panel because a drag
+   * starts synchronously — there's no chance to await a read once `dragstart`
+   * fires, so every draggable file's text has to already be here.
+   */
+  const textCache = useRef(new Map<string, string>());
   const desktopDir = useApp((s) => s.fileBrowserDesktopDir);
   const activeSessionId = useApp((s) => s.activeSessionId);
 
@@ -237,9 +275,14 @@ export function FileExplorerPanel({ hidden, onClose }: { hidden: boolean; onClos
     t.core
       .invoke("list_drawings_in_dir", { dir: desktopDir })
       .then((res) => {
-        const list = (res as { name: string; path: string }[])
+        const list = (res as { name: string; path: string; mtime?: number | null; size?: number | null }[])
           .filter((e) => isDrawingFile(e.name))
-          .map((e) => ({ name: e.name, path: e.path }));
+          .map((e) => ({
+            name: e.name,
+            path: e.path,
+            ...(e.mtime != null ? { mtime: e.mtime } : {}),
+            ...(e.size != null ? { size: e.size } : {}),
+          }));
         setEntries(list);
         setFolderLabel(desktopDir.split(/[/\\]/).filter(Boolean).pop() ?? desktopDir);
       })
@@ -304,9 +347,85 @@ export function FileExplorerPanel({ hidden, onClose }: { hidden: boolean; onClos
       return true;
     }),
     sortMode,
+    sortDir,
   );
 
+  /** Clicking a column re-sorts by it; clicking the active column flips direction. */
+  const sortByColumn = (mode: SortMode) => {
+    if (mode === sortMode) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else {
+      setSortMode(mode);
+      setSortDir(DEFAULT_DIR[mode]);
+    }
+  };
+
   const selectedEntries = displayEntries.filter((e) => selected.includes(tagKey(e)));
+
+  /** Read-through accessor for an entry's text; every read populates the shared cache. */
+  const textOf = (entry: Entry) => async (): Promise<string> => {
+    const key = tagKey(entry);
+    const hit = textCache.current.get(key);
+    if (hit !== undefined) return hit;
+    const text = await readEntryText(entry);
+    textCache.current.set(key, text);
+    return text;
+  };
+
+  const warmText = async (entry: Entry): Promise<void> => {
+    try {
+      await textOf(entry)();
+    } catch {
+      // unreadable file: leave it uncached so it's simply excluded from a drag
+    }
+  };
+
+  // Files picked through "Add files…" already carry their text, so seed the
+  // cache with it immediately. Dragging must not depend on a thumbnail having
+  // rendered first — `dragstart` is synchronous and cannot wait for a read.
+  useEffect(() => {
+    for (const entry of entries) {
+      if (entry.text !== undefined && !textCache.current.has(tagKey(entry))) {
+        textCache.current.set(tagKey(entry), entry.text);
+      }
+    }
+  }, [entries]);
+
+  // Selecting files is the signal that they're about to be dragged or
+  // exported, so pull their contents in now rather than at `dragstart`, which
+  // is synchronous and can't wait for a read.
+  useEffect(() => {
+    for (const entry of entries.filter((e) => selected.includes(tagKey(e)))) void warmText(entry);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected]);
+
+  /**
+   * The files a drag should carry: the whole selection when the dragged item
+   * is part of it, otherwise just the item itself. Entries whose text hasn't
+   * been read yet are dropped rather than sent empty.
+   */
+  const dragPayload = (entry: Entry): { name: string; text: string }[] => {
+    const group = selected.includes(tagKey(entry)) ? selectedEntries : [entry];
+    return group
+      .map((e) => ({ name: e.name, text: textCache.current.get(tagKey(e)) }))
+      .filter((f): f is { name: string; text: string } => f.text !== undefined);
+  };
+
+  const onItemDragStart = (entry: Entry) => (e: React.DragEvent) => {
+    const files = dragPayload(entry);
+    if (files.length === 0) {
+      e.preventDefault();
+      void warmText(entry); // ready for the next attempt
+      return;
+    }
+    startFileDrag(e, files);
+  };
+
+  /**
+   * Pull a file's text in as soon as the pointer touches its row/card, so the
+   * content is present by the time a drag actually starts. Hovering and
+   * pressing both fire well before `dragstart`.
+   */
+  const onItemPointerHint = (entry: Entry) => () => void warmText(entry);
 
   const toggleSelected = (entry: Entry, additive: boolean) => {
     const key = tagKey(entry);
@@ -331,6 +450,11 @@ export function FileExplorerPanel({ hidden, onClose }: { hidden: boolean; onClos
   const tagSelected = () => {
     const tag = window.prompt(`Tag ${selectedEntries.length} file(s) as:`);
     if (tag) addTagTo(selectedEntries, tag);
+  };
+
+  const editTags = (entry: Entry) => {
+    const next = window.prompt(`Tags for ${entry.name} (comma-separated):`, tagsOf(entry).join(", "));
+    if (next !== null) setEntryTags(entry, next.split(",").map((t) => t.trim()).filter(Boolean));
   };
 
   return (
@@ -375,24 +499,27 @@ export function FileExplorerPanel({ hidden, onClose }: { hidden: boolean; onClos
             onChange={(e) => setQuery(e.target.value)}
             data-testid="file-explorer-search"
           />
-          <div className="filexplorer-toggle" role="group" aria-label="Sort by">
-            <button
-              className={sortMode === "name" ? "active" : ""}
-              onClick={() => setSortMode("name")}
-              title="Sort by name"
-              data-testid="file-explorer-sort-name"
-            >
-              Name
-            </button>
-            <button
-              className={sortMode === "date" ? "active" : ""}
-              onClick={() => setSortMode("date")}
-              title="Sort by date modified"
-              data-testid="file-explorer-sort-date"
-            >
-              Date
-            </button>
-          </div>
+          {/* The list view sorts from its column headers; the grid has none, so it keeps a compact toggle. */}
+          {viewMode === "grid" && (
+            <div className="filexplorer-toggle" role="group" aria-label="Sort by">
+              <button
+                className={sortMode === "name" ? "active" : ""}
+                onClick={() => sortByColumn("name")}
+                title="Sort by name"
+                data-testid="file-explorer-sort-name"
+              >
+                Name
+              </button>
+              <button
+                className={sortMode === "date" ? "active" : ""}
+                onClick={() => sortByColumn("date")}
+                title="Sort by date modified"
+                data-testid="file-explorer-sort-date"
+              >
+                Date
+              </button>
+            </div>
+          )}
           <div className="filexplorer-toggle" role="group" aria-label="View">
             <button
               className={viewMode === "grid" ? "active" : ""}
@@ -472,19 +599,19 @@ export function FileExplorerPanel({ hidden, onClose }: { hidden: boolean; onClos
               tags={tagsOf(entry)}
               selected={selected.includes(tagKey(entry))}
               onToggleSelect={(additive) => toggleSelected(entry, additive)}
-              onEditTags={() => {
-                const next = window.prompt(`Tags for ${entry.name} (comma-separated):`, tagsOf(entry).join(", "));
-                if (next !== null) setEntryTags(entry, next.split(",").map((t) => t.trim()).filter(Boolean));
-              }}
+              onEditTags={() => editTags(entry)}
+              onDragStart={onItemDragStart(entry)}
+              onPointerHint={onItemPointerHint(entry)}
+              getText={textOf(entry)}
             />
           ))}
         </div>
       ) : (
         <div className="filexplorer-list" data-testid="file-explorer-list">
           <div className="filexplorer-list-head">
-            <span>Name</span>
-            <span>Modified</span>
-            <span>Size</span>
+            <SortHeader label="Name" mode="name" active={sortMode} dir={sortDir} onSort={sortByColumn} />
+            <SortHeader label="Modified" mode="date" active={sortMode} dir={sortDir} onSort={sortByColumn} />
+            <SortHeader label="Size" mode="size" active={sortMode} dir={sortDir} onSort={sortByColumn} />
           </div>
           {displayEntries.map((entry) => (
             <FileRow
@@ -494,10 +621,10 @@ export function FileExplorerPanel({ hidden, onClose }: { hidden: boolean; onClos
               tags={tagsOf(entry)}
               selected={selected.includes(tagKey(entry))}
               onToggleSelect={(additive) => toggleSelected(entry, additive)}
-              onEditTags={() => {
-                const next = window.prompt(`Tags for ${entry.name} (comma-separated):`, tagsOf(entry).join(", "));
-                if (next !== null) setEntryTags(entry, next.split(",").map((t) => t.trim()).filter(Boolean));
-              }}
+              onEditTags={() => editTags(entry)}
+              onDragStart={onItemDragStart(entry)}
+              onPointerHint={onItemPointerHint(entry)}
+              getText={textOf(entry)}
             />
           ))}
         </div>
@@ -522,33 +649,61 @@ interface FileItemProps {
   selected: boolean;
   onToggleSelect: (additive: boolean) => void;
   onEditTags: () => void;
+  onDragStart: (e: React.DragEvent) => void;
+  /** Called on hover/press to pre-read the file, so a drag has content ready. */
+  onPointerHint: () => void;
+  /** Read-through accessor for the file's text; fills the panel's shared cache. */
+  getText: () => Promise<string>;
 }
 
-function FileCard({ entry, activeSessionId, tags, selected, onToggleSelect, onEditTags }: FileItemProps) {
+/** A clickable list-view column title; clicking the active one flips direction. */
+function SortHeader({
+  label,
+  mode,
+  active,
+  dir,
+  onSort,
+}: {
+  label: string;
+  mode: SortMode;
+  active: SortMode;
+  dir: SortDir;
+  onSort: (mode: SortMode) => void;
+}) {
+  const isActive = active === mode;
+  return (
+    <button
+      className={`filexplorer-col ${isActive ? "active" : ""}`}
+      onClick={() => onSort(mode)}
+      title={`Sort by ${label.toLowerCase()}`}
+      data-testid={`file-explorer-col-${mode}`}
+    >
+      {label}
+      <span className="filexplorer-col-arrow">{isActive ? (dir === "asc" ? "▲" : "▼") : ""}</span>
+    </button>
+  );
+}
+
+/** Lazily renders a geometry preview once the element scrolls into view. */
+function useThumbnail(
+  entry: Entry,
+  getText: () => Promise<string>,
+  size: number,
+  ref: React.RefObject<HTMLElement>,
+): string | null {
   const [svg, setSvg] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const cardRef = useRef<HTMLButtonElement>(null);
-  const textCacheRef = useRef<string | null>(entry.text ?? null);
-
-  const activeName = getSessions().find((s) => s.id === activeSessionId)?.name;
-  const isActive = activeName === entry.name;
-
-  // Render on demand: only fetch + rasterize once this card actually scrolls into view.
   useEffect(() => {
-    const el = cardRef.current;
-    if (!el || svg || loading) return;
+    const el = ref.current;
+    if (!el) return;
+    let done = false;
     const observer = new IntersectionObserver(
       (entries) => {
-        if (entries.some((e) => e.isIntersecting)) {
-          setLoading(true);
-          readEntryText(entry)
-            .then((text) => {
-              textCacheRef.current = text;
-              setSvg(fileToSvg(entry.name, text, { size: 110, background: "#17181c", stroke: "#c7d0dc" }));
-            })
-            .catch(() => setSvg(fileToSvg(entry.name, "", { size: 110 })))
-            .finally(() => setLoading(false));
+        if (!done && entries.some((e) => e.isIntersecting)) {
+          done = true;
           observer.disconnect();
+          getText()
+            .then((text) => setSvg(fileToSvg(entry.name, text, { size, background: "#17181c", stroke: "#c7d0dc" })))
+            .catch(() => setSvg(fileToSvg(entry.name, "", { size })));
         }
       },
       { rootMargin: "200px" },
@@ -556,29 +711,24 @@ function FileCard({ entry, activeSessionId, tags, selected, onToggleSelect, onEd
     observer.observe(el);
     return () => observer.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entry.name]);
+  }, [entry.name, size]);
+  return svg;
+}
 
-  const handleOpen = async () => {
-    const text = textCacheRef.current ?? (await readEntryText(entry));
-    openEntry(entry, text);
-  };
+function FileCard({ entry, activeSessionId, tags, selected, onToggleSelect, onEditTags, onDragStart, onPointerHint, getText }: FileItemProps) {
+  const cardRef = useRef<HTMLButtonElement>(null);
+  const svg = useThumbnail(entry, getText, 110, cardRef);
 
-  // Dragging needs the content synchronously, so fall back to no-op if the
-  // lazy read hasn't finished; the thumbnail load populates it within a tick.
-  const onDragStart = (e: React.DragEvent) => {
-    const text = textCacheRef.current;
-    if (text === null) {
-      e.preventDefault();
-      return;
-    }
-    startFileDrag(e, entry.name, text);
-  };
+  const activeName = getSessions().find((s) => s.id === activeSessionId)?.name;
+  const isActive = activeName === entry.name;
+
+  const handleOpen = async () => openEntry(entry, await getText());
 
   return (
     <button
       className={`filecard ${isActive ? "active" : ""} ${selected ? "selected" : ""}`}
       data-testid="file-card"
-      title={`Open ${entry.name}${tags.length ? ` — tagged ${tags.join(", ")}` : ""}\nCtrl-click to select · drag to copy the file out`}
+      title={`Open ${entry.name}${tags.length ? ` — tagged ${tags.join(", ")}` : ""}\nCtrl-click to select · drag out to copy the file · right-click to tag`}
       onClick={(e) => (e.ctrlKey || e.metaKey || e.shiftKey ? onToggleSelect(true) : void handleOpen())}
       onContextMenu={(e) => {
         e.preventDefault();
@@ -586,6 +736,8 @@ function FileCard({ entry, activeSessionId, tags, selected, onToggleSelect, onEd
       }}
       draggable
       onDragStart={onDragStart}
+      onPointerEnter={onPointerHint}
+      onPointerDown={onPointerHint}
       ref={cardRef}
     >
       <span className="filecard-thumb">
@@ -605,33 +757,23 @@ function FileCard({ entry, activeSessionId, tags, selected, onToggleSelect, onEd
   );
 }
 
-function FileRow({ entry, activeSessionId, tags, selected, onToggleSelect, onEditTags }: FileItemProps) {
-  const textCacheRef = useRef<string | null>(entry.text ?? null);
+function FileRow({ entry, activeSessionId, tags, selected, onToggleSelect, onEditTags, onDragStart, onPointerHint, getText }: FileItemProps) {
+  const rowRef = useRef<HTMLButtonElement>(null);
+  // A small geometry preview, so the list is still scannable by shape and not
+  // just by filename. Rendering it also warms the shared text cache, which is
+  // what makes a drag out of the list work on the first attempt.
+  const svg = useThumbnail(entry, getText, 22, rowRef);
   const activeName = getSessions().find((s) => s.id === activeSessionId)?.name;
   const isActive = activeName === entry.name;
 
-  const handleOpen = async () => {
-    const text = textCacheRef.current ?? (await readEntryText(entry));
-    openEntry(entry, text);
-  };
-
-  // The list view has no thumbnail pass to warm the cache, so read on demand
-  // the first time the row is picked up for a drag.
-  const onDragStart = (e: React.DragEvent) => {
-    const text = textCacheRef.current;
-    if (text === null) {
-      e.preventDefault();
-      void readEntryText(entry).then((t) => (textCacheRef.current = t));
-      return;
-    }
-    startFileDrag(e, entry.name, text);
-  };
+  const handleOpen = async () => openEntry(entry, await getText());
 
   return (
     <button
+      ref={rowRef}
       className={`filerow ${isActive ? "active" : ""} ${selected ? "selected" : ""}`}
       data-testid="file-row"
-      title={`Open ${entry.name}${tags.length ? ` — tagged ${tags.join(", ")}` : ""}\nCtrl-click to select · drag to copy the file out · right-click to tag`}
+      title={`Open ${entry.name}${tags.length ? ` — tagged ${tags.join(", ")}` : ""}\nCtrl-click to select · drag out to copy the file · right-click to tag`}
       onClick={(e) => (e.ctrlKey || e.metaKey || e.shiftKey ? onToggleSelect(true) : void handleOpen())}
       onContextMenu={(e) => {
         e.preventDefault();
@@ -639,13 +781,14 @@ function FileRow({ entry, activeSessionId, tags, selected, onToggleSelect, onEdi
       }}
       draggable
       onDragStart={onDragStart}
-      onPointerEnter={() => {
-        // Warm the cache on hover so a drag started right after works first time.
-        if (textCacheRef.current === null) void readEntryText(entry).then((t) => (textCacheRef.current = t));
-      }}
+      onPointerEnter={onPointerHint}
+      onPointerDown={onPointerHint}
     >
       <span className="filerow-name">
-        {entry.name}
+        <span className="filerow-thumb" aria-hidden="true">
+          {svg ? <span dangerouslySetInnerHTML={{ __html: svg }} /> : null}
+        </span>
+        <span className="filerow-label">{entry.name}</span>
         {tags.length > 0 && (
           <span className="filecard-tags">
             {tags.map((t) => (

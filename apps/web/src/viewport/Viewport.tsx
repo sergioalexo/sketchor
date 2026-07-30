@@ -22,6 +22,7 @@ import {
 import {
   applyStraighten,
   bus,
+  closeTab,
   computeStraightenTransform,
   doc,
   getSessionView,
@@ -361,6 +362,11 @@ export function Viewport() {
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "o") {
         e.preventDefault();
         void openDrawing();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "w") {
+        // Desktop only in practice: browsers reserve Ctrl+W to close their own
+        // tab and won't let a page preventDefault it.
+        e.preventDefault();
+        closeTab(useApp.getState().activeSessionId);
       } else if (e.ctrlKey && e.key.toLowerCase() === "z" && !e.shiftKey) {
         bus.undo();
         e.preventDefault();

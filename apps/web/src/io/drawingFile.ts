@@ -1,6 +1,6 @@
 import { entitiesToDxf, entitiesToSvgDocument, parseSvgText } from "@sketchor/core";
 import { importDwgBuffer } from "../browser/dwgImport";
-import { doc, finishSessionSave, importDxfText, importEntities, openIntoSession, useApp } from "../state/store";
+import { doc, finishSessionSave, getSessions, importDxfText, importEntities, openIntoSession, useApp } from "../state/store";
 import { displayUnitToDxfCode } from "../units";
 
 /**
@@ -84,13 +84,27 @@ async function writeToHandle(handle: FsFileHandle, text: string): Promise<void> 
  */
 export type SaveMode = "save" | "save-as" | "save-copy";
 
+/**
+ * What the save dialog should be pre-filled with: the tab's own filename,
+ * re-extensioned for the format being written, so saving an opened
+ * `bracket.dxf` suggests `bracket.dxf` (or `bracket.svg`) rather than a
+ * generic `drawing.dxf`. Falls back to `drawing.<fmt>` for a tab that has
+ * never been named (an untouched "Untitled-1").
+ */
+function defaultSaveName(format: SaveFormat): string {
+  const active = getSessions().find((s) => s.id === useApp.getState().activeSessionId);
+  if (!active?.named || !active.name) return `drawing.${format}`;
+  const stem = active.name.replace(/\.(dxf|svg|dwg)$/i, "");
+  return `${stem}.${format}`;
+}
+
 /** Saves the current drawing as DXF or SVG. No-op if the location prompt is cancelled. */
 export async function saveDrawing(format: SaveFormat, suggestedName?: string, mode: SaveMode = "save"): Promise<void> {
   const text = serialize(format);
   const { mime, description } = SAVE_FORMAT[format];
-  const name = suggestedName ?? `drawing.${format}`;
   const w = window as WindowWithFS;
   const sessionId = useApp.getState().activeSessionId;
+  const name = suggestedName ?? defaultSaveName(format);
 
   if (mode === "save") {
     const cached = savedHandles.get(sessionId);

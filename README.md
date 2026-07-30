@@ -22,6 +22,7 @@ npm run desktop    # native desktop window via Tauri (needs Rust toolchain)
 | Pan | middle- or right-button drag |
 | Zoom | mouse wheel (at cursor) |
 | Save / Save As | `Ctrl+S` overwrites the tab's file; the Save menu has Save As and Save a Copy |
+| Close tab | `Ctrl+W` (desktop only — browsers reserve it for their own tab) |
 | Undo / Redo | `Ctrl+Z` / `Ctrl+Y` |
 
 Snapping is automatic, in priority order: endpoints, centers, quadrants and
@@ -124,9 +125,11 @@ elsewhere. Opening a file that's already open in a tab switches to that tab
 
 ### The file browser
 
-The left panel browses a folder of drawings as geometry thumbnails. It sorts
-by name or date, switches between the thumbnail grid and a list view with
-Name / Modified / Size columns, and filters as you type (`Ctrl+F`).
+The left panel browses a folder of drawings as geometry thumbnails, and
+filters as you type (`Ctrl+F`). The **list view** shows a small preview plus
+Name / Modified / Size columns — click a column title to sort by it, click it
+again to reverse. (The grid view has no headers, so it keeps a compact
+name/date toggle.)
 
 Files can be **tagged** (right-click one, or select several and use **Tag…**);
 the tag chips along the top filter the list, and multiple active tags narrow
@@ -135,11 +138,18 @@ desktop build and by filename in the browser — the File System Access API's
 handles aren't a durable identifier across sessions, so in the browser two
 same-named files from different folders share tags.
 
-**Dragging a file out** of the panel copies it to the desktop, Explorer, or
-another app. This rides Chromium's `DownloadURL` drag protocol (also honored
-by Tauri's WebView2); other engines get a `text/plain` fallback. That protocol
-carries one file per drag, which is why selecting several and pressing
-**Export** — not a multi-file drag — is how you get a batch out.
+**Dragging files out** of the panel copies them to another app — a chat's
+upload box, a file input, Explorer, the desktop. Dragging an item that's part
+of the current selection drags the whole selection; dragging an unselected one
+drags just it.
+
+Two mechanisms are attached to the drag, because drop targets read different
+things: real `File` objects (what any *web* drop target reads, and what makes
+a drag into a chat attach the drawing instead of pasting its name), plus
+Chromium's `DownloadURL` protocol, which is what lets a drop onto the *OS*
+write a file. `DownloadURL` carries only one file, so it's attached to
+single-file drags only; a multi-file drag still works into web targets, and
+**Export** writes a selection out directly.
 
 On Windows, `native/dxf-thumbnailer/` is a Rust COM shell extension that makes
 Explorer render a **preview of the geometry** — not just the app icon — as the

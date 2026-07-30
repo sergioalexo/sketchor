@@ -78,6 +78,12 @@ fn first_drawing_arg(args: &[String]) -> Option<String> {
 struct DrawingEntry {
     name: String,
     path: String,
+    /// Last-modified time in milliseconds since the Unix epoch, matching the
+    /// browser's `File.lastModified` so the panel sorts both sources alike.
+    /// `None` when the platform or filesystem can't report it.
+    mtime: Option<f64>,
+    /// Size in bytes, `None` if it couldn't be read.
+    size: Option<f64>,
 }
 
 /// Lists `.dxf`/`.svg` files directly inside `dir` (non-recursive), for
@@ -102,9 +108,20 @@ fn list_drawings_in_dir(dir: String) -> Result<Vec<DrawingEntry>, String> {
             Some(n) => n.to_string_lossy().to_string(),
             None => continue,
         };
+        // Metadata is best-effort: a file we can list but not stat still gets
+        // shown, just without a date or size.
+        let meta = entry.metadata().ok();
+        let mtime = meta.as_ref().and_then(|m| m.modified().ok()).and_then(|t| {
+            t.duration_since(std::time::UNIX_EPOCH)
+                .ok()
+                .map(|d| d.as_millis() as f64)
+        });
+        let size = meta.as_ref().map(|m| m.len() as f64);
         out.push(DrawingEntry {
             name,
             path: path.to_string_lossy().to_string(),
+            mtime,
+            size,
         });
     }
     Ok(out)
