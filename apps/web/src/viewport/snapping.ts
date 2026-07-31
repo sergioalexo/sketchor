@@ -2,7 +2,7 @@ import type { Point, SketchDocument } from "@sketchor/core";
 import { arcPointAt, arcSweep, bulgeToArc, closestPointOnSegment, dist, mid, polylineSegments } from "@sketchor/core";
 import { gridStep, type View } from "./view";
 
-export type SnapKind = "endpoint" | "midpoint" | "center" | "quadrant" | "intersection" | "on-line" | "grid";
+export type SnapKind = "origin" | "endpoint" | "midpoint" | "center" | "quadrant" | "intersection" | "on-line" | "grid";
 
 export interface Snap {
   point: Point;
@@ -35,9 +35,11 @@ function segmentIntersection(a1: Point, a2: Point, b1: Point, b2: Point): Point 
  * feature point sitting further along the same line, making corners and
  * centers effectively unreachable.
  */
-export function findSnap(doc: SketchDocument, view: View, cursor: Point): Snap {
+export function findSnap(doc: SketchDocument, view: View, cursor: Point, excludeIds?: readonly string[]): Snap {
   const tol = SNAP_PX / view.scale;
-  const entities = doc.all();
+  // While dragging a selection, its own geometry must not act as a snap target
+  // — it moves with the cursor, so it would snap to itself and pin the drag.
+  const entities = excludeIds?.length ? doc.all().filter((e) => !excludeIds.includes(e.id)) : doc.all();
 
   const bestOf = (candidates: { point: Point; kind: SnapKind }[]): Snap | null => {
     let best: Snap | null = null;
@@ -52,7 +54,9 @@ export function findSnap(doc: SketchDocument, view: View, cursor: Point): Snap {
     return best;
   };
 
-  const featurePoints: { point: Point; kind: SnapKind }[] = [];
+  // The world origin is always snappable, even in an empty drawing — it's the
+  // one reference point that exists before any geometry does.
+  const featurePoints: { point: Point; kind: SnapKind }[] = [{ point: { x: 0, y: 0 }, kind: "origin" }];
   const midpoints: { point: Point; kind: SnapKind }[] = [];
   const onCurve: { point: Point; kind: SnapKind }[] = [];
 

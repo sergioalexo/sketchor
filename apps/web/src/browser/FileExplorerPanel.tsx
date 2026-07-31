@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { parseSvgText } from "@sketchor/core";
 import { getSessions, importDxfText, importEntities, openIntoSession, useApp } from "../state/store";
-import { fileToSvg, isDrawingFile } from "./thumbnail";
+import { fileToSvg, isDrawingFile, queueThumbnail } from "./thumbnail";
 
 interface Entry {
   name: string;
-  /** Already-read content (e.g. from the "Add files…" picker) — skips the lazy read below. */
+  /** Already-read content — skips the lazy read below. */
   text?: string;
+  /** A picked `File` whose content is read on demand, so adding hundreds of files doesn't read them all upfront. */
+  file?: File;
   /** Web folder browsing: a handle to lazily read the file's text. */
   handle?: FileSystemFileHandle;
   /** Desktop: a full path passed to the Rust `read_drawing_file` command. */
@@ -64,6 +66,7 @@ function tauri(): TauriInvoke | undefined {
 
 async function readEntryText(entry: Entry): Promise<string> {
   if (entry.text !== undefined) return entry.text;
+  if (entry.file) return entry.file.text();
   if (entry.handle) return (await entry.handle.getFile()).text();
   if (entry.path) {
     const t = tauri();
@@ -159,6 +162,8 @@ function startFileDrag(e: React.DragEvent, files: { name: string; text: string }
 const MIN_WIDTH = 160;
 const MAX_WIDTH = 520;
 const DEFAULT_WIDTH = 240;
+/** How many files' contents to pre-read so dragging works without waiting; the rest load on hover/scroll. */
+const PREFETCH_COUNT = 24;
 
 /**
  * Left-dock "mini-Explorer" (R9): geometry thumbnails of every .dxf/.svg
@@ -232,11 +237,11 @@ export function FileExplorerPanel({ hidden, onClose }: { hidden: boolean; onClos
 
   const addFiles = async (files: FileList | null) => {
     if (!files) return;
-    const picked = await Promise.all(
-      Array.from(files)
-        .filter((f) => isDrawingFile(f.name))
-        .map(async (f) => ({ name: f.name, text: await f.text(), mtime: f.lastModified, size: f.size })),
-    );
+    // Metadata only — contents are read lazily per file. Reading every picked
+    // file upfront is what made adding a large library stall the app.
+    const picked: Entry[] = Array.from(files)
+      .filter((f) => isDrawingFile(f.name))
+      .map((f) => ({ name: f.name, file: f, mtime: f.lastModified, size: f.size }));
     if (picked.length === 0) return;
     setEntries((prev) => {
       const byName = new Map(prev.map((e) => [e.name, e]));
@@ -379,15 +384,20 @@ export function FileExplorerPanel({ hidden, onClose }: { hidden: boolean; onClos
     }
   };
 
-  // Files picked through "Add files…" already carry their text, so seed the
-  // cache with it immediately. Dragging must not depend on a thumbnail having
-  // rendered first — `dragstart` is synchronous and cannot wait for a read.
+  /**
+   * Warm the first screenful of files in the background.
+   *
+   * `dragstart` is synchronous and can't wait for a read, so a file's content
+   * has to already be cached when the drag begins. Hovering warms it (and
+   * hover reliably precedes a mouse drag), but prefetching the top of the list
+   * means the common case of a modest folder behaves as if everything were
+   * loaded, without the stall of reading a large library upfront. Reads go
+   * through the same queue as thumbnails, so this never blocks the canvas.
+   */
   useEffect(() => {
-    for (const entry of entries) {
-      if (entry.text !== undefined && !textCache.current.has(tagKey(entry))) {
-        textCache.current.set(tagKey(entry), entry.text);
-      }
-    }
+    const cancels = entries.slice(0, PREFETCH_COUNT).map((entry) => queueThumbnail(() => warmText(entry)));
+    return () => cancels.forEach((cancel) => cancel());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entries]);
 
   // Selecting files is the signal that they're about to be dragged or
@@ -696,20 +706,32 @@ function useThumbnail(
     const el = ref.current;
     if (!el) return;
     let done = false;
+    let cancelQueued: (() => void) | null = null;
     const observer = new IntersectionObserver(
       (entries) => {
         if (!done && entries.some((e) => e.isIntersecting)) {
           done = true;
           observer.disconnect();
-          getText()
-            .then((text) => setSvg(fileToSvg(entry.name, text, { size, background: "#17181c", stroke: "#c7d0dc" })))
-            .catch(() => setSvg(fileToSvg(entry.name, "", { size })));
+          // Reading and rasterising happens on the shared queue, so a folder
+          // of hundreds of drawings fills in gradually instead of locking up
+          // the app while every visible card parses at once.
+          cancelQueued = queueThumbnail(async () => {
+            try {
+              const text = await getText();
+              setSvg(fileToSvg(entry.name, text, { size, background: "#17181c", stroke: "#c7d0dc" }));
+            } catch {
+              setSvg(fileToSvg(entry.name, "", { size }));
+            }
+          });
         }
       },
       { rootMargin: "200px" },
     );
     observer.observe(el);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      cancelQueued?.();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entry.name, size]);
   return svg;

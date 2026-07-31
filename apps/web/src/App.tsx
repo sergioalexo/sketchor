@@ -10,6 +10,7 @@ import { DiagnosticsPanel } from "./heal/DiagnosticsPanel";
 import { DuplicatesPanel } from "./heal/DuplicatesPanel";
 import { ImportReportBanner } from "./dxf/ImportReportBanner";
 import { LayerPanel } from "./layers/LayerPanel";
+import { PatternPanel } from "./pattern/PatternPanel";
 import { StraightenPanel } from "./viewport/StraightenPanel";
 import { TabStrip } from "./tabs/TabStrip";
 
@@ -125,10 +126,20 @@ export function App() {
   const pinMeasurement = useApp((s) => s.pinMeasurement);
   const clearPinnedMeasurements = useApp((s) => s.clearPinnedMeasurements);
   const referenceEdgeId = useApp((s) => s.referenceEdgeId);
+  const saveNotice = useApp((s) => s.saveNotice);
+  const setSaveNotice = useApp((s) => s.setSaveNotice);
+
+  // A save confirmation is transient — clear it a few seconds after it lands.
+  useEffect(() => {
+    if (!saveNotice) return;
+    const t = setTimeout(() => setSaveNotice(null), saveNotice.kind === "error" ? 8000 : 3000);
+    return () => clearTimeout(t);
+  }, [saveNotice, setSaveNotice]);
   const [showCode, setShowCode] = useState(false);
   const [showLayers, setShowLayers] = useState(true);
   const [showDiag, setShowDiag] = useState(false);
   const [showDup, setShowDup] = useState(false);
+  const [showPattern, setShowPattern] = useState(false);
   const [showSaveMenu, setShowSaveMenu] = useState(false);
   const showFiles = useApp((s) => s.fileBrowserVisible);
   const setShowFiles = useApp((s) => s.setFileBrowserVisible);
@@ -385,6 +396,24 @@ export function App() {
             </svg>
           </button>
           <button
+            className={`action ${showPattern ? "toggled" : ""}`}
+            title="Toggle pattern panel (repeat the selection in a grid or circle)"
+            data-testid="toggle-pattern"
+            onClick={() => setShowPattern((v) => !v)}
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18">
+              <circle cx="6" cy="6" r="2.2" fill="currentColor" />
+              <circle cx="12" cy="6" r="2.2" fill="currentColor" />
+              <circle cx="18" cy="6" r="2.2" fill="currentColor" />
+              <circle cx="6" cy="12" r="2.2" fill="currentColor" />
+              <circle cx="12" cy="12" r="2.2" fill="currentColor" />
+              <circle cx="18" cy="12" r="2.2" fill="currentColor" />
+              <circle cx="6" cy="18" r="2.2" fill="currentColor" />
+              <circle cx="12" cy="18" r="2.2" fill="currentColor" />
+              <circle cx="18" cy="18" r="2.2" fill="currentColor" />
+            </svg>
+          </button>
+          <button
             className={`action ${showFiles ? "toggled" : ""}`}
             title="Toggle file browser"
             data-testid="toggle-file-browser"
@@ -470,6 +499,7 @@ export function App() {
         </div>
         {showDiag && <DiagnosticsPanel onClose={() => setShowDiag(false)} />}
         {showDup && <DuplicatesPanel onClose={() => setShowDup(false)} />}
+        {showPattern && <PatternPanel onClose={() => setShowPattern(false)} />}
         {showLayers && <LayerPanel />}
         {showCode && <CodePanel />}
       </div>
@@ -493,6 +523,14 @@ export function App() {
           ))}
         </select>
         <span data-testid="entity-count">{doc.all().length} entities</span>
+        {saveNotice && (
+          <span
+            className={saveNotice.kind === "error" ? "save-notice error" : "save-notice"}
+            data-testid="save-notice"
+          >
+            {saveNotice.message}
+          </span>
+        )}
         <span data-testid="selection-hint">{selectionLabel(selection)}</span>
         {measurement && (
           <span className="measure-readout" data-testid="measure-readout">

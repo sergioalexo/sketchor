@@ -460,6 +460,15 @@ body {
   background: rgba(90, 209, 197, 0.15);
 }
 
+.save-notice {
+  color: #5adc7a;
+  font-weight: 600;
+}
+
+.save-notice.error {
+  color: #ff8266;
+}
+
 .connectivity-readout {
   color: #4d7ac7;
   font-weight: 600;

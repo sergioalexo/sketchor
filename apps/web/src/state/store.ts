@@ -21,6 +21,7 @@ import {
   newGroupId,
   parseCode,
   parseDxf,
+  patternCommands,
   reduceToHalfTurn,
   scanForCrossings,
   scanForDuplicates,
@@ -39,6 +40,7 @@ import {
   type HealIssue,
   type HealOptions,
   type ParseIssue,
+  type PatternSpec,
   type Point,
 } from "@sketchor/core";
 
@@ -331,6 +333,27 @@ export function fixAllHeal(): void {
   rescanHeal();
 }
 
+/* --------------------------------- pattern -------------------------------- */
+
+/**
+ * Arrays the current selection, as one undoable step, and selects the result
+ * (originals plus copies) so it can be moved or patterned again. No-op when
+ * nothing is selected or the spec produces no copies.
+ */
+export function applyPattern(spec: PatternSpec): number {
+  const { selection } = useApp.getState();
+  if (selection.length === 0) return 0;
+  const commands = patternCommands(doc, selection, spec);
+  if (commands.length === 0) return 0;
+
+  bus.execute({ type: "batch", commands });
+  const added = commands
+    .map((c) => (c.type === "add-entity" ? c.entity.id : null))
+    .filter((id): id is EntityId => id !== null);
+  useApp.getState().setSelection([...selection, ...added]);
+  return added.length;
+}
+
 /* ---------------------------- duplicate geometry -------------------------- */
 
 /** Re-scans the drawing for duplicate/overlapping geometry under the current tolerance, and for line crossings. */
@@ -466,6 +489,13 @@ interface AppState {
   /** Read-only findings from the most recent line-crossing scan — no auto-fix (see crossings.ts). */
   crossingIssues: CrossingIssue[];
   setCrossingIssues: (issues: CrossingIssue[]) => void;
+  /**
+   * Outcome of the most recent save, surfaced in the status bar. Ctrl+S over
+   * an already-chosen file writes with no dialog, so without this the app
+   * gives no sign it did anything.
+   */
+  saveNotice: { kind: "saved" | "error"; message: string; at: number } | null;
+  setSaveNotice: (notice: { kind: "saved" | "error"; message: string; at: number } | null) => void;
   /** The group currently "entered" for editing individual members (double-click a group, Esc to exit). */
   enteredGroupId: GroupId | null;
   setEnteredGroup: (id: GroupId | null) => void;
@@ -555,6 +585,8 @@ export const useApp = create<AppState>((set, get) => ({
   setDuplicateFocus: (p) => set({ duplicateFocus: p }),
   crossingIssues: [],
   setCrossingIssues: (crossingIssues) => set({ crossingIssues }),
+  saveNotice: null,
+  setSaveNotice: (saveNotice) => set({ saveNotice }),
   enteredGroupId: null,
   setEnteredGroup: (id) => set({ enteredGroupId: id }),
   fileBrowserVisible: true,
@@ -652,11 +684,20 @@ export const useApp = create<AppState>((set, get) => ({
 }));
 
 function syncFromBus(): void {
+  const session = activeSession();
+  const becameDirty = !session.dirty;
+  session.dirty = true;
+
   useApp.setState((s) => {
     const selection = s.selection.filter((id) => doc.has(id));
     return {
       revision: doc.revision,
       selection,
+      // `dirty` lives on the session object, which the tab strip reads through
+      // getSessions() rather than subscribing to. Bumping the version here is
+      // what actually makes the unsaved-changes dot appear — without it the
+      // flag flips but nothing re-renders, so an edit looked unrecorded.
+      ...(becameDirty ? { sessionsVersion: s.sessionsVersion + 1 } : {}),
       // The straighten tool's reference edge must stay part of the selection;
       // the measure tool's angle-reference edge (Ctrl-click) isn't selection-bound,
       // so it only needs to still exist.
@@ -669,7 +710,6 @@ function syncFromBus(): void {
       crossingIssues: s.crossingIssues.filter((issue) => issue.entityIds.every((id) => doc.has(id))),
     };
   });
-  activeSession().dirty = true;
 }
 
 let unbindBus: (() => void) | null = null;

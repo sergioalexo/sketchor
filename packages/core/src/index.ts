@@ -15,3 +15,4 @@ export * from "./boxSelect";
 export * from "./regions";
 export * from "./duplicates";
 export * from "./crossings";
+export * from "./pattern";

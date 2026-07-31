@@ -9,6 +9,7 @@ import {
   distToSegment,
   polylineSegments,
   entitiesInBox,
+  entityPoints,
   findClosedRegions,
   freeEndpointEntityIds,
   regionContainingPoint,
@@ -47,7 +48,15 @@ type Interaction =
   | { kind: "draw-polyline"; points: Point[] }
   | { kind: "draw-circle"; center: Point }
   | { kind: "measure"; start: Point }
-  | { kind: "move"; ids: EntityId[]; startWorld: Point; dx: number; dy: number }
+  | {
+      kind: "move";
+      ids: EntityId[];
+      startWorld: Point;
+      dx: number;
+      dy: number;
+      /** The selection vertex nearest the grab point; what snapping aligns to a target. */
+      base: Point | null;
+    }
   | { kind: "rotate-group"; ids: EntityId[]; pivot: Point; startAngle: number; rotation: number }
   | { kind: "box-select"; startScreen: Point; startWorld: Point; currentWorld: Point; additive: boolean };
 
@@ -58,6 +67,28 @@ const GROUP_HANDLE_HIT_PX = 8;
 function groupHandleScreenPos(view: View, bb: { minX: number; maxX: number; maxY: number }): Point {
   const s = worldToScreen(view, { x: (bb.minX + bb.maxX) / 2, y: bb.maxY });
   return { x: s.x, y: s.y - GROUP_HANDLE_OFFSET_PX };
+}
+
+/**
+ * The vertex of `ids` closest to `world` — the handle a snapped move aligns.
+ * Grabbing near a corner therefore snaps that corner onto the target, which is
+ * how you land a part exactly on the origin or on another corner.
+ */
+function nearestVertex(ids: EntityId[], world: Point): Point | null {
+  let best: Point | null = null;
+  let bestDist = Infinity;
+  for (const id of ids) {
+    const entity = doc.get(id);
+    if (!entity) continue;
+    for (const p of entityPoints(entity)) {
+      const d = dist(p, world);
+      if (d < bestDist) {
+        bestDist = d;
+        best = p;
+      }
+    }
+  }
+  return best;
 }
 
 /** New geometry carries the active layer (omitted when it's the default). */
@@ -653,7 +684,14 @@ export function Viewport() {
           }
           app.setSelection(ids);
           if (resolved.every((id) => ids.includes(id))) {
-            interactionRef.current = { kind: "move", ids, startWorld: world, dx: 0, dy: 0 };
+            interactionRef.current = {
+              kind: "move",
+              ids,
+              startWorld: world,
+              dx: 0,
+              dy: 0,
+              base: nearestVertex(ids, world),
+            };
           }
         } else {
           // Nothing under the cursor: could be a plain click (clears the
@@ -694,11 +732,23 @@ export function Viewport() {
       view.oy += screen.y - interaction.lastY;
       interactionRef.current = { ...interaction, lastX: screen.x, lastY: screen.y };
     } else if (interaction.kind === "move") {
-      interactionRef.current = {
-        ...interaction,
-        dx: world.x - interaction.startWorld.x,
-        dy: world.y - interaction.startWorld.y,
-      };
+      let dx = world.x - interaction.startWorld.x;
+      let dy = world.y - interaction.startWorld.y;
+      // Snap the moved geometry itself, not the cursor: the selection's base
+      // vertex (the one nearest where the drag began) is tested against every
+      // snap target — including the origin — and the whole selection is offset
+      // so that vertex lands exactly on it. Hold Alt for a free, unsnapped move.
+      if (interaction.base && !e.altKey) {
+        const moved = { x: interaction.base.x + dx, y: interaction.base.y + dy };
+        const candidate = findSnap(doc, view, moved, interaction.ids);
+        // Only real targets pull the selection; the grid fallback would
+        // quantise every move and make free positioning impossible.
+        if (candidate.kind !== "grid") {
+          dx = candidate.point.x - interaction.base.x;
+          dy = candidate.point.y - interaction.base.y;
+        }
+      }
+      interactionRef.current = { ...interaction, dx, dy };
     } else if (interaction.kind === "rotate-group") {
       const angle = Math.atan2(world.y - interaction.pivot.y, world.x - interaction.pivot.x);
       interactionRef.current = { ...interaction, rotation: angle - interaction.startAngle };
@@ -813,8 +863,11 @@ export function Viewport() {
         return;
       }
     }
-    // Anywhere else — empty canvas or an ungrouped/already-entered entity — zoom in to fit.
-    fitView(app.selection.length ? app.selection : undefined);
+    // Zoom to fit. Double-clicking *geometry* frames that entity; double-clicking
+    // empty space always frames the whole drawing — deliberately ignoring the
+    // selection, since the first click of the double-click may have just changed
+    // it, which otherwise makes the gesture unpredictable.
+    fitView(hit ? [hit] : undefined);
   };
 
   return (

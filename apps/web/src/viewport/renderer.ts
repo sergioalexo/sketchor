@@ -86,6 +86,10 @@ const COLORS = {
   closedRegionFill: "rgba(180, 190, 205, 0.16)",
   duplicateMarker: "#f0b968",
   crossingMarker: "#c77dff",
+  origin: "#9aa4b8",
+  originOff: "#4a5165",
+  axisX: "#e06c75",
+  axisY: "#7ec96f",
 };
 
 function fmtNum(n: number): string {
@@ -149,6 +153,11 @@ export function render(
     drawEntity(ctx, view, ui.preview, COLORS.preview, 1.25);
     ctx.setLineDash([]);
   }
+
+  // Drawn over the geometry, like a CAD axis icon: geometry frequently runs
+  // straight through the origin, and a reference marker hidden underneath it
+  // is no use.
+  drawOrigin(ctx, width, height, view);
 
   if (ui.pinnedMeasurements.length > 0) {
     ctx.globalAlpha = 0.5;
@@ -504,6 +513,62 @@ function drawGrid(
   }
 }
 
+/**
+ * The world origin: a small crosshair with labelled +X/+Y axis stubs, so
+ * "where is 0,0" is answerable at a glance and snapping to it has something
+ * visible to aim at. Drawn at a fixed screen size, and clamped to the edge of
+ * the viewport with a muted marker when the origin is panned off-screen so it
+ * still reads as a direction rather than disappearing.
+ */
+function drawOrigin(ctx: CanvasRenderingContext2D, width: number, height: number, view: View): void {
+  const o = worldToScreen(view, { x: 0, y: 0 });
+  const onScreen = o.x >= 0 && o.x <= width && o.y >= 0 && o.y <= height;
+
+  if (!onScreen) {
+    const x = Math.max(8, Math.min(width - 8, o.x));
+    const y = Math.max(8, Math.min(height - 8, o.y));
+    ctx.strokeStyle = COLORS.originOff;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(x, y, 4, 0, Math.PI * 2);
+    ctx.stroke();
+    return;
+  }
+
+  const AXIS = 26;
+  ctx.lineWidth = 1.5;
+
+  // +X to the right, +Y upward (screen Y is flipped).
+  ctx.strokeStyle = COLORS.axisX;
+  ctx.beginPath();
+  ctx.moveTo(o.x, o.y);
+  ctx.lineTo(o.x + AXIS, o.y);
+  ctx.stroke();
+
+  ctx.strokeStyle = COLORS.axisY;
+  ctx.beginPath();
+  ctx.moveTo(o.x, o.y);
+  ctx.lineTo(o.x, o.y - AXIS);
+  ctx.stroke();
+
+  ctx.strokeStyle = COLORS.origin;
+  ctx.beginPath();
+  ctx.arc(o.x, o.y, 3.5, 0, Math.PI * 2);
+  ctx.stroke();
+
+  ctx.font = "10px 'Segoe UI', system-ui, sans-serif";
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = COLORS.axisX;
+  ctx.fillText("X", o.x + AXIS + 3, o.y);
+  ctx.fillStyle = COLORS.axisY;
+  ctx.textAlign = "center";
+  ctx.fillText("Y", o.x, o.y - AXIS - 7);
+  ctx.textAlign = "start";
+  ctx.fillStyle = COLORS.origin;
+  ctx.fillText("0, 0", o.x + 7, o.y + 10);
+  ctx.textBaseline = "alphabetic";
+}
+
 function drawEntity(
   ctx: CanvasRenderingContext2D,
   view: View,
@@ -588,6 +653,12 @@ function drawSnapMarker(ctx: CanvasRenderingContext2D, view: View, snap: Snap): 
       ctx.lineTo(s.x + 5, s.y + 5);
       ctx.moveTo(s.x + 5, s.y - 5);
       ctx.lineTo(s.x - 5, s.y + 5);
+      break;
+    case "origin":
+      // Concentric rings, distinct from the plain circle used for a center snap.
+      ctx.arc(s.x, s.y, 6, 0, Math.PI * 2);
+      ctx.moveTo(s.x + 2.5, s.y);
+      ctx.arc(s.x, s.y, 2.5, 0, Math.PI * 2);
       break;
     case "on-line":
       ctx.arc(s.x, s.y, 2.5, 0, Math.PI * 2);

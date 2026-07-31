@@ -25,9 +25,31 @@ npm run desktop    # native desktop window via Tauri (needs Rust toolchain)
 | Close tab | `Ctrl+W` (desktop only — browsers reserve it for their own tab) |
 | Undo / Redo | `Ctrl+Z` / `Ctrl+Y` |
 
-Snapping is automatic, in priority order: endpoints, centers, quadrants and
-**intersections**, then midpoints, then the nearest point **along** a
-line/segment, then the grid.
+Snapping is automatic, in priority order: **the origin**, endpoints, centers,
+quadrants and **intersections**, then midpoints, then the nearest point
+**along** a line/segment, then the grid.
+
+The world origin is drawn as a crosshair with labelled +X / +Y stubs (and a
+muted marker clamped to the edge when it's panned off-screen), so `0, 0` is
+always locatable and there's something to aim at when snapping.
+
+**Moving snaps the geometry, not the cursor.** Dragging a selection with the
+select tool aligns the selection vertex nearest where you grabbed onto
+whatever snap target you drag near — so grabbing a corner and dropping it by
+the origin lands it exactly on `0, 0`. Hold `Alt` while dragging for a free,
+unsnapped move. The grid is deliberately excluded, since quantising every
+drag would make free positioning impossible.
+
+### Patterns
+
+The pattern panel repeats the current selection in a **grid** (columns/rows
+plus spacing) or **around a circle** (count, sweep angle, centre, and whether
+copies rotate to follow the arc). A full 360° sweep divides by the instance
+count rather than count−1, so it doesn't stack a duplicate on the original.
+
+Copies are ordinary independent entities added in a single undoable step —
+there's no live array object linking them back to the source, so each copy is
+editable afterwards like anything else.
 
 ### Measure tool
 
@@ -126,7 +148,10 @@ elsewhere. Opening a file that's already open in a tab switches to that tab
 ### The file browser
 
 The left panel browses a folder of drawings as geometry thumbnails, and
-filters as you type (`Ctrl+F`). The **list view** shows a small preview plus
+filters as you type (`Ctrl+F`). Reading and rendering previews runs on a
+queue that yields to the browser between files, so opening a large library
+fills in progressively instead of freezing the app — the drawing already open
+stays editable throughout. The **list view** shows a small preview plus
 Name / Modified / Size columns — click a column title to sort by it, click it
 again to reverse. (The grid view has no headers, so it keeps a compact
 name/date toggle.)

@@ -1,6 +1,6 @@
 [package]
 name = "sketchor"
-version = "0.6.1"
+version = "0.6.2"
 description = "Sketchor - modern parametric 2D sketching"
 edition = "2021"
 

@@ -87,6 +87,10 @@ async function writeToHandle(handle: FsFileHandle, text: string): Promise<void> 
   await writable.close();
 }
 
+function noticeSaved(name: string): void {
+  useApp.getState().setSaveNotice({ kind: "saved", message: `Saved ${name}`, at: Date.now() });
+}
+
 /**
  * - "save": overwrite the tab's last-used file silently if there is one;
  *   otherwise behaves like "save-as" (nothing to overwrite yet).
@@ -125,9 +129,18 @@ export async function saveDrawing(format: SaveFormat, suggestedName?: string, mo
       try {
         await writeToHandle(cached.handle, text);
         finishSessionSave(cached.handle.name);
+        noticeSaved(cached.handle.name);
         return;
-      } catch {
-        // Handle went stale (file moved/deleted, permission revoked) — fall through to a fresh picker.
+      } catch (err) {
+        // Handle went stale (file moved/deleted, permission revoked). Say so
+        // rather than silently reopening the picker, which looks like the save
+        // was simply ignored.
+        useApp.getState().setSaveNotice({
+          kind: "error",
+          message: `Couldn't write ${cached.handle.name} — choose a location`,
+          at: Date.now(),
+        });
+        void err;
       }
     }
   }
@@ -141,6 +154,7 @@ export async function saveDrawing(format: SaveFormat, suggestedName?: string, mo
       await writeToHandle(handle, text);
       if (mode !== "save-copy") savedHandles.set(sessionId, { handle, format });
       finishSessionSave(handle.name);
+      noticeSaved(handle.name);
     } catch (err) {
       // The user dismissing the picker throws AbortError — treat as a no-op.
       if ((err as DOMException)?.name !== "AbortError") throw err;
@@ -158,6 +172,7 @@ export async function saveDrawing(format: SaveFormat, suggestedName?: string, mo
   a.click();
   URL.revokeObjectURL(url);
   finishSessionSave(name);
+  noticeSaved(name);
 }
 
 /** Plain "Save": overwrites the active tab's last-used file in its existing format, defaulting to DXF if it's never been saved. */
