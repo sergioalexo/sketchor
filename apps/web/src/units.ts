@@ -28,6 +28,11 @@ function round(n: number, places: number): number {
   return Object.is(r, -0) ? 0 : r;
 }
 
+/** How many display-unit units make up one stored (millimeter) world unit — e.g. `factorFromMm("in")` is `1/25.4`. */
+export function factorFromMm(unit: DisplayUnit): number {
+  return FACTOR_FROM_MM[unit];
+}
+
 export function formatLength(worldValue: number, unit: DisplayUnit): string {
   return `${round(worldValue * FACTOR_FROM_MM[unit], 3)}${unit}`;
 }

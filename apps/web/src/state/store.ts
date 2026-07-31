@@ -188,10 +188,47 @@ export function importDxfText(text: string, replace = true): { count: number; wa
   const { entities, warnings, report, insUnits } = parseDxf(text);
   applyImportedEntities(entities, replace);
   useApp.getState().setImportReport(report);
-  // The file's own $INSUNITS becomes the display unit; unspecified/unmapped units leave it as-is.
+  // The file's own $INSUNITS becomes the document's saved unit; unspecified/
+  // unmapped units leave it as-is. Only a real open (replace) may do this —
+  // the document keeps its own unit unless the user explicitly changes it
+  // (via the display-unit picker) or opens a new file over it; an overlay
+  // add (see overlayEntities) never reaches this branch.
   const unit = dxfCodeToDisplayUnit(insUnits);
-  if (unit) useApp.getState().setDisplayUnit(unit);
+  if (replace && unit) useApp.getState().setDisplayUnit(unit);
   return { count: entities.length, warnings };
+}
+
+/** Layer name for {@link overlayEntities}: `base` if free, else `base (2)`, `base (3)`, ... */
+function uniqueOverlayLayerName(base: string): string {
+  const used = new Set(useApp.getState().layers.map((l) => l.name));
+  if (!used.has(base)) return base;
+  let i = 2;
+  while (used.has(`${base} (${i})`)) i += 1;
+  return `${base} (${i})`;
+}
+
+/**
+ * Adds entities to the current drawing on their own new layer, without
+ * replacing anything — used to overlay a second file (e.g. another
+ * revision of the same part) on top of the current one so the differences
+ * show up visually and the overlay can be toggled or selected apart from
+ * the existing geometry. Deliberately never touches `displayUnit`: unlike
+ * {@link importDxfText}'s replace path, overlaying isn't "opening" a
+ * document, so the document keeps whatever unit it already had.
+ */
+export function overlayEntities(entities: Entity[], label: string): { count: number; layer: string } {
+  const layer = uniqueOverlayLayerName(label);
+  const tagged = entities.map((e) => ({ ...e, layer }));
+  applyImportedEntities(tagged, false);
+  useApp.getState().setActiveLayer(layer);
+  return { count: entities.length, layer };
+}
+
+/** DXF-specific overlay: parses `text` and adds it via {@link overlayEntities}. The file's own `$INSUNITS` still scales its coordinates into the shared millimeter space (see dxf.ts) — only the document's own saved unit is left alone. */
+export function overlayDxfText(text: string, label: string): { count: number; warnings: string[]; layer: string } {
+  const { entities, warnings, report } = parseDxf(text);
+  useApp.getState().setImportReport(report);
+  return { ...overlayEntities(entities, label), warnings };
 }
 
 export type ToolId = "select" | "line" | "polyline" | "circle" | "point" | "measure" | "straighten";

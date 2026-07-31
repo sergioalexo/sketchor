@@ -1,6 +1,8 @@
 import type { ArcEntity, CircleEntity, Entity, LineEntity, PointEntity, PolylineEntity } from "./entities";
-import { layerOf } from "./entities";
+import { layerOf, transformed } from "./entities";
 import { boundsOf } from "./dxf";
+
+const ORIGIN = { x: 0, y: 0 };
 
 /**
  * Writes a minimal but broadly-compatible ASCII DXF (AC1009 / R12), the
@@ -107,11 +109,18 @@ function entityDxf(e: Entity): string {
  * @param insUnits The HEADER's `$INSUNITS` code to write (0 unitless, 1 in,
  * 2 ft, 4 mm, 5 cm, 6 m — see dxf.ts's `parseInsUnits`). Defaults to 0
  * (unspecified) when the caller doesn't track a real-world unit.
+ * @param scale Factor applied to every coordinate/radius before writing, so
+ * the file's numbers actually match the unit declared in `insUnits`.
+ * Entities are always stored internally in millimeters (see units.ts), so a
+ * caller writing e.g. inches passes `1 / 25.4` here — writing raw mm values
+ * under an inches tag would silently produce a file 25.4x the wrong size.
+ * Defaults to 1 (no rescaling, i.e. the file's numbers stay millimeters).
  */
-export function entitiesToDxf(entities: Entity[], insUnits = 0): string {
-  const layers = [...new Set(entities.map((e) => layerOf(e)))];
+export function entitiesToDxf(entities: Entity[], insUnits = 0, scale = 1): string {
+  const scaled = scale !== 1 ? entities.map((e) => transformed(e, ORIGIN, 0, 0, 0, scale)) : entities;
+  const layers = [...new Set(scaled.map((e) => layerOf(e)))];
   if (layers.length === 0) layers.push("0");
-  const bounds = boundsOf(entities) ?? { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+  const bounds = boundsOf(scaled) ?? { minX: 0, minY: 0, maxX: 0, maxY: 0 };
 
   const header =
     `0\nSECTION\n2\nHEADER\n` +
@@ -124,7 +133,7 @@ export function entitiesToDxf(entities: Entity[], insUnits = 0): string {
 
   const tables = `0\nSECTION\n2\nTABLES\n${layerTable(layers)}0\nENDSEC\n`;
 
-  const entitiesSection = `0\nSECTION\n2\nENTITIES\n${entities.map(entityDxf).join("")}0\nENDSEC\n`;
+  const entitiesSection = `0\nSECTION\n2\nENTITIES\n${scaled.map(entityDxf).join("")}0\nENDSEC\n`;
 
   return `${header}${tables}${entitiesSection}0\nEOF\n`;
 }

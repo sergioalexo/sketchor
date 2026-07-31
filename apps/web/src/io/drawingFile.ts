@@ -1,7 +1,17 @@
 import { entitiesToDxf, entitiesToSvgDocument, parseSvgText } from "@sketchor/core";
 import { importDwgBuffer } from "../browser/dwgImport";
-import { doc, finishSessionSave, getSessions, importDxfText, importEntities, openIntoSession, useApp } from "../state/store";
-import { displayUnitToDxfCode } from "../units";
+import {
+  doc,
+  finishSessionSave,
+  getSessions,
+  importDxfText,
+  importEntities,
+  openIntoSession,
+  overlayDxfText,
+  overlayEntities,
+  useApp,
+} from "../state/store";
+import { displayUnitToDxfCode, factorFromMm } from "../units";
 
 /**
  * Save / open of Sketchor's supported drawing formats: DXF and SVG for
@@ -55,7 +65,10 @@ const OPEN_TYPES: PickerType[] = [
 function serialize(format: SaveFormat): string {
   const entities = doc.all();
   if (format === "dxf") {
-    return entitiesToDxf(entities, displayUnitToDxfCode(useApp.getState().displayUnit));
+    const displayUnit = useApp.getState().displayUnit;
+    // Stored coordinates are always millimeters — rescale to match the
+    // declared unit so the file's numbers represent real-world size.
+    return entitiesToDxf(entities, displayUnitToDxfCode(displayUnit), factorFromMm(displayUnit));
   }
   return entitiesToSvgDocument(entities);
 }
@@ -199,6 +212,61 @@ export async function openDrawing(): Promise<void> {
       resolve();
     };
     input.oncancel = () => resolve();
+    input.click();
+  });
+}
+
+/**
+ * Overlays a DXF/SVG/DWG `File` onto the current drawing, on a new layer
+ * named after the file — added geometry, not a replacement, so the tab's
+ * own file binding and saved unit are untouched. Meant for comparing two
+ * revisions of the same drawing: open the base one normally, then overlay
+ * the other and toggle its layer to spot what changed.
+ */
+export async function overlayDrawingFile(name: string, file: File): Promise<{ count: number; warnings: string[]; layer: string }> {
+  const label = name.replace(/\.(dxf|svg|dwg)$/i, "");
+  if (/\.svg$/i.test(name)) {
+    const text = await file.text();
+    const { entities, warnings } = parseSvgText(text);
+    useApp.getState().setFileWarnings(warnings);
+    return { ...overlayEntities(entities, label), warnings };
+  }
+  if (/\.dwg$/i.test(name)) {
+    const buffer = await file.arrayBuffer();
+    const { entities, warnings } = await importDwgBuffer(buffer);
+    useApp.getState().setFileWarnings(warnings);
+    return { ...overlayEntities(entities, label), warnings };
+  }
+  const text = await file.text();
+  return overlayDxfText(text, label);
+}
+
+/** Opens a file picker and overlays the chosen DXF/SVG/DWG onto the current drawing (see {@link overlayDrawingFile}). No-op if cancelled. */
+export async function overlayDrawing(): Promise<{ count: number; warnings: string[]; layer: string } | null> {
+  const w = window as WindowWithFS;
+
+  if (typeof w.showOpenFilePicker === "function") {
+    try {
+      const [handle] = await w.showOpenFilePicker({ multiple: false, types: OPEN_TYPES });
+      if (!handle) return null;
+      const file = await handle.getFile();
+      return await overlayDrawingFile(handle.name, file);
+    } catch (err) {
+      if ((err as DOMException)?.name !== "AbortError") throw err;
+      return null;
+    }
+  }
+
+  // Fallback: a hidden file input.
+  return new Promise((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".dxf,.svg,.dwg";
+    input.onchange = async () => {
+      const file = input.files?.[0];
+      resolve(file ? await overlayDrawingFile(file.name, file) : null);
+    };
+    input.oncancel = () => resolve(null);
     input.click();
   });
 }

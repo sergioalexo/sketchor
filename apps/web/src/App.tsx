@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { freeEndpointEntityIds } from "@sketchor/core";
 import { bus, doc, measurementText, TOOL_HINTS, useApp, type ToolId } from "./state/store";
-import { openDrawing, saveCurrent, saveDrawing } from "./io/drawingFile";
+import { openDrawing, overlayDrawing, saveCurrent, saveDrawing } from "./io/drawingFile";
 import { DISPLAY_UNITS, formatLength, type DisplayUnit } from "./units";
 import { Viewport } from "./viewport/Viewport";
 import { CodePanel } from "./code/CodePanel";
@@ -212,6 +212,17 @@ export function App() {
                 fill="none"
                 strokeLinejoin="round"
               />
+            </svg>
+          </button>
+          <button
+            className="action"
+            title="Overlay a DXF / SVG / DWG onto the current drawing, on its own layer — for comparing two revisions"
+            data-testid="overlay-file"
+            onClick={() => void overlayDrawing()}
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18">
+              <rect x="3" y="7" width="13" height="13" rx="1.5" stroke="currentColor" strokeWidth="2" fill="none" />
+              <rect x="8" y="4" width="13" height="13" rx="1.5" stroke="currentColor" strokeWidth="2" fill="none" opacity="0.6" />
             </svg>
           </button>
           <div className="action-menu-wrap">

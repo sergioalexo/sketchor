@@ -1,5 +1,5 @@
 import type { Entity } from "./entities";
-import { newEntityId, polylineSegments } from "./entities";
+import { newEntityId, polylineSegments, transformed } from "./entities";
 import type { Point } from "./geometry";
 import { arcExtentPoints, arcPointAt, arcSweep, bulgeToArc, dist } from "./geometry";
 import { textToStrokes } from "./font";
@@ -124,6 +124,29 @@ function parseInsUnits(pairs: Pair[]): number {
     }
   }
   return 0;
+}
+
+/**
+ * Millimeters per unit for the `$INSUNITS` codes this app maps to a
+ * {@link DisplayUnit} (see units.ts's `DXF_UNIT_CODE`). Unspecified/unmapped
+ * codes have no known factor, so callers leave coordinates untouched for
+ * those rather than guessing.
+ */
+const MM_PER_INSUNIT: Record<number, number> = { 1: 25.4, 2: 304.8, 4: 1, 5: 10, 6: 1000 };
+
+const ORIGIN: Point = { x: 0, y: 0 };
+
+/**
+ * Entities are always stored internally in millimeters (see units.ts), but a
+ * DXF's coordinates are in whatever real-world unit its `$INSUNITS` declares
+ * — so they're rescaled to mm here, once, right after parsing. Without this,
+ * an inch-based file's raw numbers would be stored as if they were already
+ * millimeters: 25.4x too small, and silently wrong again on export.
+ */
+function scaleToMm(entities: Entity[], insUnits: number): Entity[] {
+  const mmPerUnit = MM_PER_INSUNIT[insUnits];
+  if (!mmPerUnit || mmPerUnit === 1) return entities;
+  return entities.map((e) => transformed(e, ORIGIN, 0, 0, 0, mmPerUnit));
 }
 
 function num(raw: RawEntity, code: number, fallback = 0): number {
@@ -616,7 +639,7 @@ export function parseDxf(text: string): DxfParseResult {
   const raws = collectRawEntities(allPairs);
   const blocks = collectBlocks(allPairs);
 
-  const entities = convertRecords(raws, { blocks, warnings, depth: 0, stack: new Set() });
+  const entities = scaleToMm(convertRecords(raws, { blocks, warnings, depth: 0, stack: new Set() }), insUnits);
 
   return { entities, warnings: dedupe(warnings), report: buildImportReport(raws), insUnits };
 }
