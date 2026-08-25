@@ -37,7 +37,7 @@ export function UpdateButton({ open, onToggle }: { open: boolean; onToggle: () =
   return (
     <div className="action-menu-wrap">
       <button
-        className={`action ${phase === "available" ? "update-ready" : ""}`}
+        className={`action action-labeled ${phase === "available" ? "update-ready" : ""}`}
         title={
           phase === "available"
             ? `Sketchor ${version} is available — click to update`
@@ -60,6 +60,17 @@ export function UpdateButton({ open, onToggle }: { open: boolean; onToggle: () =
           />
           <path d="M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" />
         </svg>
+        {/* Spelled out rather than icon-only: an update button nobody can find
+            is an update nobody installs. */}
+        <span className="action-label">
+          {busy
+            ? phase === "checking"
+              ? "Checking..."
+              : "Updating..."
+            : phase === "available"
+              ? `Update to ${version}`
+              : "Check for updates"}
+        </span>
         {phase === "available" && <span className="update-dot" />}
       </button>
 

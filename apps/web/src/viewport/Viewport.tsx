@@ -41,13 +41,22 @@ import { render } from "./renderer";
 import { findSnap, type Snap } from "./snapping";
 import { fitToBounds, screenToWorld, worldToScreen, zoomAt, type View } from "./view";
 
-type Interaction =
-  | { kind: "idle" }
-  | { kind: "pan"; lastX: number; lastY: number }
+/**
+ * The half-finished states a pan can interrupt. Panning or zooming mid-draw
+ * must not throw the drawing away — you routinely need to scroll to where the
+ * far end of a line goes — so a pan stashes one of these in its `resume` and
+ * puts it back on pointer-up.
+ */
+type DrawInteraction =
   | { kind: "draw-line"; start: Point }
   | { kind: "draw-polyline"; points: Point[] }
   | { kind: "draw-circle"; center: Point }
-  | { kind: "measure"; start: Point }
+  | { kind: "measure"; start: Point };
+
+type Interaction =
+  | { kind: "idle" }
+  | { kind: "pan"; lastX: number; lastY: number; resume: DrawInteraction | { kind: "idle" } }
+  | DrawInteraction
   | {
       kind: "move";
       ids: EntityId[];
@@ -59,6 +68,13 @@ type Interaction =
     }
   | { kind: "rotate-group"; ids: EntityId[]; pivot: Point; startAngle: number; rotation: number }
   | { kind: "box-select"; startScreen: Point; startWorld: Point; currentWorld: Point; additive: boolean };
+
+const DRAW_KINDS = ["draw-line", "draw-polyline", "draw-circle", "measure"] as const;
+
+/** Narrows to the states worth preserving across a pan (see DrawInteraction). */
+function resumable(i: Interaction): DrawInteraction | { kind: "idle" } {
+  return (DRAW_KINDS as readonly string[]).includes(i.kind) ? (i as DrawInteraction) : { kind: "idle" };
+}
 
 /** Fixed pixel offset above a selected group's bounding box where its rotate handle is drawn/hit-tested. */
 const GROUP_HANDLE_OFFSET_PX = 26;
@@ -163,7 +179,10 @@ export function Viewport() {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     const state = useApp.getState();
-    const interaction = interactionRef.current;
+    // During a pan, draw the interaction it suspended — otherwise the rubber
+    // band vanishes the moment you scroll to see where the line is going.
+    const held = interactionRef.current;
+    const interaction: Interaction = held.kind === "pan" ? held.resume : held;
     const snap = snapRef.current;
 
     let preview: Entity | null = null;
@@ -199,7 +218,7 @@ export function Viewport() {
     render(ctx, w, h, viewRef.current, doc, {
       selection: new Set(state.selection),
       preview,
-      snap: state.tool === "select" ? null : snap,
+      snap: state.tool === "select" || state.tool === "pan" ? null : snap,
       moveOffset:
         interaction.kind === "move" ? { dx: interaction.dx, dy: interaction.dy } : null,
       measurement: state.measurement,
@@ -418,11 +437,17 @@ export function Viewport() {
           bus.execute({ type: "delete-entities", ids: app.selection });
         }
       } else if (e.key === "Escape") {
+        // One key that always gets you back to a known-safe state: abandon
+        // whatever is half-drawn, drop the selection, and park on the pan
+        // tool so the next stray click can't add geometry.
         interactionRef.current = { kind: "idle" };
         app.setSelection([]);
         app.setMeasurement(null);
         app.setEnteredGroup(null);
+        app.setTool("pan");
         redraw();
+      } else if (e.key.toLowerCase() === "h") {
+        app.setTool("pan");
       } else if (e.key.toLowerCase() === "v" || e.key.toLowerCase() === "s") {
         app.setTool("select");
       } else if (e.key.toLowerCase() === "l") {
@@ -492,11 +517,25 @@ export function Viewport() {
     const world = screenToWorld(view, screen);
     const app = useApp.getState();
 
+    // Middle/right-drag pans from any tool, and explicitly preserves a
+    // half-drawn line/polyline/circle/measurement rather than replacing it.
     if (e.button === 1 || e.button === 2) {
-      interactionRef.current = { kind: "pan", lastX: screen.x, lastY: screen.y };
+      interactionRef.current = {
+        kind: "pan",
+        lastX: screen.x,
+        lastY: screen.y,
+        resume: resumable(interactionRef.current),
+      };
       return;
     }
     if (e.button !== 0) return;
+
+    // The pan tool is the neutral parking spot Esc drops you into: left-drag
+    // pans and nothing on the canvas can be changed by accident.
+    if (app.tool === "pan") {
+      interactionRef.current = { kind: "pan", lastX: screen.x, lastY: screen.y, resume: { kind: "idle" } };
+      return;
+    }
 
     if (app.tool === "select") {
       const groupId = wholeGroupSelected(doc, app.selection);
@@ -762,7 +801,7 @@ export function Viewport() {
     if (interaction.kind === "measure") {
       app.setMeasurement({ kind: "distance", a: interaction.start, b: snap.point });
     }
-    const shown = app.tool === "select" ? world : snap.point;
+    const shown = app.tool === "select" || app.tool === "pan" ? world : snap.point;
     app.setCursor({ x: shown.x, y: shown.y });
     redraw();
   };
@@ -799,7 +838,8 @@ export function Viewport() {
       return;
     }
     if (interaction.kind === "pan") {
-      interactionRef.current = { kind: "idle" };
+      interactionRef.current = interaction.resume;
+      redraw();
     } else if (interaction.kind === "move") {
       if (interaction.dx !== 0 || interaction.dy !== 0) {
         bus.execute({
@@ -874,6 +914,7 @@ export function Viewport() {
     <canvas
       ref={canvasRef}
       className="viewport"
+      data-tool={tool}
       data-testid="viewport"
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}

@@ -99,6 +99,22 @@ body {
   background: var(--border);
 }
 
+/* An action that carries a caption instead of standing on its icon alone. */
+.action-labeled {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  width: auto;
+  padding: 0 10px;
+  white-space: nowrap;
+}
+
+.action-label {
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .action:disabled {
   color: #565a64;
   cursor: default;
@@ -168,6 +184,20 @@ body {
   height: 100%;
   cursor: crosshair;
   touch-action: none;
+}
+
+/* The pan tool grabs the sheet rather than aiming at it. `:active` covers the
+   held state for free, so it needs no React re-render to stay in sync. */
+.viewport[data-tool="pan"] {
+  cursor: grab;
+}
+
+.viewport[data-tool="pan"]:active {
+  cursor: grabbing;
+}
+
+.viewport[data-tool="select"] {
+  cursor: default;
 }
 
 .statusbar {

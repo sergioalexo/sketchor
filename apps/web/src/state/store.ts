@@ -233,12 +233,13 @@ export function overlayDxfText(text: string, label: string): { count: number; wa
   return { ...overlayEntities(entities, label), warnings };
 }
 
-export type ToolId = "select" | "line" | "polyline" | "circle" | "point" | "measure" | "straighten";
+export type ToolId = "pan" | "select" | "line" | "polyline" | "circle" | "point" | "measure" | "straighten";
 
 export const TOOL_HINTS: Record<ToolId, string> = {
+  pan: "Drag to pan, wheel to zoom - nothing here can change the drawing. Esc returns to this tool from anywhere; V goes back to select",
   select: "Click to select (Shift adds) - drag left-to-right to window-select, right-to-left to crossing-select - drag to move - Del deletes - G groups - U ungroups",
-  line: "Click start point, then click next points to chain - Esc to finish",
-  polyline: "Click each vertex - Enter or double-click to finish, C to close the shape, Backspace undoes the last vertex, Esc cancels",
+  line: "Click start point, then click next points to chain - middle/right-drag pans and the wheel zooms without losing the line - Esc finishes and returns to the pan tool",
+  polyline: "Click each vertex - Enter or double-click to finish, C to close the shape, Backspace undoes the last vertex, middle/right-drag pans without losing it, Esc cancels and returns to the pan tool",
   circle: "Click center, then click a point on the circle",
   point: "Click to place a point",
   measure: "Click two points to measure distance (snaps to endpoints, midpoints, centers, on-line points, intersections) - Ctrl-click a line to set it as the angle reference - Alt-click a line/circle/arc for its whole length/radius, Shift-Alt-click more lines/arcs to total - click inside a closed area for its area+perimeter - Ctrl+C copies the readout",
