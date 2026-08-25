@@ -21,7 +21,7 @@ npm run desktop    # native desktop window via Tauri (needs Rust toolchain)
 | Measure tool | `M` — see below |
 | Pan | middle- or right-button drag |
 | Zoom | mouse wheel (at cursor) |
-| Save / Save As | `Ctrl+S` overwrites the tab's file; the Save menu has Save As and Save a Copy |
+| Save / Save As | `Ctrl+S` overwrites the tab's own file; the Save menu names that file and offers Save As / Save a Copy |
 | Close tab | `Ctrl+W` (desktop only — browsers reserve it for their own tab) |
 | Undo / Redo | `Ctrl+Z` / `Ctrl+Y` |
 
@@ -180,6 +180,43 @@ On Windows, `native/dxf-thumbnailer/` is a Rust COM shell extension that makes
 Explorer render a **preview of the geometry** — not just the app icon — as the
 `.dxf` file thumbnail (and, when installed elevated, in the reading pane).
 Install it per-user with `native/dxf-thumbnailer/install-thumbnailer.ps1`.
+
+## Saving
+
+A tab remembers the file it came from, whichever way it got there — the Open
+dialog, the in-app file browser, or a double-click in Explorer — so `Ctrl+S`
+writes straight back to that file with no prompt. The Save button's menu names
+it (`Save to bracket.dxf`) so it's clear what's about to be overwritten, and
+sits above **Save As DXF/SVG** (prompts, and rebinds the tab to the new file)
+and **Save a Copy** (prompts, but leaves the tab on its original file).
+
+A drawing that has no file yet says so — the menu reads *Not saved to a file
+yet* and Save opens the location prompt, pre-filled with the tab's name.
+
+Two write paths back the same behaviour: a File System Access handle where the
+file was picked through a dialog, and the `write_drawing_file` Tauri command
+where the desktop build only has a native path (its folder browser and the
+`.dxf` file association both hand over paths, not handles). DWG is import-only,
+so a DWG tab stays unbound and Save falls through to a prompt.
+
+## Updates
+
+The desktop app updates itself. It checks a few seconds after launch, and any
+time you press the download button in the toolbar; when there's something
+newer, a banner offers **Update now**, which downloads the installer with a
+progress bar, verifies its signature, installs it and relaunches Sketchor.
+
+Releases are signed with a minisign keypair. The public half is baked into
+`tauri.conf.json`; the private half lives only in this machine's
+`~/.sketchor-keys/` and in the repo's `TAURI_SIGNING_PRIVATE_KEY` Actions
+secret, and `release.yml` uses it to sign the installer and publish the
+`latest.json` the app polls. **Losing the private key means shipping a new
+installer by hand**, since existing installs will reject anything signed with a
+different key.
+
+The web build has no installer to swap, so it falls back to the public GitHub
+Releases API and offers the download page instead — the same fallback the
+desktop app uses if `latest.json` can't be reached.
 
 ## Roadmap
 

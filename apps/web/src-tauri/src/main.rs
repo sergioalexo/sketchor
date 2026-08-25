@@ -18,6 +18,9 @@ struct OpenFile {
     /// The file's containing folder, so the UI can offer the in-app file
     /// browser (R9) pre-loaded with its sibling drawings.
     dir: String,
+    /// The full path, so a plain "Save" can write straight back to the file
+    /// that was double-clicked (see write_drawing_file).
+    path: String,
 }
 
 /// Reads a `.dxf`, `.svg`, or `.dwg` file and forwards its content to the
@@ -51,13 +54,13 @@ fn emit_file(app: &AppHandle, path: &str) {
             let base64 = base64::engine::general_purpose::STANDARD.encode(bytes);
             let _ = app.emit(
                 event,
-                OpenFile { name, text: None, base64: Some(base64), dir },
+                OpenFile { name, text: None, base64: Some(base64), dir, path: path.to_string() },
             );
         }
     } else if let Ok(text) = std::fs::read_to_string(path) {
         let _ = app.emit(
             event,
-            OpenFile { name, text: Some(text), base64: None, dir },
+            OpenFile { name, text: Some(text), base64: None, dir, path: path.to_string() },
         );
     }
 }
@@ -135,10 +138,23 @@ fn read_drawing_file(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| e.to_string())
 }
 
+/// Writes a drawing back to a full native path. The desktop file browser and
+/// the OS file association hand the UI a path rather than a File System Access
+/// handle, so a plain "Save" of a file opened that way needs this to overwrite
+/// the original instead of reprompting for a location.
+#[tauri::command]
+fn write_drawing_file(path: String, contents: String) -> Result<(), String> {
+    std::fs::write(&path, contents).map_err(|e| e.to_string())
+}
+
 fn main() {
     tauri::Builder::default()
-        // Opens URLs (the update notifier's "download page" action).
+        // Opens URLs (release notes, the website behind the logo).
         .plugin(tauri_plugin_opener::init())
+        // Signed in-app updates: the UI calls `check()` / `downloadAndInstall()`
+        // and then `relaunch()` from the process plugin.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         // A second launch (e.g. double-clicking another .dxf) forwards its
         // argv to the already-running window instead of opening a new one.
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
@@ -151,7 +167,8 @@ fn main() {
         }))
         .invoke_handler(tauri::generate_handler![
             list_drawings_in_dir,
-            read_drawing_file
+            read_drawing_file,
+            write_drawing_file
         ])
         .setup(|app| {
             // Handle a file passed on the initial launch.

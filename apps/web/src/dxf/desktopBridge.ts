@@ -1,5 +1,6 @@
 import { importDxfText, importEntities, openIntoSession, useApp } from "../state/store";
 import { importDwgBuffer } from "../browser/dwgImport";
+import { bindSavePath } from "../io/drawingFile";
 import { parseSvgText } from "@sketchor/core";
 
 /**
@@ -20,9 +21,18 @@ interface TauriGlobal {
   event: {
     listen: (
       event: string,
-      handler: (e: { payload: { name: string; text?: string; base64?: string; dir?: string } }) => void,
+      handler: (e: { payload: { name: string; text?: string; base64?: string; dir?: string; path?: string } }) => void,
     ) => Promise<() => void>;
   };
+}
+
+/**
+ * Binds the freshly-opened tab to the file on disk it came from, so Save
+ * (Ctrl+S) overwrites the drawing the user double-clicked. DWG is import-only
+ * and bindSavePath ignores it.
+ */
+function bindOpened(path: string | undefined, name: string): void {
+  if (path) bindSavePath(path, name);
 }
 
 /** Reveals the in-app file browser (R9) pointed at the opened file's folder, when the desktop side sent one. */
@@ -46,6 +56,7 @@ export function initDesktopFileOpen(): void {
   tauri.event.listen("open-dxf", ({ payload }) => {
     if (!payload?.text) return;
     openIntoSession(payload.name, () => importDxfText(payload.text!));
+    bindOpened(payload.path, payload.name);
     revealFolder(payload.dir);
   });
 
@@ -53,6 +64,7 @@ export function initDesktopFileOpen(): void {
     if (!payload?.text) return;
     const { entities, warnings } = parseSvgText(payload.text);
     openIntoSession(payload.name, () => importEntities(entities, warnings));
+    bindOpened(payload.path, payload.name);
     revealFolder(payload.dir);
   });
 

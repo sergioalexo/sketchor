@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { parseSvgText } from "@sketchor/core";
 import { getSessions, importDxfText, importEntities, openIntoSession, useApp } from "../state/store";
+import { bindSaveHandle, bindSavePath } from "../io/drawingFile";
 import { fileToSvg, isDrawingFile, queueThumbnail } from "./thumbnail";
 
 interface Entry {
@@ -83,6 +84,11 @@ function openEntry(entry: Entry, text: string): void {
   } else {
     openIntoSession(entry.name, () => importDxfText(text));
   }
+  // Bind the new tab to the file it came from, so Ctrl+S writes back here
+  // instead of asking where to put it. Desktop entries carry a native path,
+  // web entries a File System Access handle.
+  if (entry.path) bindSavePath(entry.path, entry.name);
+  else if (entry.handle) bindSaveHandle(entry.handle as unknown as Parameters<typeof bindSaveHandle>[0]);
 }
 
 /* ------------------------------- tagging -------------------------------- */

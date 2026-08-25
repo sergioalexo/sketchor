@@ -1,6 +1,6 @@
 [package]
 name = "sketchor"
-version = "0.6.2"
+version = "0.7.0"
 description = "Sketchor - modern parametric 2D sketching"
 edition = "2021"
 
@@ -10,8 +10,13 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = [] }
 tauri-plugin-single-instance = "2"
-# Opens the GitHub release download page when the update notifier prompts.
+# Opens the release notes / download page from the update panel.
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 base64 = "0.22"
+
+# Signed in-app updates: `updater` downloads and verifies the NSIS installer,
+# `process` relaunches Sketchor once it has been applied.
+tauri-plugin-updater = "2"
+tauri-plugin-process = "2"

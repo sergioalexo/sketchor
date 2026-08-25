@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { freeEndpointEntityIds } from "@sketchor/core";
 import { bus, doc, measurementText, TOOL_HINTS, useApp, type ToolId } from "./state/store";
-import { openDrawing, overlayDrawing, saveCurrent, saveDrawing } from "./io/drawingFile";
+import { activeSaveTarget, openDrawing, overlayDrawing, saveCurrent, saveDrawing } from "./io/drawingFile";
 import { DISPLAY_UNITS, formatLength, type DisplayUnit } from "./units";
 import { Viewport } from "./viewport/Viewport";
 import { CodePanel } from "./code/CodePanel";
@@ -13,6 +13,11 @@ import { LayerPanel } from "./layers/LayerPanel";
 import { PatternPanel } from "./pattern/PatternPanel";
 import { StraightenPanel } from "./viewport/StraightenPanel";
 import { TabStrip } from "./tabs/TabStrip";
+import { UpdateBanner, UpdateButton } from "./update/UpdatePanel";
+import { openExternal } from "./update/updateService";
+
+/** The project's home page, opened by the logo in the toolbar. */
+const SKETCHOR_SITE = "https://sketchor.sergioalexo.com";
 
 const TOOLS: { id: ToolId; label: string; keyHint: string; icon: JSX.Element }[] = [
   {
@@ -141,6 +146,7 @@ export function App() {
   const [showDup, setShowDup] = useState(false);
   const [showPattern, setShowPattern] = useState(false);
   const [showSaveMenu, setShowSaveMenu] = useState(false);
+  const [showUpdateMenu, setShowUpdateMenu] = useState(false);
   const showFiles = useApp((s) => s.fileBrowserVisible);
   const setShowFiles = useApp((s) => s.setFileBrowserVisible);
   const showConnectivityHint = useApp((s) => s.showConnectivityHint);
@@ -150,15 +156,24 @@ export function App() {
   const displayUnit = useApp((s) => s.displayUnit);
   const setDisplayUnit = useApp((s) => s.setDisplayUnit);
 
-  // Close the Save-format menu on an outside click.
+  // Close the Save-format and update popovers on an outside click.
   useEffect(() => {
-    if (!showSaveMenu) return;
+    if (!showSaveMenu && !showUpdateMenu) return;
     const onClick = (e: MouseEvent) => {
-      if (!(e.target as HTMLElement).closest(".action-menu-wrap")) setShowSaveMenu(false);
+      if ((e.target as HTMLElement).closest(".action-menu-wrap")) return;
+      setShowSaveMenu(false);
+      setShowUpdateMenu(false);
     };
     document.addEventListener("click", onClick);
     return () => document.removeEventListener("click", onClick);
-  }, [showSaveMenu]);
+  }, [showSaveMenu, showUpdateMenu]);
+
+  // Which real file a plain Save would overwrite. Subscribing to
+  // `sessionsVersion` is what makes it refresh: the binding itself lives in
+  // drawingFile.ts, but every event that changes it (opening a file, Save As,
+  // switching tabs) bumps that counter.
+  useApp((s) => s.sessionsVersion);
+  const saveTarget = activeSaveTarget();
 
   const referenceEdge = referenceEdgeId ? doc.get(referenceEdgeId) : null;
   const referenceAngleDeg =
@@ -195,7 +210,13 @@ export function App() {
   return (
     <div className="app">
       <header className="topbar">
-        <div className="brand">
+        <button
+          className="brand"
+          type="button"
+          title="Open sketchor.sergioalexo.com"
+          data-testid="brand-link"
+          onClick={() => void openExternal(SKETCHOR_SITE)}
+        >
           <svg viewBox="0 0 24 24" width="18" height="18">
             <path
               d="M4 18L11 5l3.5 6.5L18 6l2 12"
@@ -207,7 +228,7 @@ export function App() {
             />
           </svg>
           Sketchor
-        </div>
+        </button>
         <div className="topbar-actions">
           <button
             className="action"
@@ -239,9 +260,16 @@ export function App() {
           <div className="action-menu-wrap">
             <button
               className="action"
-              title="Save (Ctrl+S) — or Save As / Save a Copy as DXF/SVG"
+              title={
+                saveTarget
+                  ? `Save to ${saveTarget.name} (Ctrl+S) — or Save As / Save a Copy`
+                  : "Save (Ctrl+S) — this drawing has no file yet, so Save will ask where to put it"
+              }
               data-testid="save-file"
-              onClick={() => setShowSaveMenu((v) => !v)}
+              onClick={() => {
+                setShowUpdateMenu(false);
+                setShowSaveMenu((v) => !v);
+              }}
             >
               <svg viewBox="0 0 24 24" width="18" height="18">
                 <path
@@ -256,14 +284,18 @@ export function App() {
             </button>
             {showSaveMenu && (
               <div className="action-menu" data-testid="save-menu">
+                <div className="action-menu-caption" data-testid="save-target">
+                  {saveTarget ? saveTarget.name : "Not saved to a file yet"}
+                </div>
                 <button
+                  className="action-menu-default"
                   data-testid="save-now"
                   onClick={() => {
                     setShowSaveMenu(false);
                     void saveCurrent();
                   }}
                 >
-                  Save
+                  {saveTarget ? `Save to ${saveTarget.name}` : "Save..."}
                 </button>
                 <button
                   onClick={() => {
@@ -335,6 +367,14 @@ export function App() {
               />
             </svg>
           </button>
+          <UpdateButton
+            open={showUpdateMenu}
+            onToggle={() => {
+              setShowSaveMenu(false);
+              setShowUpdateMenu((v) => !v);
+            }}
+          />
+          <div className="action-sep" />
           <button
             className={`action ${showLayers ? "toggled" : ""}`}
             title="Toggle layers panel"
@@ -472,6 +512,7 @@ export function App() {
         <div className="hint">{TOOL_HINTS[tool]}</div>
       </header>
 
+      <UpdateBanner />
       <ImportReportBanner />
 
       <div className="body">

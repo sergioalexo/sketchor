@@ -73,18 +73,71 @@ function serialize(format: SaveFormat): string {
   return entitiesToSvgDocument(entities);
 }
 
-/**
- * Which real file (if any) each tab last saved to or opened from, so a plain
- * "Save" can silently overwrite it instead of always reprompting. Keyed by
- * session id rather than stored on DocSession to avoid a circular import
- * (store.ts doesn't need to know about file handles).
- */
-const savedHandles = new Map<string, { handle: FsFileHandle; format: SaveFormat }>();
+/* ----------------------------- save targets ----------------------------- */
 
-async function writeToHandle(handle: FsFileHandle, text: string): Promise<void> {
-  const writable = await handle.createWritable();
-  await writable.write(text);
-  await writable.close();
+/**
+ * The real file a tab is bound to, so a plain "Save" overwrites the drawing
+ * the user actually opened instead of reprompting for a location.
+ *
+ * Two flavours, because a file reaches a tab two different ways:
+ * - `handle` — picked through the File System Access API (Ctrl+O, Save As,
+ *   or a folder chosen in the file browser on the web build).
+ * - `path` — a native path from the desktop build: the file browser's folder
+ *   listing and the OS file association both hand us a path, never a handle.
+ *   Written back through the `write_drawing_file` Tauri command.
+ *
+ * Keyed by session id rather than stored on DocSession to avoid a circular
+ * import (store.ts doesn't need to know about file handles).
+ */
+export type SaveTarget =
+  | { kind: "handle"; handle: FsFileHandle; format: SaveFormat; name: string }
+  | { kind: "path"; path: string; format: SaveFormat; name: string };
+
+const saveTargets = new Map<string, SaveTarget>();
+
+/** The format a filename implies, or null when it isn't something we can write (DWG). */
+function writableFormat(name: string): SaveFormat | null {
+  if (/\.svg$/i.test(name)) return "svg";
+  if (/\.dwg$/i.test(name)) return null; // import-only, nothing to save back to
+  return "dxf";
+}
+
+function activeSessionId(): string {
+  return useApp.getState().activeSessionId;
+}
+
+/** The file the active tab would overwrite on a plain Save, or null if it has none yet. */
+export function activeSaveTarget(): SaveTarget | null {
+  return saveTargets.get(activeSessionId()) ?? null;
+}
+
+/**
+ * Binds the active tab to a file opened by full native path (desktop file
+ * browser, or a drawing opened from Explorer). Call after the drawing has
+ * been loaded, so `activeSessionId` is the tab it landed in.
+ */
+export function bindSavePath(path: string, name = path.split(/[\\/]/).pop() ?? path): void {
+  const format = writableFormat(name);
+  if (!format) return;
+  saveTargets.set(activeSessionId(), { kind: "path", path, format, name });
+}
+
+/** Binds the active tab to a File System Access handle (web file browser / pickers). */
+export function bindSaveHandle(handle: FsFileHandle): void {
+  const format = writableFormat(handle.name);
+  if (!format) return;
+  saveTargets.set(activeSessionId(), { kind: "handle", handle, format, name: handle.name });
+}
+
+async function writeTarget(target: SaveTarget, text: string): Promise<void> {
+  if (target.kind === "handle") {
+    const writable = await target.handle.createWritable();
+    await writable.write(text);
+    await writable.close();
+    return;
+  }
+  const { invoke } = await import("@tauri-apps/api/core");
+  await invoke("write_drawing_file", { path: target.path, contents: text });
 }
 
 function noticeSaved(name: string): void {
@@ -92,7 +145,7 @@ function noticeSaved(name: string): void {
 }
 
 /**
- * - "save": overwrite the tab's last-used file silently if there is one;
+ * - "save": overwrite the tab's bound file silently if there is one;
  *   otherwise behaves like "save-as" (nothing to overwrite yet).
  * - "save-as": always prompts for a location and becomes the tab's file for
  *   future plain saves.
@@ -109,10 +162,10 @@ export type SaveMode = "save" | "save-as" | "save-copy";
  * never been named (an untouched "Untitled-1").
  */
 function defaultSaveName(format: SaveFormat): string {
-  const active = getSessions().find((s) => s.id === useApp.getState().activeSessionId);
-  if (!active?.named || !active.name) return `drawing.${format}`;
-  const stem = active.name.replace(/\.(dxf|svg|dwg)$/i, "");
-  return `${stem}.${format}`;
+  const target = activeSaveTarget();
+  const base = target?.name ?? getSessions().find((s) => s.id === activeSessionId() && s.named)?.name;
+  if (!base) return `drawing.${format}`;
+  return `${base.replace(/\.(dxf|svg|dwg)$/i, "")}.${format}`;
 }
 
 /** Saves the current drawing as DXF or SVG. No-op if the location prompt is cancelled. */
@@ -120,24 +173,24 @@ export async function saveDrawing(format: SaveFormat, suggestedName?: string, mo
   const text = serialize(format);
   const { mime, description } = SAVE_FORMAT[format];
   const w = window as WindowWithFS;
-  const sessionId = useApp.getState().activeSessionId;
+  const sessionId = activeSessionId();
   const name = suggestedName ?? defaultSaveName(format);
 
   if (mode === "save") {
-    const cached = savedHandles.get(sessionId);
-    if (cached && cached.format === format) {
+    const target = saveTargets.get(sessionId);
+    if (target && target.format === format) {
       try {
-        await writeToHandle(cached.handle, text);
-        finishSessionSave(cached.handle.name);
-        noticeSaved(cached.handle.name);
+        await writeTarget(target, text);
+        finishSessionSave(target.name);
+        noticeSaved(target.name);
         return;
       } catch (err) {
-        // Handle went stale (file moved/deleted, permission revoked). Say so
+        // Target went stale (file moved/deleted, permission revoked). Say so
         // rather than silently reopening the picker, which looks like the save
         // was simply ignored.
         useApp.getState().setSaveNotice({
           kind: "error",
-          message: `Couldn't write ${cached.handle.name} — choose a location`,
+          message: `Couldn't write ${target.name} — choose a location`,
           at: Date.now(),
         });
         void err;
@@ -151,8 +204,10 @@ export async function saveDrawing(format: SaveFormat, suggestedName?: string, mo
         suggestedName: name,
         types: [{ description, accept: { [mime]: [`.${format}`] } }],
       });
-      await writeToHandle(handle, text);
-      if (mode !== "save-copy") savedHandles.set(sessionId, { handle, format });
+      await writeTarget({ kind: "handle", handle, format, name: handle.name }, text);
+      if (mode !== "save-copy") {
+        saveTargets.set(sessionId, { kind: "handle", handle, format, name: handle.name });
+      }
       finishSessionSave(handle.name);
       noticeSaved(handle.name);
     } catch (err) {
@@ -175,10 +230,15 @@ export async function saveDrawing(format: SaveFormat, suggestedName?: string, mo
   noticeSaved(name);
 }
 
-/** Plain "Save": overwrites the active tab's last-used file in its existing format, defaulting to DXF if it's never been saved. */
+/** Plain "Save": overwrites the active tab's bound file in its own format, defaulting to DXF if it has none. */
 export async function saveCurrent(): Promise<void> {
-  const cached = savedHandles.get(useApp.getState().activeSessionId);
-  await saveDrawing(cached?.format ?? "dxf", undefined, "save");
+  const target = activeSaveTarget();
+  await saveDrawing(target?.format ?? "dxf", undefined, "save");
+}
+
+/** "Save As": always prompts, pre-filled with the current file's name, and rebinds the tab to the result. */
+export async function saveAs(format: SaveFormat = activeSaveTarget()?.format ?? "dxf"): Promise<void> {
+  await saveDrawing(format, undefined, "save-as");
 }
 
 /** Loads a DXF/SVG/DWG `File` into a tab (opening or reusing one — see openIntoSession). */
@@ -207,9 +267,9 @@ export async function openDrawing(): Promise<void> {
       if (!handle) return;
       const file = await handle.getFile();
       await loadDrawingFile(handle.name, file);
-      // DWG has no export path (read-only), so there's nothing to bind a "Save" to.
-      const format: SaveFormat | null = /\.svg$/i.test(handle.name) ? "svg" : /\.dwg$/i.test(handle.name) ? null : "dxf";
-      if (format) savedHandles.set(useApp.getState().activeSessionId, { handle, format });
+      // DWG has no export path (read-only), so bindSaveHandle ignores it and
+      // Save falls through to a prompt.
+      bindSaveHandle(handle);
     } catch (err) {
       if ((err as DOMException)?.name !== "AbortError") throw err;
     }

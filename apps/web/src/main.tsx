@@ -2,7 +2,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { initDesktopFileOpen } from "./dxf/desktopBridge";
-import { initUpdateNotifier } from "./update/updateNotifier";
+import { initUpdateCheck } from "./update/updateService";
 import "./styles.css";
 
 createRoot(document.getElementById("root")!).render(
@@ -14,5 +14,7 @@ createRoot(document.getElementById("root")!).render(
 // Wire up "open .dxf / .svg / .dwg from Explorer" when running as the desktop app.
 initDesktopFileOpen();
 
-// Notify if a newer release is on GitHub (keyless; works on web + desktop).
-void initUpdateNotifier();
+// Look for a newer release shortly after launch. On the desktop this uses the
+// signed Tauri updater (install in place); on the web it falls back to the
+// public GitHub Releases API. Failures stay silent — see updateService.ts.
+initUpdateCheck();

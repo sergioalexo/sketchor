@@ -1,9 +1,14 @@
 name: release
 
-# Push a version tag (e.g. v0.2.0) to build the Windows installer and
-# publish a GitHub Release. The app's update notifier polls the public
-# Releases API and points users at the installer attached here — no signing
-# keys or secrets required.
+# Push a version tag (e.g. v0.7.0) to build the Windows installer and publish
+# a GitHub Release. The build is signed with the updater keypair, and
+# tauri-action attaches `latest.json` alongside the installer — that file is
+# the endpoint the in-app updater polls, so an already-installed Sketchor can
+# download, verify and install the new version by itself.
+#
+# Secrets required (already set on this repo):
+#   TAURI_SIGNING_PRIVATE_KEY           minisign private key (updater signing)
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  its password (empty for this key)
 #
 # NOTE: pushing this file needs a token with the `workflow` scope
 # (`gh auth refresh -s workflow`), or add it via the GitHub web UI.
@@ -38,13 +43,17 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: apps/web
           tagName: ${{ github.ref_name }}
           releaseName: "Sketchor ${{ github.ref_name }}"
           releaseBody: |
-            Download the `.exe` installer below. It upgrades an existing
-            install in place. The app notifies you here when a newer
-            version is published.
+            Installed already? Sketchor updates itself — **Check for updates**
+            in the toolbar, or accept the prompt on start-up.
+
+            First install: download the `.exe` below.
           releaseDraft: false
           prerelease: false
+          includeUpdaterJson: true
