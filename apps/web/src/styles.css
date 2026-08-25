@@ -186,20 +186,6 @@ body {
   touch-action: none;
 }
 
-/* The pan tool grabs the sheet rather than aiming at it. `:active` covers the
-   held state for free, so it needs no React re-render to stay in sync. */
-.viewport[data-tool="pan"] {
-  cursor: grab;
-}
-
-.viewport[data-tool="pan"]:active {
-  cursor: grabbing;
-}
-
-.viewport[data-tool="select"] {
-  cursor: default;
-}
-
 .statusbar {
   display: flex;
   gap: 24px;

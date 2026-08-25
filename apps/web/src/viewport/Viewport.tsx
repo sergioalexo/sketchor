@@ -218,7 +218,7 @@ export function Viewport() {
     render(ctx, w, h, viewRef.current, doc, {
       selection: new Set(state.selection),
       preview,
-      snap: state.tool === "select" || state.tool === "pan" ? null : snap,
+      snap: state.tool === "select" ? null : snap,
       moveOffset:
         interaction.kind === "move" ? { dx: interaction.dx, dy: interaction.dy } : null,
       measurement: state.measurement,
@@ -438,16 +438,14 @@ export function Viewport() {
         }
       } else if (e.key === "Escape") {
         // One key that always gets you back to a known-safe state: abandon
-        // whatever is half-drawn, drop the selection, and park on the pan
-        // tool so the next stray click can't add geometry.
+        // whatever is half-drawn, drop the selection, and fall back to the
+        // select tool so the next stray click can't add geometry.
         interactionRef.current = { kind: "idle" };
         app.setSelection([]);
         app.setMeasurement(null);
         app.setEnteredGroup(null);
-        app.setTool("pan");
+        app.setTool("select");
         redraw();
-      } else if (e.key.toLowerCase() === "h") {
-        app.setTool("pan");
       } else if (e.key.toLowerCase() === "v" || e.key.toLowerCase() === "s") {
         app.setTool("select");
       } else if (e.key.toLowerCase() === "l") {
@@ -529,13 +527,6 @@ export function Viewport() {
       return;
     }
     if (e.button !== 0) return;
-
-    // The pan tool is the neutral parking spot Esc drops you into: left-drag
-    // pans and nothing on the canvas can be changed by accident.
-    if (app.tool === "pan") {
-      interactionRef.current = { kind: "pan", lastX: screen.x, lastY: screen.y, resume: { kind: "idle" } };
-      return;
-    }
 
     if (app.tool === "select") {
       const groupId = wholeGroupSelected(doc, app.selection);
@@ -801,7 +792,7 @@ export function Viewport() {
     if (interaction.kind === "measure") {
       app.setMeasurement({ kind: "distance", a: interaction.start, b: snap.point });
     }
-    const shown = app.tool === "select" || app.tool === "pan" ? world : snap.point;
+    const shown = app.tool === "select" ? world : snap.point;
     app.setCursor({ x: shown.x, y: shown.y });
     redraw();
   };
@@ -914,7 +905,6 @@ export function Viewport() {
     <canvas
       ref={canvasRef}
       className="viewport"
-      data-tool={tool}
       data-testid="viewport"
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}

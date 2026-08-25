@@ -21,23 +21,6 @@ const SKETCHOR_SITE = "https://sketchor.sergioalexo.com";
 
 const TOOLS: { id: ToolId; label: string; keyHint: string; icon: JSX.Element }[] = [
   {
-    id: "pan",
-    label: "Pan",
-    keyHint: "H",
-    icon: (
-      <svg viewBox="0 0 24 24" width="20" height="20">
-        <path
-          d="M9 11V5.5a1.5 1.5 0 013 0V11m0-1.5a1.5 1.5 0 013 0V12m0-1a1.5 1.5 0 013 0v5a5 5 0 01-5 5h-2.2a5 5 0 01-3.9-1.9L6 15.4a1.6 1.6 0 012.4-2.1L9 14V7.5a1.5 1.5 0 00-3 0V13"
-          stroke="currentColor"
-          strokeWidth="1.8"
-          fill="none"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    ),
-  },
-  {
     id: "select",
     label: "Select",
     keyHint: "V",
