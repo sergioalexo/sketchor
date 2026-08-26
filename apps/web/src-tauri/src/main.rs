@@ -94,9 +94,20 @@ struct DrawingEntry {
 /// those are fetched on demand per visible card via `read_drawing_file`.
 /// DWG isn't listed here — it's binary and import-only, opened via the Open
 /// dialog or file association instead of the folder-browser grid.
+///
+/// Runs on the blocking pool rather than the main thread: a library folder of
+/// ten thousand drawings means ten thousand `stat` calls, and on a cold cache
+/// or a network share that is long enough to stall the window if it ran where
+/// events are pumped.
 #[tauri::command]
-fn list_drawings_in_dir(dir: String) -> Result<Vec<DrawingEntry>, String> {
-    let entries = std::fs::read_dir(&dir).map_err(|e| e.to_string())?;
+async fn list_drawings_in_dir(dir: String) -> Result<Vec<DrawingEntry>, String> {
+    tauri::async_runtime::spawn_blocking(move || scan_drawings(&dir))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn scan_drawings(dir: &str) -> Result<Vec<DrawingEntry>, String> {
+    let entries = std::fs::read_dir(dir).map_err(|e| e.to_string())?;
     let mut out = Vec::new();
     for entry in entries.flatten() {
         let path = entry.path();

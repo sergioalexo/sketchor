@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { parseSvgText } from "@sketchor/core";
 import { getSessions, importDxfText, importEntities, openIntoSession, useApp } from "../state/store";
 import { bindSaveHandle, bindSavePath } from "../io/drawingFile";
@@ -102,6 +102,113 @@ function openEntry(entry: Entry, text: string): void {
  */
 const TAG_STORE_KEY = "sketchor.fileTags.v1";
 
+/**
+ * Windowed rendering for the file list.
+ *
+ * A library folder here can hold ten thousand drawings, and mounting a
+ * component per file is what froze the app for seconds on open: React has to
+ * reconcile 10k elements and each one starts its own IntersectionObserver for
+ * its thumbnail. Only the rows within {@link OVERSCAN_PX} of the viewport are
+ * rendered; the rest are stand-in padding above and below, so the scrollbar
+ * still measures the whole folder and nothing about scrolling feels different.
+ *
+ * Row height and column count are **measured, not hardcoded** — the cards are
+ * square (`aspect-ratio: 1`), so their height follows the panel's draggable
+ * width, and no fixed number would survive a resize. Reading
+ * `gridTemplateColumns` also makes the same hook serve the list view, where it
+ * computes to `none` and so yields a single column.
+ *
+ * This does assume every item is the same height, which styles.css enforces by
+ * clipping long names and the tag strip rather than letting them wrap. If that
+ * ever stops being true the symptom is drift while scrolling, not a crash.
+ */
+const OVERSCAN_PX = 500;
+/** Files whose metadata is read per yield when enumerating a folder in the browser build. */
+const METADATA_BATCH = 250;
+/** Rendered before anything has been measured — enough to measure from, cheap enough not to stall. */
+const INITIAL_BATCH = 60;
+
+function useWindowedItems(count: number) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const itemsRef = useRef<HTMLDivElement>(null);
+  const observerRef = useRef<ResizeObserver | null>(null);
+  const [metrics, setMetrics] = useState({ stride: 0, cols: 1 });
+  const [scrollTop, setScrollTop] = useState(0);
+  const [viewport, setViewport] = useState(0);
+
+  /**
+   * A callback ref, not a plain one plus an effect: the scroller only exists
+   * once there are entries to show, and it is torn down and rebuilt when the
+   * view mode flips. A mount-time effect would measure a element that isn't
+   * there yet and leave the window sized by overscan alone.
+   */
+  const attachScroll = useCallback((el: HTMLDivElement | null) => {
+    observerRef.current?.disconnect();
+    observerRef.current = null;
+    scrollRef.current = el;
+    if (!el) return;
+    setViewport(el.clientHeight);
+    setScrollTop(el.scrollTop);
+    if (typeof ResizeObserver === "undefined") return;
+    observerRef.current = new ResizeObserver(() => setViewport(el.clientHeight));
+    observerRef.current.observe(el);
+  }, []);
+
+  useEffect(() => () => observerRef.current?.disconnect(), []);
+
+  const onScroll = () => {
+    if (scrollRef.current) setScrollTop(scrollRef.current.scrollTop);
+  };
+
+  // Deliberately runs after every render: the panel resizes, the view mode
+  // flips, and the measurement has to follow. It only sets state when a number
+  // actually moved, so it settles in one extra pass instead of looping.
+  useLayoutEffect(() => {
+    // The viewport height is read here as well as from the ResizeObserver.
+    // The observer delivers on an animation frame, so on the render where the
+    // scroller first appears it hasn't reported yet — and a window sized from
+    // a height of zero renders a couple of rows and leaves blanks below.
+    const scroll = scrollRef.current;
+    if (scroll && scroll.clientHeight !== viewport) setViewport(scroll.clientHeight);
+
+    const items = itemsRef.current;
+    const item = items?.querySelector<HTMLElement>("[data-vitem]");
+    if (!items || !item) return;
+    // The panel stays mounted under `display: none` when toggled off, where
+    // every box measures zero. Taking that reading would leave the stride as
+    // nothing but the row gap and blow the window up to hundreds of rows, so
+    // a hidden panel keeps whatever was last measured.
+    const itemHeight = item.getBoundingClientRect().height;
+    if (itemHeight <= 0) return;
+
+    const style = getComputedStyle(items);
+    const cols = Math.max(1, style.gridTemplateColumns.split(" ").filter(Boolean).length);
+    const stride = itemHeight + (parseFloat(style.rowGap) || 0);
+    if (Math.abs(stride - metrics.stride) > 0.5 || cols !== metrics.cols) {
+      setMetrics({ stride, cols });
+    }
+  });
+
+  const { stride, cols } = metrics;
+  if (stride <= 0) {
+    // Nothing measured yet — render a first batch to measure against.
+    return { attachScroll, itemsRef, onScroll, start: 0, end: Math.min(count, INITIAL_BATCH), padTop: 0, padBottom: 0 };
+  }
+
+  const rows = Math.ceil(count / cols);
+  const firstRow = Math.min(Math.max(0, rows - 1), Math.max(0, Math.floor((scrollTop - OVERSCAN_PX) / stride)));
+  const lastRow = Math.min(rows, Math.ceil((scrollTop + viewport + OVERSCAN_PX) / stride));
+  return {
+    attachScroll,
+    itemsRef,
+    onScroll,
+    start: firstRow * cols,
+    end: Math.min(count, lastRow * cols),
+    padTop: firstRow * stride,
+    padBottom: Math.max(0, (rows - lastRow) * stride),
+  };
+}
+
 function tagKey(entry: Entry): string {
   return entry.path ?? entry.name;
 }
@@ -188,6 +295,8 @@ const PREFETCH_COUNT = 24;
  */
 export function FileExplorerPanel({ hidden, onClose }: { hidden: boolean; onClose: () => void }) {
   const [entries, setEntries] = useState<Entry[]>([]);
+  /** True while a folder is being enumerated — a big library takes a moment even off the main thread. */
+  const [loading, setLoading] = useState(false);
   const [folderLabel, setFolderLabel] = useState<string | null>(null);
   const [width, setWidth] = useState(DEFAULT_WIDTH);
   const [sortMode, setSortMode] = useState<SortMode>("name");
@@ -217,27 +326,37 @@ export function FileExplorerPanel({ hidden, onClose }: { hidden: boolean; onClos
       const dir = await (
         window as unknown as { showDirectoryPicker: () => Promise<{ name: string; values: () => AsyncIterable<FileSystemHandle & { kind: string; name: string }> }> }
       ).showDirectoryPicker();
+      setLoading(true);
+      setFolderLabel(dir.name);
       const handles: FileSystemFileHandle[] = [];
       for await (const item of dir.values()) {
         if (item.kind === "file" && isDrawingFile(item.name)) {
           handles.push(item as unknown as FileSystemFileHandle);
         }
       }
-      // Metadata only (not content) — cheap enough to fetch eagerly so date-sort works; per-file content still loads lazily via IntersectionObserver.
-      const list: Entry[] = await Promise.all(
-        handles.map(async (handle) => {
-          try {
-            const f = await handle.getFile();
-            return { name: handle.name, handle, mtime: f.lastModified, size: f.size };
-          } catch {
-            return { name: handle.name, handle };
-          }
-        }),
-      );
+      // Metadata only (not content) — per-file content still loads lazily.
+      // Done in batches with a yield between them so enumerating a folder of
+      // thousands leaves gaps for input and rendering instead of one long task.
+      const list: Entry[] = [];
+      for (let i = 0; i < handles.length; i += METADATA_BATCH) {
+        const batch = await Promise.all(
+          handles.slice(i, i + METADATA_BATCH).map(async (handle) => {
+            try {
+              const f = await handle.getFile();
+              return { name: handle.name, handle, mtime: f.lastModified, size: f.size };
+            } catch {
+              return { name: handle.name, handle };
+            }
+          }),
+        );
+        list.push(...batch);
+        await new Promise((r) => setTimeout(r, 0));
+      }
       setEntries(list);
-      setFolderLabel(dir.name);
     } catch {
       // user cancelled the picker
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -283,9 +402,12 @@ export function FileExplorerPanel({ hidden, onClose }: { hidden: boolean; onClos
     if (!desktopDir) return;
     const t = tauri();
     if (!t) return;
+    let cancelled = false;
+    setLoading(true);
     t.core
       .invoke("list_drawings_in_dir", { dir: desktopDir })
       .then((res) => {
+        if (cancelled) return;
         const list = (res as { name: string; path: string; mtime?: number | null; size?: number | null }[])
           .filter((e) => isDrawingFile(e.name))
           .map((e) => ({
@@ -299,7 +421,13 @@ export function FileExplorerPanel({ hidden, onClose }: { hidden: boolean; onClos
       })
       .catch(() => {
         // Best-effort: an older desktop build without the command, or a read error.
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
       });
+    return () => {
+      cancelled = true;
+    };
   }, [desktopDir]);
 
   // Ctrl+F focuses the panel's own search box, while it's visible, instead of the browser's page search.
@@ -350,16 +478,26 @@ export function FileExplorerPanel({ hidden, onClose }: { hidden: boolean; onClos
     setActiveTags((prev) => (prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]));
 
   const q = query.trim().toLowerCase();
-  const displayEntries = sortEntries(
-    entries.filter((e) => {
-      if (q && !e.name.toLowerCase().includes(q)) return false;
-      // Multiple active tags narrow rather than widen (an AND, like faceted search).
-      if (activeTags.length > 0 && !activeTags.every((t) => tagsOf(e).includes(t))) return false;
-      return true;
-    }),
-    sortMode,
-    sortDir,
+  // Memoised because it walks every entry: over a folder of thousands this
+  // would otherwise re-filter and re-sort the lot on each keystroke, and on
+  // every unrelated re-render of the panel.
+  const displayEntries = useMemo(
+    () =>
+      sortEntries(
+        entries.filter((e) => {
+          if (q && !e.name.toLowerCase().includes(q)) return false;
+          // Multiple active tags narrow rather than widen (an AND, like faceted search).
+          if (activeTags.length > 0 && !activeTags.every((t) => (tags[tagKey(e)] ?? []).includes(t))) return false;
+          return true;
+        }),
+        sortMode,
+        sortDir,
+      ),
+    [entries, q, activeTags, tags, sortMode, sortDir],
   );
+
+  const win = useWindowedItems(displayEntries.length);
+  const visible = displayEntries.slice(win.start, win.end);
 
   /** Clicking a column re-sorts by it; clicking the active column flips direction. */
   const sortByColumn = (mode: SortMode) => {
@@ -593,7 +731,12 @@ export function FileExplorerPanel({ hidden, onClose }: { hidden: boolean; onClos
         </div>
       )}
 
-      {entries.length === 0 ? (
+      {loading ? (
+        <div className="filexplorer-loading" data-testid="file-explorer-loading">
+          <span className="spinner" aria-hidden="true" />
+          <span>Reading {folderLabel ?? "folder"}…</span>
+        </div>
+      ) : entries.length === 0 ? (
         <div className="filexplorer-empty">
           {isDesktop
             ? "Open a .dxf or .svg file, or pick a folder, to browse its drawings."
@@ -606,44 +749,63 @@ export function FileExplorerPanel({ hidden, onClose }: { hidden: boolean; onClos
           {query ? `No files match "${query}".` : "No files carry all of the selected tags."}
         </div>
       ) : viewMode === "grid" ? (
-        <div className="filexplorer-grid" data-testid="file-explorer-grid">
-          {displayEntries.map((entry) => (
-            <FileCard
-              key={tagKey(entry)}
-              entry={entry}
-              activeSessionId={activeSessionId}
-              tags={tagsOf(entry)}
-              selected={selected.includes(tagKey(entry))}
-              onToggleSelect={(additive) => toggleSelected(entry, additive)}
-              onEditTags={() => editTags(entry)}
-              onDragStart={onItemDragStart(entry)}
-              onPointerHint={onItemPointerHint(entry)}
-              getText={textOf(entry)}
-            />
-          ))}
+        <div className="filexplorer-scroll" ref={win.attachScroll} onScroll={win.onScroll}>
+          <div
+            className="filexplorer-grid"
+            data-testid="file-explorer-grid"
+            ref={win.itemsRef}
+            style={{ paddingTop: win.padTop, paddingBottom: win.padBottom }}
+          >
+            {visible.map((entry) => (
+              <FileCard
+                key={tagKey(entry)}
+                entry={entry}
+                activeSessionId={activeSessionId}
+                tags={tagsOf(entry)}
+                reserveTags={allTags.length > 0}
+                selected={selected.includes(tagKey(entry))}
+                onToggleSelect={(additive) => toggleSelected(entry, additive)}
+                onEditTags={() => editTags(entry)}
+                onDragStart={onItemDragStart(entry)}
+                onPointerHint={onItemPointerHint(entry)}
+                getText={textOf(entry)}
+              />
+            ))}
+          </div>
         </div>
       ) : (
-        <div className="filexplorer-list" data-testid="file-explorer-list">
+        <>
+          {/* Outside the scroller, so the columns stay put while you scroll. */}
           <div className="filexplorer-list-head">
             <SortHeader label="Name" mode="name" active={sortMode} dir={sortDir} onSort={sortByColumn} />
             <SortHeader label="Modified" mode="date" active={sortMode} dir={sortDir} onSort={sortByColumn} />
             <SortHeader label="Size" mode="size" active={sortMode} dir={sortDir} onSort={sortByColumn} />
           </div>
-          {displayEntries.map((entry) => (
-            <FileRow
-              key={tagKey(entry)}
-              entry={entry}
-              activeSessionId={activeSessionId}
-              tags={tagsOf(entry)}
-              selected={selected.includes(tagKey(entry))}
-              onToggleSelect={(additive) => toggleSelected(entry, additive)}
-              onEditTags={() => editTags(entry)}
-              onDragStart={onItemDragStart(entry)}
-              onPointerHint={onItemPointerHint(entry)}
-              getText={textOf(entry)}
-            />
-          ))}
-        </div>
+          <div className="filexplorer-scroll" ref={win.attachScroll} onScroll={win.onScroll}>
+            <div
+              className="filexplorer-list"
+              data-testid="file-explorer-list"
+              ref={win.itemsRef}
+              style={{ paddingTop: win.padTop, paddingBottom: win.padBottom }}
+            >
+              {visible.map((entry) => (
+                <FileRow
+                  key={tagKey(entry)}
+                  entry={entry}
+                  activeSessionId={activeSessionId}
+                  tags={tagsOf(entry)}
+                  reserveTags={false}
+                  selected={selected.includes(tagKey(entry))}
+                  onToggleSelect={(additive) => toggleSelected(entry, additive)}
+                  onEditTags={() => editTags(entry)}
+                  onDragStart={onItemDragStart(entry)}
+                  onPointerHint={onItemPointerHint(entry)}
+                  getText={textOf(entry)}
+                />
+              ))}
+            </div>
+          </div>
+        </>
       )}
 
       <div
@@ -660,6 +822,13 @@ export function FileExplorerPanel({ hidden, onClose }: { hidden: boolean; onClos
 
 interface FileItemProps {
   entry: Entry;
+  /**
+   * Keep the tag row's space even when this file has no tags. Windowing
+   * measures one card and assumes the rest match, so in a folder where
+   * *anything* is tagged every card has to carry the row. Folders with no
+   * tags at all stay compact.
+   */
+  reserveTags: boolean;
   activeSessionId: string;
   tags: string[];
   selected: boolean;
@@ -743,7 +912,7 @@ function useThumbnail(
   return svg;
 }
 
-function FileCard({ entry, activeSessionId, tags, selected, onToggleSelect, onEditTags, onDragStart, onPointerHint, getText }: FileItemProps) {
+function FileCard({ entry, activeSessionId, tags, reserveTags, selected, onToggleSelect, onEditTags, onDragStart, onPointerHint, getText }: FileItemProps) {
   const cardRef = useRef<HTMLButtonElement>(null);
   const svg = useThumbnail(entry, getText, 110, cardRef);
 
@@ -756,6 +925,7 @@ function FileCard({ entry, activeSessionId, tags, selected, onToggleSelect, onEd
     <button
       className={`filecard ${isActive ? "active" : ""} ${selected ? "selected" : ""}`}
       data-testid="file-card"
+      data-vitem=""
       title={`Open ${entry.name}${tags.length ? ` — tagged ${tags.join(", ")}` : ""}\nCtrl-click to select · drag out to copy the file · right-click to tag`}
       onClick={(e) => (e.ctrlKey || e.metaKey || e.shiftKey ? onToggleSelect(true) : void handleOpen())}
       onContextMenu={(e) => {
@@ -772,7 +942,7 @@ function FileCard({ entry, activeSessionId, tags, selected, onToggleSelect, onEd
         {svg ? <span dangerouslySetInnerHTML={{ __html: svg }} /> : <span className="filecard-placeholder" />}
       </span>
       <span className="filecard-name">{entry.name}</span>
-      {tags.length > 0 && (
+      {(tags.length > 0 || reserveTags) && (
         <span className="filecard-tags">
           {tags.map((t) => (
             <span key={t} className="filetag mini">
@@ -786,6 +956,7 @@ function FileCard({ entry, activeSessionId, tags, selected, onToggleSelect, onEd
 }
 
 function FileRow({ entry, activeSessionId, tags, selected, onToggleSelect, onEditTags, onDragStart, onPointerHint, getText }: FileItemProps) {
+  // Rows put tags inline on a fixed-height line, so they need no reservation.
   const rowRef = useRef<HTMLButtonElement>(null);
   // A small geometry preview, so the list is still scannable by shape and not
   // just by filename. Rendering it also warms the shared text cache, which is
@@ -801,6 +972,7 @@ function FileRow({ entry, activeSessionId, tags, selected, onToggleSelect, onEdi
       ref={rowRef}
       className={`filerow ${isActive ? "active" : ""} ${selected ? "selected" : ""}`}
       data-testid="file-row"
+      data-vitem=""
       title={`Open ${entry.name}${tags.length ? ` — tagged ${tags.join(", ")}` : ""}\nCtrl-click to select · drag out to copy the file · right-click to tag`}
       onClick={(e) => (e.ctrlKey || e.metaKey || e.shiftKey ? onToggleSelect(true) : void handleOpen())}
       onContextMenu={(e) => {

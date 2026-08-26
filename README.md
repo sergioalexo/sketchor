@@ -151,7 +151,18 @@ The left panel browses a folder of drawings as geometry thumbnails, and
 filters as you type (`Ctrl+F`). Reading and rendering previews runs on a
 queue that yields to the browser between files, so opening a large library
 fills in progressively instead of freezing the app — the drawing already open
-stays editable throughout. The **list view** shows a small preview plus
+stays editable throughout.
+
+**It is built for folders of thousands.** Only the cards near the viewport
+exist as elements; the rest are stand-in padding, so the scrollbar still
+measures the whole folder while the page holds a few dozen nodes instead of
+ten thousand. Row height and column count are measured from a real card rather
+than hardcoded, because the cards are square and follow the panel's draggable
+width. That does mean every item has to be the same height — long names and
+the tag strip clip rather than wrap, and in a folder where anything is tagged
+every card reserves the tag row. On the desktop the folder scan runs on a
+blocking-pool thread, not the one pumping window events, and a spinner shows
+while it works. The **list view** shows a small preview plus
 Name / Modified / Size columns — click a column title to sort by it, click it
 again to reverse. (The grid view has no headers, so it keeps a compact
 name/date toggle.)

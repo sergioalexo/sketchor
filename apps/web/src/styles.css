@@ -947,10 +947,16 @@ body {
 
 .filecard-tags {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 3px;
   justify-content: center;
   margin-top: 2px;
+  overflow: hidden;
+  /* Uniform item height is what the windowed list measures against, so a
+     second row of tags would make scrolling drift. They clip instead; the
+     full set is in the title tooltip and the right-click editor. */
+  max-height: 14px;
+  min-height: 14px;
 }
 
 .filexplorer-selbar {
@@ -974,10 +980,15 @@ body {
   outline-offset: -2px;
 }
 
-.filexplorer-list {
+/* Scroll container for both views. Holding the scroll here, and the item
+   layout in a child, lets the windowing spacers be plain padding. */
+.filexplorer-scroll {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+}
+
+.filexplorer-list {
   display: flex;
   flex-direction: column;
   padding: 4px 0;
@@ -1079,9 +1090,6 @@ body {
 }
 
 .filexplorer-grid {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
@@ -1282,4 +1290,38 @@ body {
 .update-later:hover {
   color: var(--text);
   background: var(--border);
+}
+
+/* ---------- file browser: loading ---------- */
+
+.filexplorer-loading {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 24px 12px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.spinner {
+  width: 15px;
+  height: 15px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 700ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 2.4s;
+  }
 }
