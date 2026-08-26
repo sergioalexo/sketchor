@@ -81,13 +81,27 @@ export function isTauri(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
-/** Opens a URL in the user's real browser (desktop) or a new tab (web). */
+/**
+ * Opens a URL in the user's real browser (desktop) or a new tab (web).
+ *
+ * Failures are reported, not dropped. Callers fire this from click handlers
+ * without awaiting, so a rejection here used to disappear into a floating
+ * promise — which is exactly how the desktop build refusing every URL (an
+ * opener permission with no scope attached) stayed invisible for three
+ * releases. If it can't open, say so and show the address.
+ */
 export async function openExternal(url: string): Promise<void> {
-  if (isTauri()) {
-    const { openUrl } = await import("@tauri-apps/plugin-opener");
-    await openUrl(url);
-  } else {
-    window.open(url, "_blank", "noopener");
+  try {
+    if (isTauri()) {
+      const { openUrl } = await import("@tauri-apps/plugin-opener");
+      await openUrl(url);
+    } else {
+      window.open(url, "_blank", "noopener");
+    }
+  } catch (err) {
+    console.error("Failed to open", url, err);
+    const { useApp } = await import("../state/store");
+    useApp.getState().setSaveNotice({ kind: "error", message: `Couldn't open ${url}`, at: Date.now() });
   }
 }
 

@@ -16,8 +16,12 @@ import { TabStrip } from "./tabs/TabStrip";
 import { UpdateBanner, UpdateButton } from "./update/UpdatePanel";
 import { openExternal } from "./update/updateService";
 
-/** The project's home page, opened by the logo in the toolbar. */
-const SKETCHOR_SITE = "https://sketchor.sergioalexo.com";
+/**
+ * The project's home page, opened by the logo in the toolbar. Must stay
+ * inside the opener scope in src-tauri/capabilities/default.json — the
+ * desktop build refuses any URL that isn't listed there.
+ */
+const SKETCHOR_SITE = "https://sketchor.sergioalexo.com/";
 
 const TOOLS: { id: ToolId; label: string; keyHint: string; icon: JSX.Element }[] = [
   {

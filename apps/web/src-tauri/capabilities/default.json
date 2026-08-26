@@ -1,11 +1,19 @@
 {
   "identifier": "default",
+  "description": "The opener entry MUST carry an `allow` list. `opener:allow-open-url` on its own enables the command with an empty scope, and the plugin's check is `allowed.iter().any(..)` — which is false for every URL, so open_url returns ForbiddenUrl and nothing happens. That is why the toolbar logo silently did nothing before 0.8.3.",
   "platforms": ["windows", "macOS", "linux"],
   "windows": ["main"],
   "permissions": [
     "core:default",
-    "opener:allow-open-url",
     "updater:default",
-    "process:allow-restart"
+    "process:allow-restart",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        { "url": "https://sketchor.sergioalexo.com" },
+        { "url": "https://sketchor.sergioalexo.com/*" },
+        { "url": "https://github.com/sergioalexo/*" }
+      ]
+    }
   ]
 }
