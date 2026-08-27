@@ -11,6 +11,7 @@ import { DuplicatesPanel } from "./heal/DuplicatesPanel";
 import { ImportReportBanner } from "./dxf/ImportReportBanner";
 import { LayerPanel } from "./layers/LayerPanel";
 import { PatternPanel } from "./pattern/PatternPanel";
+import { LoadPlanPanel } from "./plugins/truckNesting/LoadPlanPanel";
 import { StraightenPanel } from "./viewport/StraightenPanel";
 import { TabStrip } from "./tabs/TabStrip";
 import { UpdateBanner, UpdateButton } from "./update/UpdatePanel";
@@ -149,6 +150,8 @@ export function App() {
   const [showDiag, setShowDiag] = useState(false);
   const [showDup, setShowDup] = useState(false);
   const [showPattern, setShowPattern] = useState(false);
+  // Reference plugin, wired in directly (roadmap step 3) until a real panel-contribution registry exists (v0.10).
+  const [showNesting, setShowNesting] = useState(false);
   const [showSaveMenu, setShowSaveMenu] = useState(false);
   const [showUpdateMenu, setShowUpdateMenu] = useState(false);
   const showFiles = useApp((s) => s.fileBrowserVisible);
@@ -458,6 +461,26 @@ export function App() {
             </svg>
           </button>
           <button
+            className={`action ${showNesting ? "toggled" : ""}`}
+            title="Toggle Load Plan (truck nesting plugin)"
+            data-testid="toggle-nesting"
+            onClick={() => setShowNesting((v) => !v)}
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18">
+              <rect x="2" y="7" width="14" height="10" rx="1" stroke="currentColor" strokeWidth="1.8" fill="none" />
+              <path
+                d="M16 10h3.5L22 13v4h-6"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                fill="none"
+                strokeLinejoin="round"
+              />
+              <circle cx="7" cy="19" r="1.6" fill="currentColor" />
+              <circle cx="18.5" cy="19" r="1.6" fill="currentColor" />
+              <path d="M5 11h5M5 14h4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+            </svg>
+          </button>
+          <button
             className={`action ${showFiles ? "toggled" : ""}`}
             title="Toggle file browser"
             data-testid="toggle-file-browser"
@@ -545,6 +568,7 @@ export function App() {
         {showDiag && <DiagnosticsPanel onClose={() => setShowDiag(false)} />}
         {showDup && <DuplicatesPanel onClose={() => setShowDup(false)} />}
         {showPattern && <PatternPanel onClose={() => setShowPattern(false)} />}
+        {showNesting && <LoadPlanPanel onClose={() => setShowNesting(false)} />}
         {showLayers && <LayerPanel />}
         {showCode && <CodePanel />}
       </div>

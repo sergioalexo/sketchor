@@ -702,6 +702,135 @@ body {
   color: var(--text-dim);
 }
 
+/* ---------- load plan (truck nesting plugin) panel ---------- */
+
+.nestpanel {
+  width: 360px;
+  overflow-y: auto;
+}
+
+.nestpanel-section {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.nestpanel-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+
+.nestpanel-trailer {
+  grid-template-columns: 1fr 1fr;
+}
+
+.nestpanel-table-wrap {
+  overflow-x: auto;
+}
+
+.nestpanel-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.nestpanel-table th {
+  text-align: left;
+  color: var(--text-dim);
+  font-weight: 500;
+  padding: 2px 4px;
+}
+
+.nestpanel-table td {
+  padding: 2px 3px;
+}
+
+.nestpanel-table input[type="text"],
+.nestpanel-table input[type="number"] {
+  width: 100%;
+  min-width: 0;
+  padding: 3px 4px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: #17181c;
+  color: var(--text);
+  font-size: 11px;
+}
+
+.nestpanel-table td:first-child input[type="text"] {
+  width: 84px;
+}
+
+.nestpanel-checkbox-cell {
+  text-align: center;
+}
+
+.nestpanel-totals {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.nestpanel-results {
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.nestpanel-finding {
+  font-size: 11.5px;
+  border-radius: 5px;
+  padding: 5px 8px;
+  line-height: 1.4;
+}
+
+.nestpanel-finding-info {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.nestpanel-finding-warn {
+  background: #4a3a17;
+  color: #f0c674;
+}
+
+.nestpanel-finding-error {
+  background: #4a1f1f;
+  color: #f08e8e;
+}
+
+.nestpanel-finding-level {
+  font-weight: 600;
+  margin-right: 4px;
+}
+
+.nestpanel-stop {
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 6px 8px;
+}
+
+.nestpanel-stop-head {
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.nestpanel-stop-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
 /* ---------- document tabs ---------- */
 
 .tabstrip {

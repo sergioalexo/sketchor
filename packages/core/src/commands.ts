@@ -4,6 +4,7 @@ import type { GroupId } from "./groups";
 import type { Constraint, ConstraintId } from "./constraints";
 import type { Point } from "./geometry";
 import type { SketchDocument } from "./document";
+import type { Json } from "./meta";
 
 /**
  * Every mutation of the document is a plain-data command.
@@ -30,6 +31,9 @@ export type Command =
   | { type: "ungroup"; groupId: GroupId }
   | { type: "add-constraint"; constraint: Constraint }
   | { type: "remove-constraint"; id: ConstraintId }
+  /** Plugin metadata (see meta.ts) — `pluginId` namespaces the key so two plugins can't collide. */
+  | { type: "set-meta"; pluginId: string; targetId: EntityId | GroupId; value: Json }
+  | { type: "clear-meta"; pluginId: string; targetId: EntityId | GroupId }
   | { type: "batch"; commands: Command[] };
 
 interface HistoryEntry {
@@ -175,6 +179,21 @@ export class CommandBus {
         if (!existing) return [];
         doc._removeConstraint(command.id);
         return [{ type: "add-constraint", constraint: existing }];
+      }
+      case "set-meta": {
+        const previous = doc.getMeta(command.pluginId, command.targetId);
+        doc._setMeta(command.pluginId, command.targetId, command.value);
+        return [
+          previous === undefined
+            ? { type: "clear-meta", pluginId: command.pluginId, targetId: command.targetId }
+            : { type: "set-meta", pluginId: command.pluginId, targetId: command.targetId, value: previous },
+        ];
+      }
+      case "clear-meta": {
+        const previous = doc.getMeta(command.pluginId, command.targetId);
+        if (previous === undefined) return [];
+        doc._clearMeta(command.pluginId, command.targetId);
+        return [{ type: "set-meta", pluginId: command.pluginId, targetId: command.targetId, value: previous }];
       }
       case "batch": {
         const inverse: Command[] = [];

@@ -12,6 +12,8 @@
   "dependencies": {
     "@mlightcad/libredwg-web": "^0.7.9",
     "@sketchor/core": "*",
+    "@sketchor/plugin-api": "*",
+    "@sketchor/plugin-truck-nesting": "*",
     "@tauri-apps/plugin-opener": "^2.5.4",
     "@tauri-apps/plugin-process": "^2.3.0",
     "@tauri-apps/plugin-updater": "^2.9.0",

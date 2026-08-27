@@ -1,0 +1,14 @@
+{
+  "id": "com.sergioalexo.truck-nesting",
+  "name": "Truck Nesting",
+  "version": "0.1.0",
+  "engines": { "sketchor": "^0.8" },
+  "main": "src/index.ts",
+  "permissions": ["document:write"],
+  "activation": ["panel:nesting"],
+  "contributes": {
+    "panels": [{ "id": "nesting", "title": "Load Plan", "dock": "right" }],
+    "tools": [],
+    "commands": [{ "id": "nesting.autoNest", "title": "Auto-nest load" }]
+  }
+}

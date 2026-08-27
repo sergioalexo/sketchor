@@ -1,6 +1,7 @@
 export * from "./geometry";
 export * from "./entities";
 export * from "./groups";
+export * from "./meta";
 export * from "./constraints";
 export * from "./connectivity";
 export * from "./document";
