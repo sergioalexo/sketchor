@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>en</string>
+  <key>CFBundleDisplayName</key>
+  <string>Sketchor DXF Thumbnail</string>
+  <key>CFBundleExecutable</key>
+  <string>DxfThumbnail</string>
+  <key>CFBundleIdentifier</key>
+  <string>com.sketchor.app.DxfThumbnail</string>
+  <key>CFBundleInfoDictionaryVersion</key>
+  <string>6.0</string>
+  <key>CFBundleName</key>
+  <string>DxfThumbnail</string>
+  <key>CFBundlePackageType</key>
+  <string>XPC!</string>
+  <key>CFBundleShortVersionString</key>
+  <string>0.8.3</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
+  <key>NSExtension</key>
+  <dict>
+    <key>NSExtensionAttributes</key>
+    <dict>
+      <!-- Must be the EXACT UTI Finder resolves a .dxf to. The host app
+           (apps/web/src-tauri/Info.plist) exports com.sketchor.dxf; verify at
+           runtime with `mdls -name kMDItemContentType file.dxf` and add any
+           other resolved UTI here if a different app owns .dxf. -->
+      <key>QLSupportedContentTypes</key>
+      <array>
+        <string>com.sketchor.dxf</string>
+      </array>
+      <key>QLThumbnailMinimumDimension</key>
+      <integer>0</integer>
+    </dict>
+    <key>NSExtensionPointIdentifier</key>
+    <string>com.apple.quicklook.thumbnail</string>
+    <key>NSExtensionPrincipalClass</key>
+    <string>ThumbnailProvider</string>
+  </dict>
+</dict>
+</plist>

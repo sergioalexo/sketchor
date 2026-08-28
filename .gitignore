@@ -5,6 +5,9 @@ dist/
 # rust build output (tauri shell + native thumbnailer)
 target/
 
+# macOS Quick Look extension build output (.appex, sample binary)
+native/dxf-quicklook/build/
+
 # logs / os cruft
 *.log
 .DS_Store

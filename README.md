@@ -192,6 +192,14 @@ Explorer render a **preview of the geometry** — not just the app icon — as t
 `.dxf` file thumbnail (and, when installed elevated, in the reading pane).
 Install it per-user with `native/dxf-thumbnailer/install-thumbnailer.ps1`.
 
+On macOS, `native/dxf-quicklook/` does the same for Finder: a Quick Look
+thumbnail extension (`.appex`) that renders `.dxf` geometry onto the file icon.
+It shares the DXF parser and fit-to-box projection with the Windows thumbnailer
+via a common Rust crate (`native/dxf-parse/`), so the two previews match. It
+ships inside `Sketchor.app` (embedded after `tauri build` by
+`native/embed-quicklook-macos.sh`, since Tauri can't bundle an app extension
+itself); see `native/dxf-quicklook/README.md`.
+
 ## Saving
 
 A tab remembers the file it came from, whichever way it got there — the Open

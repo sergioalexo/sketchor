@@ -1,6 +1,11 @@
 //! Minimal ASCII DXF parsing + shape model, mirroring the TypeScript
 //! parser in `@sketchor/core`. Arcs and polylines are approximated with
 //! line segments. Kept dependency-free so it is easy to audit.
+//!
+//! Shared by the Windows Explorer thumbnailer (`dxf-thumbnailer`, which
+//! rasterises the shapes with GDI) and the macOS Quick Look extension
+//! (`dxf-quicklook`, which draws them with Core Graphics). Both consume the
+//! same `parse` + `project` here so previews agree across platforms.
 
 #[derive(Clone, Copy)]
 pub struct Pt {
@@ -236,4 +241,62 @@ pub fn bounds(shapes: &[Shape]) -> Option<Bounds> {
     } else {
         None
     }
+}
+
+/// A line/circle in raster space: origin top-left, Y increasing downward,
+/// already fitted into the `size`x`size` box. Consumers just stroke these.
+#[derive(Clone, Copy)]
+pub struct ProjLine {
+    pub x1: f64,
+    pub y1: f64,
+    pub x2: f64,
+    pub y2: f64,
+}
+
+#[derive(Clone, Copy)]
+pub struct ProjCircle {
+    pub cx: f64,
+    pub cy: f64,
+    pub r: f64,
+}
+
+pub struct Projection {
+    pub lines: Vec<ProjLine>,
+    pub circles: Vec<ProjCircle>,
+}
+
+/// Fit shapes into a `size`x`size` box with `pad` px of margin, flipping
+/// world-Y-up to raster-Y-down. This is the same scale/offset math the GDI
+/// rasteriser (`dxf-thumbnailer/src/render.rs`) and the SVG thumbnailer
+/// (`@sketchor/core` `entitiesToSvg`) use, lifted here so every platform's
+/// preview lands identically. Returns empty when there is nothing to draw.
+pub fn project(shapes: &[Shape], size: f64, pad: f64) -> Projection {
+    let mut lines = Vec::new();
+    let mut circles = Vec::new();
+    let Some(b) = bounds(shapes) else {
+        return Projection { lines, circles };
+    };
+    let w = (b.max_x - b.min_x).max(1e-6);
+    let h = (b.max_y - b.min_y).max(1e-6);
+    let scale = ((size - pad * 2.0) / w).min((size - pad * 2.0) / h);
+    let off_x = (size - w * scale) / 2.0;
+    let off_y = (size - h * scale) / 2.0;
+    let sx = |x: f64| off_x + (x - b.min_x) * scale;
+    let sy = |y: f64| off_y + (b.max_y - y) * scale; // Y down
+    for s in shapes {
+        match s {
+            Shape::Line(a, c) => lines.push(ProjLine {
+                x1: sx(a.x),
+                y1: sy(a.y),
+                x2: sx(c.x),
+                y2: sy(c.y),
+            }),
+            Shape::Circle(c, r) => circles.push(ProjCircle {
+                cx: sx(c.x),
+                cy: sy(c.y),
+                r: r * scale,
+            }),
+        }
+    }
+    Projection { lines, circles }
 }

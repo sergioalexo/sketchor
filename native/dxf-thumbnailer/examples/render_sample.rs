@@ -4,7 +4,8 @@
 //!
 //!   cargo run --example render_sample -- [input.dxf] [out.png] [size]
 
-use dxf_thumbnailer::{dxf, render};
+use dxf_parse as dxf;
+use dxf_thumbnailer::render;
 
 const SAMPLE: &str = "0\nSECTION\n2\nENTITIES\n\
 0\nLWPOLYLINE\n90\n4\n70\n1\n10\n0\n20\n0\n10\n120\n20\n0\n10\n120\n20\n80\n10\n0\n20\n80\n\

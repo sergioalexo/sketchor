@@ -1,0 +1,8 @@
+[package]
+name = "dxf-parse"
+version = "0.1.0"
+edition = "2021"
+description = "Dependency-free ASCII DXF parser + fit-to-box projection shared by Sketchor's Windows thumbnailer and macOS Quick Look extension"
+
+[lib]
+crate-type = ["rlib"]
