@@ -55,7 +55,7 @@ export function createClient(transport: RpcTransport): PluginHostApi {
     },
 
     ui: {
-      show: (options?: UiShowOptions) => transport.call("ui.show", [options]) as Promise<void>,
+      show: (html: string, options?: UiShowOptions) => transport.call("ui.show", [html, options]) as Promise<void>,
       hide: () => transport.call("ui.hide", []) as Promise<void>,
       postMessage: (message: unknown) => transport.post("ui.postMessage", [message]),
       onMessage: (listener: (message: unknown) => void): Promise<Unsubscribe> =>

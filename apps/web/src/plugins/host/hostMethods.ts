@@ -1,5 +1,6 @@
-import { projectDocument, type Command } from "@sketchor/core";
+import { projectDocument, type Command, type UiShowOptions } from "@sketchor/core";
 import { bus, doc, useApp } from "../../state/store";
+import { hidePanel, postToPanel, showPanel, subscribeToPanel } from "./uiManager";
 
 /**
  * The actual host-side implementations behind each RPC method. These run on the
@@ -69,8 +70,10 @@ export async function dispatchCall(ctx: HostContext, method: string, args: unkno
       return hostFetch(String(args[0]), args[1] as RequestInit | undefined);
 
     case "ui.show":
+      showPanel(ctx.pluginId, String(args[0] ?? ""), args[1] as UiShowOptions | undefined);
+      return undefined;
     case "ui.hide":
-      // Real sandboxed-iframe panels land in Phase 3; accept and no-op for now.
+      hidePanel(ctx.pluginId);
       return undefined;
 
     default:
@@ -80,7 +83,7 @@ export async function dispatchCall(ctx: HostContext, method: string, args: unkno
 
 /** Event-stream methods. Returns an unsubscribe function. */
 export function dispatchSubscribe(
-  _ctx: HostContext,
+  ctx: HostContext,
   method: string,
   _args: unknown[],
   emit: (payload: unknown) => void,
@@ -95,8 +98,7 @@ export function dispatchSubscribe(
       });
 
     case "ui.onMessage":
-      // Panel messaging is wired in Phase 3; no events until then.
-      return () => {};
+      return subscribeToPanel(ctx.pluginId, (message) => emit(message));
 
     default:
       throw new Error(`Unhandled subscribe method "${method}"`);
@@ -104,18 +106,18 @@ export function dispatchSubscribe(
 }
 
 /** Fire-and-forget methods. */
-export function dispatchPost(_ctx: HostContext, method: string, args: unknown[]): void {
+export function dispatchPost(ctx: HostContext, method: string, args: unknown[]): void {
   switch (method) {
     case "ui.notify": {
       const message = String(args[0]);
-      // Phase 3 shows a real toast; for now surface it on a window event + console.
       window.dispatchEvent(new CustomEvent("sketchor:plugin-notify", { detail: { message, options: args[1] } }));
       // eslint-disable-next-line no-console
       console.info(`[plugin] ${message}`);
       return;
     }
     case "ui.postMessage":
-      return; // no panel yet (Phase 3)
+      postToPanel(ctx.pluginId, args[0]);
+      return;
     default:
       throw new Error(`Unhandled post method "${method}"`);
   }

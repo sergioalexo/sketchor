@@ -349,6 +349,20 @@ body {
   background: var(--border);
 }
 
+/* ---------- plugin panels (sandboxed iframe) ---------- */
+
+.pluginpanel {
+  min-width: 220px;
+}
+
+.pluginpanel-frame {
+  flex: 1;
+  width: 100%;
+  min-height: 120px;
+  border: none;
+  background: var(--panel);
+}
+
 /* ---------- plugin command palette ---------- */
 
 .cmdpalette-backdrop {

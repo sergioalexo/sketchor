@@ -25,6 +25,20 @@ export const BUILTIN_MANIFESTS: PluginManifest[] = [
     permissions: ["read-document", "write-document"],
   },
   {
+    id: "com.sketchor.panel-demo",
+    version: "1.0.0",
+    name: "Circle Maker",
+    description: "Demo: a sandboxed-iframe panel that adds a circle through the worker.",
+    publisher: "Sketchor",
+    engines: { sketchor: `^${HOST_API_VERSION}` },
+    main: "panelDemoPlugin.ts",
+    ui: "panelDemo.html",
+    contributes: {
+      commands: [{ id: "panel-demo.open", title: "Circle Maker (panel)" }],
+    },
+    permissions: ["read-document", "write-document"],
+  },
+  {
     id: "com.sketchor.svg-export",
     version: "1.0.0",
     name: "SVG Export",

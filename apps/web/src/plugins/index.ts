@@ -10,6 +10,7 @@ import {
 import { doc, useApp } from "../state/store";
 import { PluginHost } from "./host/PluginHost";
 import { previewGenerator, registerContributions, runGenerator, unregisterContributions } from "./host/registries";
+import { removePluginUi } from "./host/uiManager";
 import { BUILTIN_MANIFESTS } from "./builtins/manifests";
 
 /**
@@ -50,6 +51,7 @@ export function stopPlugin(pluginId: string): void {
   running.get(pluginId)?.dispose();
   running.delete(pluginId);
   unregisterContributions(pluginId);
+  removePluginUi(pluginId);
 }
 
 /** Boots the in-repo first-party plugins. Called once at app start. */

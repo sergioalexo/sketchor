@@ -12,6 +12,7 @@ import { ImportReportBanner } from "./dxf/ImportReportBanner";
 import { LayerPanel } from "./layers/LayerPanel";
 import { PatternPanel } from "./pattern/PatternPanel";
 import { PluginCommandPalette } from "./plugins/PluginCommandPalette";
+import { PluginPanels } from "./plugins/PluginPanels";
 import { listExporters, onRegistriesChange, runExporter } from "./plugins/host/registries";
 import { StraightenPanel } from "./viewport/StraightenPanel";
 import { TabStrip } from "./tabs/TabStrip";
@@ -604,6 +605,7 @@ export function App() {
         {showPattern && <PatternPanel onClose={() => setShowPattern(false)} />}
         {showLayers && <LayerPanel />}
         {showCode && <CodePanel />}
+        <PluginPanels />
       </div>
 
       <footer className="statusbar" data-revision={revision}>

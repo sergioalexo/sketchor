@@ -86,13 +86,17 @@ export interface PluginFetchResponse {
  * `ui` entry in its manifest; no separate permission.
  */
 export interface UiApi {
-  /** Mounts the plugin's UI panel. */
-  show(options?: UiShowOptions): Promise<void>;
+  /**
+   * Mounts `html` as the plugin's panel — a sandboxed iframe docked in the host
+   * UI, isolated from `window.sketchor`, the main DOM, and (via CSP) the network.
+   * The panel talks back only by `postMessage`. Mirrors Figma's `showUI(html)`.
+   */
+  show(html: string, options?: UiShowOptions): Promise<void>;
   /** Hides the panel without unloading the plugin. */
   hide(): Promise<void>;
-  /** Posts a message to the panel iframe. */
+  /** Posts a message to the panel iframe (delivered as `event.data.pluginMessage`). */
   postMessage(message: unknown): void;
-  /** Receives messages the panel posts back. Returns an unsubscribe function. */
+  /** Receives messages the panel posts back (its `parent.postMessage({ pluginMessage })`). */
   onMessage(listener: (message: unknown) => void): Promise<Unsubscribe>;
   /** Shows a transient host notification (toast). */
   notify(message: string, options?: NotifyOptions): void;
@@ -183,7 +187,9 @@ export interface ImporterContext {
  * `engines.sketchor` is a semver range checked against this at load time; an
  * incompatible plugin is refused rather than failing at runtime.
  *
- * Bumped to 0.2.0 in Phase 2 — additive: the `commands`/`generators`/`io`
- * contribution registration surface.
+ * 0.2.0 (Phase 2, additive) added the `commands`/`generators`/`io` contribution
+ * registration surface. 0.3.0 (Phase 3) reshaped `ui.show(options)` into
+ * `ui.show(html, options)` for the sandboxed-iframe panel — a breaking change to
+ * the `ui` sub-API, hence the minor bump on a pre-1.0 line.
  */
-export const HOST_API_VERSION = "0.2.0";
+export const HOST_API_VERSION = "0.3.0";
