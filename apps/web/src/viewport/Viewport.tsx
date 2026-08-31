@@ -417,10 +417,10 @@ export function Viewport() {
         // tab and won't let a page preventDefault it.
         e.preventDefault();
         closeTab(useApp.getState().activeSessionId);
-      } else if (e.ctrlKey && e.key.toLowerCase() === "z" && !e.shiftKey) {
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && !e.shiftKey) {
         bus.undo();
         e.preventDefault();
-      } else if (e.ctrlKey && (e.key.toLowerCase() === "y" || (e.key.toLowerCase() === "z" && e.shiftKey))) {
+      } else if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "y" || (e.key.toLowerCase() === "z" && e.shiftKey))) {
         bus.redo();
         e.preventDefault();
       } else if (e.key === "Enter" && interactionRef.current.kind === "draw-polyline") {
