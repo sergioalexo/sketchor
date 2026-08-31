@@ -157,6 +157,13 @@ export function installPluginDevHandle(): void {
       console.info("[plugins] install result:", result);
       return result;
     },
+    /** Phase 5: fetch the registry and show each plugin's install/update status. */
+    browseRegistry: async () => {
+      const { fetchRegistry, withStatus } = await import("./host/registry");
+      const list = withStatus(await fetchRegistry());
+      console.info("[plugins] registry:", list);
+      return list;
+    },
     PERMISSIONS,
   };
   (window as unknown as { sketchorPlugins: typeof handle }).sketchorPlugins = handle;

@@ -391,6 +391,12 @@ body {
   opacity: 0.65;
 }
 
+.plugin-row-desc {
+  margin-top: 4px;
+  font-size: 12px;
+  opacity: 0.8;
+}
+
 .plugin-perms {
   display: flex;
   flex-direction: column;
