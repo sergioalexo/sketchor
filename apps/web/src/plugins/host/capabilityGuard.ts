@@ -1,0 +1,44 @@
+import { CapabilityError, type GrantedCapabilities, type Permission } from "@sketchor/core";
+
+/**
+ * The permission each host method requires. `null` = no permission needed (UI
+ * methods). A method absent from this map is unknown and rejected outright — a
+ * plugin can only reach methods the host explicitly exposes.
+ */
+const REQUIRED: Record<string, Permission | null> = {
+  "document.read": "read-document",
+  "document.apply": "write-document",
+  "document.onChange": "read-document",
+  "selection.read": "read-document",
+  "selection.onChange": "read-document",
+  "storage.get": "storage",
+  "storage.set": "storage",
+  "storage.delete": "storage",
+  "storage.keys": "storage",
+  "network.fetch": "network",
+  "ui.show": null,
+  "ui.hide": null,
+  "ui.postMessage": null,
+  "ui.onMessage": null,
+  "ui.notify": null,
+};
+
+export class UnknownMethodError extends Error {
+  readonly code = "unknown-method" as const;
+  constructor(method: string) {
+    super(`Unknown host method "${method}"`);
+    this.name = "UnknownMethodError";
+  }
+}
+
+/**
+ * Enforces the capability contract before any host method runs. Throws
+ * {@link UnknownMethodError} for a method the host doesn't expose and
+ * {@link CapabilityError} when the plugin lacks the required grant. This is the
+ * single choke point — every inbound call passes through it.
+ */
+export function assertCapability(method: string, granted: GrantedCapabilities): void {
+  if (!(method in REQUIRED)) throw new UnknownMethodError(method);
+  const required = REQUIRED[method];
+  if (required !== null && !granted.has(required)) throw new CapabilityError(required);
+}

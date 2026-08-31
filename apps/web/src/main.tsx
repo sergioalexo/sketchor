@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { initDesktopFileOpen } from "./dxf/desktopBridge";
 import { initUpdateCheck } from "./update/updateService";
+import { installPluginDevHandle } from "./plugins";
 import "./styles.css";
 
 createRoot(document.getElementById("root")!).render(
@@ -18,3 +19,7 @@ initDesktopFileOpen();
 // signed Tauri updater (install in place); on the web it falls back to the
 // public GitHub Releases API. Failures stay silent — see updateService.ts.
 initUpdateCheck();
+
+// Dev handle for the plugin sandbox (window.sketchorPlugins). No UI yet — see
+// apps/web/src/plugins. Phase 2 replaces this with the contribution loader.
+installPluginDevHandle();

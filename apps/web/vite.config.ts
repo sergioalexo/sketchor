@@ -17,6 +17,12 @@ export default defineConfig({
     __APP_VERSION__: JSON.stringify(pkg.version),
   },
   plugins: [react()],
+  // Plugin sandboxes are ES-module workers that dynamically import plugin
+  // bundles; ES format is required for that code-splitting (the default `iife`
+  // worker output can't split).
+  worker: {
+    format: "es",
+  },
   resolve: {
     alias: {
       "@sketchor/core": fileURLToPath(
