@@ -11,6 +11,8 @@ import { doc, useApp } from "../state/store";
 import { PluginHost } from "./host/PluginHost";
 import { previewGenerator, registerContributions, runGenerator, unregisterContributions } from "./host/registries";
 import { removePluginUi } from "./host/uiManager";
+import { satisfiesHostApi } from "./host/engine";
+import { listInstalled } from "./host/pluginStore";
 import { BUILTIN_MANIFESTS } from "./builtins/manifests";
 
 /**
@@ -26,22 +28,40 @@ import { BUILTIN_MANIFESTS } from "./builtins/manifests";
 
 const running = new Map<string, PluginHost>();
 
-/** Loads a plugin by manifest, granting the given permissions, and registers its contributions. */
-export async function loadPlugin(
-  manifest: PluginManifest,
-  builtinId: string,
-  permissions: Permission[] = manifest.permissions ?? [],
-): Promise<void> {
+export interface LoadOptions {
+  manifest: PluginManifest;
+  /** An in-repo builtin id, or … */
+  builtinId?: string;
+  /** … a verified third-party bundle's JS source. Exactly one is required. */
+  source?: string;
+  permissions?: Permission[];
+}
+
+/**
+ * Loads a plugin (builtin or a verified third-party bundle), granting the given
+ * permissions, and registers its contributions. Rejects — before starting the
+ * worker — if the manifest's `engines.sketchor` doesn't satisfy the host API.
+ * Signature verification and the permission grant happen upstream in the install
+ * flow ({@link ./host/install}); builtins are trusted by virtue of shipping in
+ * the app.
+ */
+export async function loadPlugin(opts: LoadOptions): Promise<void> {
+  const { manifest } = opts;
   const engine = manifest.engines?.sketchor ?? "";
-  if (!satisfiesEngine(engine, HOST_API_VERSION)) {
+  if (!satisfiesHostApi(engine)) {
     throw new Error(
       `Plugin "${manifest.id}" needs Sketchor plugin API ${engine}, but this host provides ${HOST_API_VERSION}`,
     );
   }
 
   stopPlugin(manifest.id);
-  const granted: GrantedCapabilities = new Set(permissions);
-  const host = new PluginHost({ pluginId: manifest.id, builtinId, granted });
+  const granted: GrantedCapabilities = new Set(opts.permissions ?? manifest.permissions ?? []);
+  const host = new PluginHost({
+    pluginId: manifest.id,
+    builtinId: opts.builtinId,
+    source: opts.source,
+    granted,
+  });
   running.set(manifest.id, host);
   await host.load();
   registerContributions(host, manifest);
@@ -58,27 +78,25 @@ export function stopPlugin(pluginId: string): void {
 export async function loadFirstPartyPlugins(): Promise<void> {
   await Promise.all(
     BUILTIN_MANIFESTS.map((m) =>
-      loadPlugin(m, m.id).catch((err) => console.error(`[plugins] failed to load ${m.id}:`, err)),
+      loadPlugin({ manifest: m, builtinId: m.id }).catch((err) =>
+        console.error(`[plugins] failed to load ${m.id}:`, err),
+      ),
     ),
   );
 }
 
-// --- engine compatibility (minimal; Phase 4 generalizes to full semver ranges) ---
-
-/** Supports the `^x.y.z` caret ranges the first-party manifests use. */
-function satisfiesEngine(range: string, version: string): boolean {
-  const m = /^\^(\d+)\.(\d+)\.(\d+)$/.exec(range.trim());
-  const v = /^(\d+)\.(\d+)\.(\d+)/.exec(version.trim());
-  if (!m || !v) return false;
-  const [, rMaj, rMin, rPat] = m.map(Number);
-  const [, vMaj, vMin, vPat] = v.map(Number);
-  if (vMaj !== rMaj) return false;
-  // Caret on a 0.x range pins the minor; otherwise any minor >= is compatible.
-  if (rMaj === 0) return vMin === rMin && vPat >= rPat;
-  return vMin > rMin || (vMin === rMin && vPat >= rPat);
+/** Boots previously installed third-party plugins from the local store. */
+export async function loadInstalledPlugins(): Promise<void> {
+  await Promise.all(
+    listInstalled().map((p) =>
+      loadPlugin({ manifest: p.manifest, source: p.bundle.code, permissions: p.granted }).catch((err) =>
+        console.error(`[plugins] failed to load installed ${p.manifest.id}:`, err),
+      ),
+    ),
+  );
 }
 
-// --- dev handle & Phase 2 acceptance ---
+// --- dev handle & acceptance ---
 
 const TEST_ID = "com.sketchor.test";
 
@@ -102,7 +120,7 @@ export function installPluginDevHandle(): void {
         engines: { sketchor: `^${HOST_API_VERSION}` },
         main: "testPlugin.ts",
       };
-      return loadPlugin(testManifest, TEST_ID, permissions);
+      return loadPlugin({ manifest: testManifest, builtinId: TEST_ID, permissions });
     },
     stop: () => stopPlugin(TEST_ID),
     /**
@@ -120,6 +138,24 @@ export function installPluginDevHandle(): void {
         `[plugins] pattern plugin added ${added} entities; geometry matches core patternCommands: ${match}`,
       );
       return { added, match };
+    },
+    /**
+     * Phase 4 acceptance: fetch the committed signed sample bundle and run it
+     * through the real install pipeline (auto-approving the prompt). Returns
+     * `{ ok: true }` for the intact bundle; call `installSample(true)` to tamper
+     * the code first and watch the signature check refuse it.
+     */
+    installSample: async (tamper = false) => {
+      const res = await fetch("/sample-plugins/hello.sketchor-plugin.json");
+      const bundle = (await res.json()) as import("@sketchor/core").SignedBundle;
+      if (tamper) bundle.code += " // tampered";
+      const { installBundle } = await import("./host/install");
+      const result = await installBundle(bundle, async (info) => {
+        console.info(`[plugins] install prompt: ${info.manifest.name} signed by ${info.fingerprint}`);
+        return { approve: true, grantedPermissions: info.permissions };
+      });
+      console.info("[plugins] install result:", result);
+      return result;
     },
     PERMISSIONS,
   };

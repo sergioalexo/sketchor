@@ -7,3 +7,4 @@ export * from "./capabilities";
 export * from "./readModel";
 export * from "./manifest";
 export * from "./hostApi";
+export * from "./signing";

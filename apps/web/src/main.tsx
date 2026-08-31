@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { initDesktopFileOpen } from "./dxf/desktopBridge";
 import { initUpdateCheck } from "./update/updateService";
-import { installPluginDevHandle, loadFirstPartyPlugins } from "./plugins";
+import { installPluginDevHandle, loadFirstPartyPlugins, loadInstalledPlugins } from "./plugins";
 import "./styles.css";
 
 createRoot(document.getElementById("root")!).render(
@@ -25,3 +25,4 @@ initUpdateCheck();
 // (window.sketchorPlugins) for the sandbox/pattern acceptance checks.
 installPluginDevHandle();
 void loadFirstPartyPlugins();
+void loadInstalledPlugins();

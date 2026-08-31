@@ -23,6 +23,7 @@ export interface PluginHostApi {
   readonly selection: SelectionApi;
   readonly storage: StorageApi;
   readonly network: NetworkApi;
+  readonly filesystem: FilesystemApi;
   readonly ui: UiApi;
   /** Register handlers for the `commands`/`generators`/`io` a plugin contributes. */
   readonly commands: CommandsApi;
@@ -78,6 +79,16 @@ export interface PluginFetchResponse {
   ok: boolean;
   headers: Record<string, string>;
   text: string;
+}
+
+/**
+ * Host-mediated file access. Requires `filesystem` and is **desktop only** —
+ * backed by the Tauri `read_drawing_file` / `write_drawing_file` commands; on
+ * the web every call rejects. See `docs/plugin-architecture.md` §9.
+ */
+export interface FilesystemApi {
+  readFile(path: string): Promise<string>;
+  writeFile(path: string, contents: string): Promise<void>;
 }
 
 /**

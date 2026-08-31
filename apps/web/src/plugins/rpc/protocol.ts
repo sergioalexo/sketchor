@@ -23,7 +23,9 @@ export type WorkerToHost =
   | { kind: "invoke-result"; id: number; ok: false; error: SerializedError };
 
 export type HostToWorker =
-  | { kind: "init"; builtinId: string; pluginId: string }
+  // Exactly one of `builtinId` (in-repo first-party) or `source` (an installed
+  // third-party bundle's verified JS) identifies what the worker loads.
+  | { kind: "init"; pluginId: string; builtinId?: string; source?: string }
   | { kind: "result"; id: number; ok: true; value: unknown }
   | { kind: "result"; id: number; ok: false; error: SerializedError }
   | { kind: "event"; subId: number; payload: unknown }

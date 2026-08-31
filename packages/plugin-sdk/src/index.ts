@@ -48,6 +48,7 @@ export type {
   SelectionApi,
   StorageApi,
   NetworkApi,
+  FilesystemApi,
   UiApi,
   DocumentReadModel,
   PluginManifest,

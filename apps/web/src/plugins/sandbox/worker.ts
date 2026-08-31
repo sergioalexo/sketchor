@@ -28,16 +28,31 @@ function send(msg: WorkerToHost): void {
   (self as unknown as Worker).postMessage(msg);
 }
 
+/**
+ * Loads the plugin module: a first-party `builtinId` (statically analyzable
+ * import) or an installed third-party `source` (already signature-verified by
+ * the host) imported as an ES module from a blob URL. The blob runs in this
+ * worker — no DOM, no `window.sketchor`, only the injected RPC client.
+ */
+async function loadModule(msg: Extract<HostToWorker, { kind: "init" }>): Promise<PluginModule> {
+  if (msg.source !== undefined) {
+    const url = URL.createObjectURL(new Blob([msg.source], { type: "text/javascript" }));
+    try {
+      return (await import(/* @vite-ignore */ url)).default as PluginModule;
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+  const loader = msg.builtinId ? BUILTINS[msg.builtinId] : undefined;
+  if (!loader) throw new Error(`Unknown builtin plugin "${msg.builtinId}"`);
+  return (await loader()).default;
+}
+
 self.addEventListener("message", async (e: MessageEvent) => {
   const msg = e.data as HostToWorker;
   if (msg.kind === "init") {
-    const loader = BUILTINS[msg.builtinId];
-    if (!loader) {
-      send({ kind: "activated", ok: false, error: { message: `Unknown builtin plugin "${msg.builtinId}"` } });
-      return;
-    }
     try {
-      active = (await loader()).default;
+      active = await loadModule(msg);
       await active.activate(client);
       send({ kind: "activated", ok: true });
     } catch (err) {

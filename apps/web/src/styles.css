@@ -363,6 +363,90 @@ body {
   background: var(--panel);
 }
 
+/* ---------- plugins manager ---------- */
+
+.plugin-row {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.plugin-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.plugin-row-ver {
+  font-size: 11px;
+  opacity: 0.55;
+}
+
+.plugin-row-head .btn {
+  margin-left: auto;
+}
+
+.plugin-row-pub {
+  margin-top: 2px;
+  font-size: 12px;
+  opacity: 0.65;
+}
+
+.plugin-perms {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.plugin-perm {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+}
+
+.plugin-perm-none,
+.install-perm-caption {
+  font-size: 12px;
+  opacity: 0.65;
+}
+
+.install-dialog {
+  width: min(420px, 92vw);
+  padding: 18px 20px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+}
+
+.install-dialog h3 {
+  margin: 0 0 12px;
+  font-size: 16px;
+}
+
+.install-signer {
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.install-fingerprint {
+  margin-top: 4px;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.install-fingerprint code {
+  font-size: 11px;
+}
+
+.install-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+
 /* ---------- plugin command palette ---------- */
 
 .cmdpalette-backdrop {

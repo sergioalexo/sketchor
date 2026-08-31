@@ -54,6 +54,12 @@ export function createClient(transport: RpcTransport): PluginHostApi {
         transport.call("network.fetch", [url, init]) as Promise<PluginFetchResponse>,
     },
 
+    filesystem: {
+      readFile: (path: string) => transport.call("filesystem.readFile", [path]) as Promise<string>,
+      writeFile: (path: string, contents: string) =>
+        transport.call("filesystem.writeFile", [path, contents]) as Promise<void>,
+    },
+
     ui: {
       show: (html: string, options?: UiShowOptions) => transport.call("ui.show", [html, options]) as Promise<void>,
       hide: () => transport.call("ui.hide", []) as Promise<void>,

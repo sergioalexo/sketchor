@@ -9,8 +9,10 @@ import { dispatchCall, dispatchPost, dispatchSubscribe, type HostContext } from 
 export interface PluginHostOptions {
   /** Manifest id; namespaces storage and identifies the plugin. */
   pluginId: string;
-  /** Which in-repo builtin the worker should load (Phase 1). */
-  builtinId: string;
+  /** An in-repo builtin the worker should load (first-party). */
+  builtinId?: string;
+  /** A verified third-party bundle's JS source, loaded in the worker instead of a builtin. */
+  source?: string;
   /** Permissions the user granted this plugin. */
   granted: GrantedCapabilities;
 }
@@ -82,7 +84,11 @@ export class PluginHost {
   }
 
   private sendInit(): void {
-    this.post({ kind: "init", builtinId: this.opts.builtinId, pluginId: this.opts.pluginId });
+    this.post({
+      kind: "init",
+      pluginId: this.opts.pluginId,
+      ...(this.opts.source !== undefined ? { source: this.opts.source } : { builtinId: this.opts.builtinId }),
+    });
   }
 
   private async onMessage(msg: WorkerToHost): Promise<void> {

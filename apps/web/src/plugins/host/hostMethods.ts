@@ -69,6 +69,11 @@ export async function dispatchCall(ctx: HostContext, method: string, args: unkno
     case "network.fetch":
       return hostFetch(String(args[0]), args[1] as RequestInit | undefined);
 
+    case "filesystem.readFile":
+      return desktopReadFile(String(args[0]));
+    case "filesystem.writeFile":
+      return desktopWriteFile(String(args[0]), String(args[1]));
+
     case "ui.show":
       showPanel(ctx.pluginId, String(args[0] ?? ""), args[1] as UiShowOptions | undefined);
       return undefined;
@@ -154,6 +159,24 @@ function storageKeys(pluginId: string): string[] {
 }
 
 // --- network ---
+
+// --- filesystem (desktop only, via the existing Tauri commands) ---
+
+function isDesktop(): boolean {
+  return typeof window !== "undefined" && "__TAURI__" in window;
+}
+
+async function desktopReadFile(path: string): Promise<string> {
+  if (!isDesktop()) throw new Error("filesystem is only available in the desktop app");
+  const { invoke } = await import("@tauri-apps/api/core");
+  return invoke<string>("read_drawing_file", { path });
+}
+
+async function desktopWriteFile(path: string, contents: string): Promise<void> {
+  if (!isDesktop()) throw new Error("filesystem is only available in the desktop app");
+  const { invoke } = await import("@tauri-apps/api/core");
+  await invoke("write_drawing_file", { path, contents });
+}
 
 async function hostFetch(url: string, init: RequestInit | undefined): Promise<{
   status: number;

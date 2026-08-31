@@ -16,6 +16,8 @@ const REQUIRED: Record<string, Permission | null> = {
   "storage.delete": "storage",
   "storage.keys": "storage",
   "network.fetch": "network",
+  "filesystem.readFile": "filesystem",
+  "filesystem.writeFile": "filesystem",
   "ui.show": null,
   "ui.hide": null,
   "ui.postMessage": null,

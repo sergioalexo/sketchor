@@ -13,6 +13,7 @@ import { LayerPanel } from "./layers/LayerPanel";
 import { PatternPanel } from "./pattern/PatternPanel";
 import { PluginCommandPalette } from "./plugins/PluginCommandPalette";
 import { PluginPanels } from "./plugins/PluginPanels";
+import { PluginsPanel } from "./plugins/PluginsPanel";
 import { listExporters, onRegistriesChange, runExporter } from "./plugins/host/registries";
 import { StraightenPanel } from "./viewport/StraightenPanel";
 import { TabStrip } from "./tabs/TabStrip";
@@ -176,6 +177,7 @@ export function App() {
   const [showDiag, setShowDiag] = useState(false);
   const [showDup, setShowDup] = useState(false);
   const [showPattern, setShowPattern] = useState(false);
+  const [showPlugins, setShowPlugins] = useState(false);
   const [showSaveMenu, setShowSaveMenu] = useState(false);
   const [showUpdateMenu, setShowUpdateMenu] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
@@ -516,6 +518,23 @@ export function App() {
             </svg>
           </button>
           <button
+            className={`action ${showPlugins ? "toggled" : ""}`}
+            title="Toggle plugins panel (install and manage plugins)"
+            data-testid="toggle-plugins"
+            onClick={() => setShowPlugins((v) => !v)}
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18">
+              <path
+                d="M10 3v4M14 3v4M6 7h12v5a6 6 0 01-12 0zM12 18v3"
+                stroke="currentColor"
+                strokeWidth="2"
+                fill="none"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+          <button
             className={`action ${showFiles ? "toggled" : ""}`}
             title="Toggle file browser"
             data-testid="toggle-file-browser"
@@ -603,6 +622,7 @@ export function App() {
         {showDiag && <DiagnosticsPanel onClose={() => setShowDiag(false)} />}
         {showDup && <DuplicatesPanel onClose={() => setShowDup(false)} />}
         {showPattern && <PatternPanel onClose={() => setShowPattern(false)} />}
+        {showPlugins && <PluginsPanel onClose={() => setShowPlugins(false)} />}
         {showLayers && <LayerPanel />}
         {showCode && <CodePanel />}
         <PluginPanels />
