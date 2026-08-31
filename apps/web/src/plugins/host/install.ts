@@ -15,6 +15,7 @@ import {
   saveInstalled,
   setGranted,
   type InstalledPlugin,
+  type InstallOrigin,
 } from "./pluginStore";
 
 /**
@@ -50,7 +51,11 @@ export type InstallPrompt = (info: InstallPromptInfo) => Promise<InstallDecision
 
 export type InstallResult = { ok: true; pluginId: string } | { ok: false; reason: string };
 
-export async function installBundle(bundle: SignedBundle, prompt: InstallPrompt): Promise<InstallResult> {
+export async function installBundle(
+  bundle: SignedBundle,
+  prompt: InstallPrompt,
+  origin: InstallOrigin = "file",
+): Promise<InstallResult> {
   // 1. Parse & validate the manifest.
   let parsed: unknown;
   try {
@@ -97,6 +102,7 @@ export async function installBundle(bundle: SignedBundle, prompt: InstallPrompt)
     bundle,
     granted,
     trustedKey: bundle.publicKey,
+    origin,
     installedAt: Date.now(),
   };
   saveInstalled(record);

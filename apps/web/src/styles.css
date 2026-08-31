@@ -381,6 +381,36 @@ body {
   opacity: 0.55;
 }
 
+.plugin-origin {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  opacity: 0.85;
+}
+
+.plugin-origin.origin-bundled {
+  color: #7cc4a0;
+  border-color: #7cc4a0;
+}
+
+.plugin-origin.origin-registry {
+  color: #6aa0ff;
+  border-color: #6aa0ff;
+}
+
+.plugin-origin.origin-file {
+  color: #d0a463;
+  border-color: #d0a463;
+}
+
+.plugin-perm.disabled {
+  opacity: 0.6;
+}
+
 .plugin-row-head .btn {
   margin-left: auto;
 }

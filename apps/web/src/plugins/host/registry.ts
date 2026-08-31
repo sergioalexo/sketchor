@@ -72,5 +72,5 @@ export async function installFromRegistry(
   } catch (err) {
     return { ok: false, reason: `Bundle download failed: ${err instanceof Error ? err.message : String(err)}` };
   }
-  return installBundle(bundle, prompt);
+  return installBundle(bundle, prompt, "registry");
 }

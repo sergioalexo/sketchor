@@ -10,6 +10,9 @@ import type { Permission, PluginManifest, SignedBundle } from "@sketchor/core";
  * corrupt storage and returns an empty set rather than throwing.
  */
 
+/** Where an installed plugin came from (first-party builtins aren't stored here). */
+export type InstallOrigin = "file" | "registry";
+
 export interface InstalledPlugin {
   manifest: PluginManifest;
   bundle: SignedBundle;
@@ -17,6 +20,8 @@ export interface InstalledPlugin {
   granted: Permission[];
   /** The signer public key the user trusted at install (equals `bundle.publicKey`). */
   trustedKey: string;
+  /** How it was installed — shown in the plugins panel. Optional for records predating this field. */
+  origin?: InstallOrigin;
   installedAt: number;
 }
 

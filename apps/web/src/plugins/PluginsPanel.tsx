@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { PERMISSIONS, type Permission, type SignedBundle } from "@sketchor/core";
+import { PERMISSIONS, type Permission, type PluginManifest, type SignedBundle } from "@sketchor/core";
 import { installBundle, uninstall, updateGrants, type InstallDecision, type InstallPromptInfo } from "./host/install";
 import { listInstalled, onInstalledChange, type InstalledPlugin } from "./host/pluginStore";
+import { BUILTIN_MANIFESTS } from "./builtins/manifests";
 import {
   fetchRegistry,
   installFromRegistry,
@@ -28,6 +29,39 @@ const PERMISSION_LABELS: Record<Permission, string> = {
 interface PendingPrompt {
   info: InstallPromptInfo;
   resolve: (decision: InstallDecision) => void;
+}
+
+type PluginOrigin = "bundled" | "registry" | "file";
+
+const ORIGIN_LABELS: Record<PluginOrigin, string> = {
+  bundled: "Bundled",
+  registry: "Registry",
+  file: "File",
+};
+
+interface PluginRow {
+  manifest: PluginManifest;
+  origin: PluginOrigin;
+  granted: Permission[];
+  /** Bundled first-party plugins can't be uninstalled or have grants revoked. */
+  managed: boolean;
+}
+
+/** First-party bundled plugins followed by installed third-party ones, each tagged with its source. */
+function buildRows(installed: InstalledPlugin[]): PluginRow[] {
+  return [
+    ...BUILTIN_MANIFESTS.map(
+      (m): PluginRow => ({ manifest: m, origin: "bundled", granted: m.permissions ?? [], managed: false }),
+    ),
+    ...installed.map(
+      (p): PluginRow => ({
+        manifest: p.manifest,
+        origin: p.origin ?? "file",
+        granted: p.granted,
+        managed: true,
+      }),
+    ),
+  ];
 }
 
 export function PluginsPanel({ onClose }: { onClose: () => void }) {
@@ -72,12 +106,12 @@ export function PluginsPanel({ onClose }: { onClose: () => void }) {
     setNotice(result.ok ? `Installed ${result.pluginId}.` : `Not installed: ${result.reason}`);
   };
 
-  const toggleGrant = (plugin: InstalledPlugin, perm: Permission) => {
-    const next = plugin.granted.includes(perm)
-      ? plugin.granted.filter((p) => p !== perm)
-      : [...plugin.granted, perm];
-    void updateGrants(plugin.manifest.id, next);
+  const toggleGrant = (id: string, granted: Permission[], perm: Permission) => {
+    const next = granted.includes(perm) ? granted.filter((p) => p !== perm) : [...granted, perm];
+    void updateGrants(id, next);
   };
+
+  const rows = buildRows(installed);
 
   return (
     <aside className="diagpanel" data-testid="plugins-panel">
@@ -122,35 +156,48 @@ export function PluginsPanel({ onClose }: { onClose: () => void }) {
 
       {tab === "installed" ? (
         <div className="diagpanel-list">
-          {installed.length === 0 ? (
-            <div className="diagpanel-empty">
-              No third-party plugins installed. First-party tools (Pattern, SVG Export) are always on.
-            </div>
-          ) : (
-            installed.map((p) => (
-              <div key={p.manifest.id} className="plugin-row" data-testid={`plugin-${p.manifest.id}`}>
+          {rows.map((row) => {
+            const requested = row.manifest.permissions ?? [];
+            return (
+              <div key={row.manifest.id} className="plugin-row" data-testid={`plugin-${row.manifest.id}`}>
                 <div className="plugin-row-head">
-                  <strong>{p.manifest.name}</strong>
-                  <span className="plugin-row-ver">v{p.manifest.version}</span>
-                  <button
-                    className="btn ghost sm"
-                    onClick={() => uninstall(p.manifest.id)}
-                    data-testid={`uninstall-${p.manifest.id}`}
+                  <strong>{row.manifest.name}</strong>
+                  <span className="plugin-row-ver">v{row.manifest.version}</span>
+                  <span
+                    className={`plugin-origin origin-${row.origin}`}
+                    data-testid={`plugin-origin-${row.manifest.id}`}
+                    title={
+                      row.origin === "bundled"
+                        ? "Ships with Sketchor"
+                        : row.origin === "registry"
+                          ? "Installed from the registry"
+                          : "Installed from a local file"
+                    }
                   >
-                    Uninstall
-                  </button>
+                    {ORIGIN_LABELS[row.origin]}
+                  </span>
+                  {row.managed && (
+                    <button
+                      className="btn ghost sm"
+                      onClick={() => uninstall(row.manifest.id)}
+                      data-testid={`uninstall-${row.manifest.id}`}
+                    >
+                      Uninstall
+                    </button>
+                  )}
                 </div>
-                {p.manifest.publisher && <div className="plugin-row-pub">{p.manifest.publisher}</div>}
+                {row.manifest.publisher && <div className="plugin-row-pub">{row.manifest.publisher}</div>}
                 <div className="plugin-perms">
-                  {(p.manifest.permissions ?? []).length === 0 ? (
+                  {requested.length === 0 ? (
                     <span className="plugin-perm-none">Requests no permissions.</span>
                   ) : (
-                    (p.manifest.permissions ?? []).map((perm) => (
-                      <label key={perm} className="plugin-perm">
+                    requested.map((perm) => (
+                      <label key={perm} className={`plugin-perm${row.managed ? "" : " disabled"}`}>
                         <input
                           type="checkbox"
-                          checked={p.granted.includes(perm)}
-                          onChange={() => toggleGrant(p, perm)}
+                          checked={row.granted.includes(perm)}
+                          disabled={!row.managed}
+                          onChange={() => toggleGrant(row.manifest.id, row.granted, perm)}
                         />
                         {PERMISSION_LABELS[perm]}
                       </label>
@@ -158,8 +205,8 @@ export function PluginsPanel({ onClose }: { onClose: () => void }) {
                   )}
                 </div>
               </div>
-            ))
-          )}
+            );
+          })}
         </div>
       ) : (
         <BrowseList
