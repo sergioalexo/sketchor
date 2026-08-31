@@ -1,5 +1,5 @@
 /// <reference lib="webworker" />
-import { createClient, type PluginModule } from "@sketchor/plugin-sdk";
+import { contributionStore, createClient, type PluginModule } from "@sketchor/plugin-sdk";
 import type { HostToWorker, WorkerToHost } from "../rpc/protocol";
 import { serializeError } from "../rpc/protocol";
 import { WorkerTransport } from "../rpc/workerTransport";
@@ -15,6 +15,8 @@ import { WorkerTransport } from "../rpc/workerTransport";
  */
 const BUILTINS: Record<string, () => Promise<{ default: PluginModule }>> = {
   "com.sketchor.test": () => import("../builtins/testPlugin"),
+  "com.sketchor.pattern": () => import("../builtins/patternPlugin"),
+  "com.sketchor.svg-export": () => import("../builtins/svgExportPlugin"),
 };
 
 const transport = new WorkerTransport();
@@ -42,6 +44,15 @@ self.addEventListener("message", async (e: MessageEvent) => {
     }
     return;
   }
+  if (msg.kind === "invoke") {
+    try {
+      const value = await runContribution(msg);
+      send({ kind: "invoke-result", id: msg.id, ok: true, value });
+    } catch (err) {
+      send({ kind: "invoke-result", id: msg.id, ok: false, error: serializeError(err) });
+    }
+    return;
+  }
   if (msg.kind === "deactivate") {
     try {
       await active?.deactivate?.();
@@ -51,5 +62,42 @@ self.addEventListener("message", async (e: MessageEvent) => {
     }
   }
 });
+
+/**
+ * Runs one registered contribution handler. Read-model inputs (document,
+ * selection) are fetched through the client, so they pass the same capability
+ * gate as any other plugin call; the handler's plain-data result crosses back
+ * to the host, which applies any returned commands under `write-document`.
+ */
+async function runContribution(
+  msg: Extract<HostToWorker, { kind: "invoke" }>,
+): Promise<unknown> {
+  const store = contributionStore(client);
+  switch (msg.contribution) {
+    case "command": {
+      const handler = store.commands.get(msg.contributionId);
+      if (!handler) throw new Error(`No command handler registered for "${msg.contributionId}"`);
+      await handler({ input: msg.input });
+      return undefined;
+    }
+    case "generator": {
+      const handler = store.generators.get(msg.contributionId);
+      if (!handler) throw new Error(`No generator handler registered for "${msg.contributionId}"`);
+      const [document, selection] = await Promise.all([client.document.read(), client.selection.read()]);
+      return handler({ document, selection, input: msg.input });
+    }
+    case "exporter": {
+      const handler = store.exporters.get(msg.contributionId);
+      if (!handler) throw new Error(`No exporter registered for "${msg.contributionId}"`);
+      const document = await client.document.read();
+      return handler({ document });
+    }
+    case "importer": {
+      const handler = store.importers.get(msg.contributionId);
+      if (!handler) throw new Error(`No importer registered for "${msg.contributionId}"`);
+      return handler({ text: String(msg.input ?? "") });
+    }
+  }
+}
 
 send({ kind: "ready" });

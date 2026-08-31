@@ -343,6 +343,90 @@ body {
   background: var(--border);
 }
 
+.action-menu-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
+}
+
+/* ---------- plugin command palette ---------- */
+
+.cmdpalette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 14vh;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.cmdpalette {
+  display: flex;
+  flex-direction: column;
+  width: min(520px, 92vw);
+  max-height: 60vh;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+.cmdpalette-input {
+  padding: 12px 14px;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font-size: 15px;
+  outline: none;
+}
+
+.cmdpalette-list {
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.cmdpalette-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 9px 12px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.cmdpalette-item.active {
+  background: var(--border);
+}
+
+.cmdpalette-item-kind {
+  font-size: 11px;
+  opacity: 0.55;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cmdpalette-empty,
+.cmdpalette-status {
+  padding: 12px 14px;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.cmdpalette-status {
+  border-top: 1px solid var(--border);
+}
+
 /* ---------- layer panel ---------- */
 
 .layerpanel {

@@ -3,11 +3,14 @@
  * host (main thread). Every payload is structured-cloneable — no functions, no
  * live references — so it survives `postMessage`.
  *
- * Three interaction shapes:
- *   - call/result   — request/response (e.g. document.apply)
+ * Four interaction shapes:
+ *   - call/result   — request/response, worker → host (e.g. document.apply)
  *   - subscribe/event/unsubscribe — a host event stream (e.g. document.onChange)
  *   - post          — fire-and-forget, no reply (e.g. ui.notify)
+ *   - invoke/invoke-result — request/response, host → worker: the host runs one
+ *     of the plugin's registered contribution handlers (command/generator/IO).
  */
+import type { ContributionKind } from "@sketchor/plugin-sdk";
 
 export type WorkerToHost =
   | { kind: "ready" }
@@ -15,13 +18,16 @@ export type WorkerToHost =
   | { kind: "subscribe"; id: number; subId: number; method: string; args: unknown[] }
   | { kind: "unsubscribe"; subId: number }
   | { kind: "post"; method: string; args: unknown[] }
-  | { kind: "activated"; ok: boolean; error?: SerializedError };
+  | { kind: "activated"; ok: boolean; error?: SerializedError }
+  | { kind: "invoke-result"; id: number; ok: true; value: unknown }
+  | { kind: "invoke-result"; id: number; ok: false; error: SerializedError };
 
 export type HostToWorker =
   | { kind: "init"; builtinId: string; pluginId: string }
   | { kind: "result"; id: number; ok: true; value: unknown }
   | { kind: "result"; id: number; ok: false; error: SerializedError }
   | { kind: "event"; subId: number; payload: unknown }
+  | { kind: "invoke"; id: number; contribution: ContributionKind; contributionId: string; input: unknown }
   | { kind: "deactivate" };
 
 export interface SerializedError {

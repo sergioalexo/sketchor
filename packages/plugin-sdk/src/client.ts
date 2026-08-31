@@ -1,8 +1,12 @@
 import { HOST_API_VERSION } from "@sketchor/core";
 import type {
   Command,
+  CommandHandler,
   DocumentReadModel,
   EntityId,
+  ExporterHandler,
+  GeneratorHandler,
+  ImporterHandler,
   NotifyOptions,
   PluginFetchInit,
   PluginFetchResponse,
@@ -10,6 +14,7 @@ import type {
   UiShowOptions,
   Unsubscribe,
 } from "@sketchor/core";
+import { contributionStore } from "./contributions";
 import type { RpcTransport } from "./transport";
 
 /**
@@ -21,7 +26,7 @@ import type { RpcTransport } from "./transport";
  * against a fake.
  */
 export function createClient(transport: RpcTransport): PluginHostApi {
-  return {
+  const api: PluginHostApi = {
     apiVersion: HOST_API_VERSION,
 
     document: {
@@ -57,5 +62,21 @@ export function createClient(transport: RpcTransport): PluginHostApi {
         transport.subscribe("ui.onMessage", [], (p) => listener(p)),
       notify: (message: string, options?: NotifyOptions) => transport.post("ui.notify", [message, options]),
     },
+
+    // Contribution registration is local to the sandbox — no RPC. Handlers land
+    // in the store the worker bootstrap dispatches from; the host invokes by id.
+    commands: {
+      register: (id: string, handler: CommandHandler) => void store.commands.set(id, handler),
+    },
+    generators: {
+      register: (id: string, handler: GeneratorHandler) => void store.generators.set(id, handler),
+    },
+    io: {
+      registerExporter: (id: string, handler: ExporterHandler) => void store.exporters.set(id, handler),
+      registerImporter: (id: string, handler: ImporterHandler) => void store.importers.set(id, handler),
+    },
   };
+
+  const store = contributionStore(api);
+  return api;
 }

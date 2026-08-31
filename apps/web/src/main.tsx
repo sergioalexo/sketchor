@@ -3,7 +3,7 @@ import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { initDesktopFileOpen } from "./dxf/desktopBridge";
 import { initUpdateCheck } from "./update/updateService";
-import { installPluginDevHandle } from "./plugins";
+import { installPluginDevHandle, loadFirstPartyPlugins } from "./plugins";
 import "./styles.css";
 
 createRoot(document.getElementById("root")!).render(
@@ -20,6 +20,8 @@ initDesktopFileOpen();
 // public GitHub Releases API. Failures stay silent — see updateService.ts.
 initUpdateCheck();
 
-// Dev handle for the plugin sandbox (window.sketchorPlugins). No UI yet — see
-// apps/web/src/plugins. Phase 2 replaces this with the contribution loader.
+// Plugin runtime: boot the first-party plugins (their contributions show up in
+// the command palette and the export menu), and keep the console dev handle
+// (window.sketchorPlugins) for the sandbox/pattern acceptance checks.
 installPluginDevHandle();
+void loadFirstPartyPlugins();

@@ -27,7 +27,7 @@ const COMMAND_TYPES = new Set<Command["type"]>([
 ]);
 
 /** Untrusted input from the sandbox — reject anything that isn't a known command. */
-function assertCommands(value: unknown): asserts value is Command[] {
+export function assertCommands(value: unknown): asserts value is Command[] {
   if (!Array.isArray(value)) throw new Error("commands must be an array");
   for (const c of value) {
     if (!c || typeof c !== "object" || !COMMAND_TYPES.has((c as { type?: Command["type"] }).type as Command["type"])) {

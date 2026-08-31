@@ -1,4 +1,6 @@
-import type { GrantedCapabilities } from "@sketchor/core";
+import type { ContributionKind } from "@sketchor/plugin-sdk";
+import type { GrantedCapabilities, Permission } from "@sketchor/core";
+import { hasCapability } from "@sketchor/core";
 import type { HostToWorker, WorkerToHost } from "../rpc/protocol";
 import { serializeError } from "../rpc/protocol";
 import { assertCapability } from "./capabilityGuard";
@@ -24,6 +26,8 @@ export class PluginHost {
   private readonly ctx: HostContext;
   private readonly granted: GrantedCapabilities;
   private readonly subs = new Map<number, () => void>();
+  private readonly invokes = new Map<number, { resolve: (v: unknown) => void; reject: (e: unknown) => void }>();
+  private nextInvokeId = 1;
   private ready = false;
   private activation?: { resolve: () => void; reject: (e: unknown) => void };
   private disposed = false;
@@ -45,11 +49,33 @@ export class PluginHost {
     });
   }
 
+  /** Whether the user granted this plugin a given permission. */
+  has(permission: Permission): boolean {
+    return hasCapability(this.granted, permission);
+  }
+
+  /**
+   * Runs one of the plugin's registered contribution handlers in its worker and
+   * resolves with the plain-data result (a generator/importer returns
+   * `Command[]`; an exporter a string; a command `undefined`). The caller is
+   * responsible for applying any returned commands through the capability gate.
+   */
+  invoke(contribution: ContributionKind, contributionId: string, input?: unknown): Promise<unknown> {
+    if (this.disposed) return Promise.reject(new Error("plugin host disposed"));
+    const id = this.nextInvokeId++;
+    return new Promise((resolve, reject) => {
+      this.invokes.set(id, { resolve, reject });
+      this.post({ kind: "invoke", id, contribution, contributionId, input });
+    });
+  }
+
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true;
     for (const unsub of this.subs.values()) unsub();
     this.subs.clear();
+    for (const pending of this.invokes.values()) pending.reject(new Error("plugin host disposed"));
+    this.invokes.clear();
     this.post({ kind: "deactivate" });
     // Give `deactivate` a moment to run before killing the worker.
     setTimeout(() => this.worker.terminate(), 500);
@@ -80,6 +106,14 @@ export class PluginHost {
         return;
       case "post":
         return this.handlePost(msg);
+      case "invoke-result": {
+        const pending = this.invokes.get(msg.id);
+        if (!pending) return;
+        this.invokes.delete(msg.id);
+        if (msg.ok) pending.resolve(msg.value);
+        else pending.reject(Object.assign(new Error(msg.error.message), msg.error));
+        return;
+      }
     }
   }
 

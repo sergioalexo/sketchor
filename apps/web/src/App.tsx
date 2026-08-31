@@ -11,6 +11,8 @@ import { DuplicatesPanel } from "./heal/DuplicatesPanel";
 import { ImportReportBanner } from "./dxf/ImportReportBanner";
 import { LayerPanel } from "./layers/LayerPanel";
 import { PatternPanel } from "./pattern/PatternPanel";
+import { PluginCommandPalette } from "./plugins/PluginCommandPalette";
+import { listExporters, onRegistriesChange, runExporter } from "./plugins/host/registries";
 import { StraightenPanel } from "./viewport/StraightenPanel";
 import { TabStrip } from "./tabs/TabStrip";
 import { UpdateBanner, UpdateButton } from "./update/UpdatePanel";
@@ -123,6 +125,30 @@ const TOOLS: { id: ToolId; label: string; keyHint: string; icon: JSX.Element }[]
   },
 ];
 
+/**
+ * Runs a plugin-contributed exporter and downloads its output. Plugin IO sits
+ * alongside the built-in DXF/SVG saves; unlike those it isn't bound to a save
+ * target (no round-trip file handle), so it always triggers a fresh download.
+ */
+async function exportViaPlugin(id: string, ext: string): Promise<void> {
+  const { setSaveNotice } = useApp.getState();
+  try {
+    const text = await runExporter(id);
+    const target = activeSaveTarget();
+    const base = (target?.name ?? "drawing").replace(/\.(dxf|svg|dwg)$/i, "");
+    const blob = new Blob([text], { type: "image/svg+xml" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${base}.${ext}`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setSaveNotice({ kind: "saved", message: `Exported ${base}.${ext}`, at: Date.now() });
+  } catch (err) {
+    setSaveNotice({ kind: "error", message: `Export failed: ${err instanceof Error ? err.message : String(err)}`, at: Date.now() });
+  }
+}
+
 export function App() {
   const tool = useApp((s) => s.tool);
   const setTool = useApp((s) => s.setTool);
@@ -151,6 +177,9 @@ export function App() {
   const [showPattern, setShowPattern] = useState(false);
   const [showSaveMenu, setShowSaveMenu] = useState(false);
   const [showUpdateMenu, setShowUpdateMenu] = useState(false);
+  const [showPalette, setShowPalette] = useState(false);
+  // Bumped when plugins load/unload, so the export menu re-reads its list.
+  const [pluginVersion, setPluginVersion] = useState(0);
   const showFiles = useApp((s) => s.fileBrowserVisible);
   const setShowFiles = useApp((s) => s.setFileBrowserVisible);
   const showConnectivityHint = useApp((s) => s.showConnectivityHint);
@@ -159,6 +188,21 @@ export function App() {
   const setShowClosedRegions = useApp((s) => s.setShowClosedRegions);
   const displayUnit = useApp((s) => s.displayUnit);
   const setDisplayUnit = useApp((s) => s.setDisplayUnit);
+
+  // Ctrl/Cmd-K opens the plugin command palette.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setShowPalette((v) => !v);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Refresh plugin-derived menus (export list) as plugins load/unload.
+  useEffect(() => onRegistriesChange(() => setPluginVersion((v) => v + 1)), []);
 
   // Close the Save-format and update popovers on an outside click.
   useEffect(() => {
@@ -333,6 +377,19 @@ export function App() {
                 >
                   Save a Copy as SVG...
                 </button>
+                {listExporters().length > 0 && <div className="action-menu-sep" data-plugin-rev={pluginVersion} />}
+                {listExporters().map((exp) => (
+                  <button
+                    key={exp.id}
+                    data-testid={`plugin-export-${exp.id}`}
+                    onClick={() => {
+                      setShowSaveMenu(false);
+                      void exportViaPlugin(exp.id, exp.extensions[0] ?? "txt");
+                    }}
+                  >
+                    Export as {exp.title}...
+                  </button>
+                ))}
               </div>
             )}
           </div>
@@ -621,6 +678,8 @@ export function App() {
           </span>
         )}
       </footer>
+
+      <PluginCommandPalette open={showPalette} onClose={() => setShowPalette(false)} />
     </div>
   );
 }

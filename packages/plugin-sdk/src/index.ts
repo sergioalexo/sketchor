@@ -23,8 +23,23 @@
  */
 
 export { createClient } from "./client";
+export { contributionStore } from "./contributions";
+export type { ContributionStore, ContributionKind } from "./contributions";
 export type { RpcTransport } from "./transport";
 export * from "./builders";
+
+// Pure geometry helpers a generator needs to transform read-model entities into
+// new ones. Framework-free and side-effect-free, so they're safe in the sandbox.
+export {
+  translated,
+  transformed,
+  rotated,
+  rotatePoint,
+  centroidOfEntities,
+  patternCopyCount,
+  newEntityId,
+  entityPoints,
+} from "@sketchor/core";
 
 // Re-export the contract types authors need, so a plugin depends only on the SDK.
 export type {
@@ -52,6 +67,22 @@ export type {
   PointEntity,
   PolylineEntity,
   Point,
+  // Contribution registration contract.
+  CommandsApi,
+  GeneratorsApi,
+  IoApi,
+  CommandHandler,
+  CommandContext,
+  GeneratorHandler,
+  GeneratorContext,
+  ExporterHandler,
+  ExporterContext,
+  ImporterHandler,
+  ImporterContext,
+  // Pattern generator types (for the first-party pattern plugin).
+  PatternSpec,
+  RectangularPattern,
+  CircularPattern,
 } from "@sketchor/core";
 
 export { HOST_API_VERSION, PERMISSIONS } from "@sketchor/core";

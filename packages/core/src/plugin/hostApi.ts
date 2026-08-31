@@ -24,6 +24,10 @@ export interface PluginHostApi {
   readonly storage: StorageApi;
   readonly network: NetworkApi;
   readonly ui: UiApi;
+  /** Register handlers for the `commands`/`generators`/`io` a plugin contributes. */
+  readonly commands: CommandsApi;
+  readonly generators: GeneratorsApi;
+  readonly io: IoApi;
 }
 
 export interface DocumentApi {
@@ -110,8 +114,76 @@ export interface NotifyOptions {
 export type Unsubscribe = () => void;
 
 /**
+ * Contribution registration. Unlike the rest of this interface, `register` is
+ * **synchronous and local** to the sandbox — it doesn't cross the RPC boundary.
+ * The plugin declares each contribution in its manifest's `contributes` block
+ * (so the host knows the id up front) and registers the handler here during
+ * `activate`. The host later *invokes* the handler — when the user runs the
+ * command, applies the generator, or picks the IO format — by messaging the
+ * sandbox; only the handler's plain-data input and result cross the boundary.
+ *
+ * Capability enforcement is unchanged: a generator/importer's returned
+ * `Command[]` is applied by the host through the same `write-document` gate as
+ * {@link DocumentApi.apply}, and a command handler's own API calls are each
+ * gated as usual. Registering a handler grants nothing by itself.
+ */
+export interface CommandsApi {
+  /** Handle a contributed command (a palette/menu action). Matches a `contributes.commands[].id`. */
+  register(id: string, handler: CommandHandler): void;
+}
+
+export interface GeneratorsApi {
+  /** Handle a contributed generator (selection in → `Command[]` out). Matches a `contributes.generators[].id`. */
+  register(id: string, handler: GeneratorHandler): void;
+}
+
+export interface IoApi {
+  /** Handle export to a contributed IO format: read-model in → serialized text out. */
+  registerExporter(id: string, handler: ExporterHandler): void;
+  /** Handle import from a contributed IO format: file text in → `Command[]` out. */
+  registerImporter(id: string, handler: ImporterHandler): void;
+}
+
+/** A contributed command handler. Runs its effect through the host API it was given in `activate`. */
+export type CommandHandler = (ctx: CommandContext) => void | Promise<void>;
+export interface CommandContext {
+  /** Optional invocation payload (e.g. arguments from a caller). */
+  readonly input?: unknown;
+}
+
+/**
+ * A contributed generator: pure selection-in → `Command[]`-out. The host
+ * applies the returned commands as a single undo step (requires
+ * `write-document`) and never trusts the handler to mutate on its own.
+ */
+export type GeneratorHandler = (ctx: GeneratorContext) => Command[] | Promise<Command[]>;
+export interface GeneratorContext {
+  /** A fresh snapshot of the document (host-provided; requires `read-document`). */
+  readonly document: DocumentReadModel;
+  /** The entity ids selected when the generator was invoked. */
+  readonly selection: EntityId[];
+  /** Optional parameters for the generation (e.g. a pattern spec). */
+  readonly input?: unknown;
+}
+
+/** A contributed exporter: the document read-model in, serialized text out. */
+export type ExporterHandler = (ctx: ExporterContext) => string | Promise<string>;
+export interface ExporterContext {
+  readonly document: DocumentReadModel;
+}
+
+/** A contributed importer: file text in, `Command[]` out (applied by the host as one undo step). */
+export type ImporterHandler = (ctx: ImporterContext) => Command[] | Promise<Command[]>;
+export interface ImporterContext {
+  readonly text: string;
+}
+
+/**
  * The host API contract version. Independent of the app version. A plugin's
  * `engines.sketchor` is a semver range checked against this at load time; an
  * incompatible plugin is refused rather than failing at runtime.
+ *
+ * Bumped to 0.2.0 in Phase 2 — additive: the `commands`/`generators`/`io`
+ * contribution registration surface.
  */
-export const HOST_API_VERSION = "0.1.0";
+export const HOST_API_VERSION = "0.2.0";
