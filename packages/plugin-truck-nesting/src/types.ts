@@ -41,6 +41,14 @@ export interface TrailerProfile {
   length: number;
   /** Across the trailer, mm. */
   width: number;
+  /** Optional clearance kept free along every wall, mm. Default 0. */
+  wallMargin?: number;
+}
+
+/** Extra options for {@link nestByOrders}. */
+export interface NestOptions {
+  /** Gap kept clear around every pallet, mm — no two pallets come within twice this. Default 0. */
+  palletMargin?: number;
 }
 
 /** One packed pallet — the unit the renderer draws and the summary lists. */
@@ -60,6 +68,11 @@ export interface PlacedItem {
   length: number;
   width: number;
   rotated: boolean;
+  /** The margin-inflated footprint this pallet reserved (door-relative). Equals the pallet box when no margins are set. */
+  slotX: number;
+  slotY: number;
+  slotLength: number;
+  slotWidth: number;
 }
 
 /** An order's pallets that couldn't be placed — too big for the trailer, or it filled up. */

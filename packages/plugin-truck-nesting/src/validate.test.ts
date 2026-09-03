@@ -5,16 +5,17 @@ import type { NestResult, PlacedItem } from "./types";
 const trailer = { name: "T", length: 13600, width: 2480 };
 
 function placed(over: Partial<PlacedItem> & Pick<PlacedItem, "instanceId" | "orderIndex" | "x" | "city">): PlacedItem {
-  return {
+  const base = {
     orderId: `o${over.orderIndex}`,
     color: "#000",
-    shape: "rect",
+    shape: "rect" as const,
     y: 0,
     length: 1200,
     width: 800,
     rotated: false,
     ...over,
   };
+  return { ...base, slotX: base.x, slotY: base.y, slotLength: base.length, slotWidth: base.width };
 }
 
 describe("validateNest", () => {
@@ -53,6 +54,16 @@ describe("validateNest", () => {
       usedLength: 15000,
     };
     expect(validateNest(result).some((f) => f.level === "error" && /doesn't fit/.test(f.message))).toBe(true);
+  });
+
+  it("notes the usable floor when a wall clearance is set", () => {
+    const result: NestResult = {
+      trailer: { ...trailer, wallMargin: 100 },
+      placed: [placed({ instanceId: "a", orderIndex: 0, city: "Leeds", x: 100 })],
+      unplaced: [],
+      usedLength: 1400,
+    };
+    expect(validateNest(result).some((f) => f.level === "info" && /usable floor/.test(f.message))).toBe(true);
   });
 
   it("reports unplaced pallets as errors", () => {

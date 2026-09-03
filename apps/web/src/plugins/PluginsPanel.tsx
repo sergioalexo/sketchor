@@ -114,7 +114,7 @@ export function PluginsPanel({ onClose }: { onClose: () => void }) {
   const rows = buildRows(installed);
 
   return (
-    <aside className="diagpanel" data-testid="plugins-panel">
+    <aside className="diagpanel dock-left" data-testid="plugins-panel">
       <div className="diagpanel-header">
         <span>Plugins</span>
         <button className="btn ghost" onClick={onClose} title="Hide panel">

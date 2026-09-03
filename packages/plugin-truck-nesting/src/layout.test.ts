@@ -63,6 +63,27 @@ describe("buildNestLayout", () => {
   });
 });
 
+describe("buildNestLayout margins", () => {
+  it("adds no white guides when both margins are zero", () => {
+    const commands = buildNestLayout(nestByOrders(trailer, orders));
+    const guides = commands.filter((c) => c.type === "add-entity" && c.entity.color === "#ffffff");
+    expect(guides).toHaveLength(0);
+  });
+
+  it("draws a white wall-clearance rectangle and a white slot around each pallet", () => {
+    const result = nestByOrders({ ...trailer, wallMargin: 120 }, orders, { palletMargin: 30 });
+    const commands = buildNestLayout(result);
+    const guides = commands.filter((c) => c.type === "add-entity" && c.entity.color === "#ffffff");
+    // one trailer clearance rect + one slot per placed pallet
+    expect(guides).toHaveLength(1 + result.placed.length);
+    for (const g of guides) {
+      if (g.type === "add-entity") expect(g.entity.fill).toBeUndefined();
+    }
+    // pallets sit off the walls
+    for (const p of result.placed) expect(p.x).toBeGreaterThanOrEqual(120 + 30 - 1e-6);
+  });
+});
+
 describe("clearPreviousLayout", () => {
   it("returns nothing when there is no prior plan", () => {
     expect(clearPreviousLayout(model())).toEqual([]);

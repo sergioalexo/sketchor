@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { dxfCodeToDisplayUnit, formatArea, formatLength, type DisplayUnit } from "../units";
+import { dxfCodeToDisplayUnit, formatArea, formatLength, loadDisplayUnit, saveDisplayUnit, type DisplayUnit } from "../units";
 import {
   CommandBus,
   DEFAULT_DUPLICATE_OPTIONS,
@@ -89,7 +89,7 @@ function newSession(name: string): DocSession {
     layers: [{ name: DEFAULT_LAYER, visible: true }],
     activeLayer: DEFAULT_LAYER,
     view: null,
-    displayUnit: "mm",
+    displayUnit: loadDisplayUnit() ?? "mm",
   };
 }
 
@@ -615,8 +615,11 @@ export const useApp = create<AppState>((set, get) => ({
   pinMeasurement: () =>
     set((s) => (s.measurement ? { pinnedMeasurements: [...s.pinnedMeasurements, s.measurement].slice(-5) } : s)),
   clearPinnedMeasurements: () => set({ pinnedMeasurements: [] }),
-  displayUnit: "mm",
-  setDisplayUnit: (displayUnit) => set({ displayUnit }),
+  displayUnit: loadDisplayUnit() ?? "mm",
+  setDisplayUnit: (displayUnit) => {
+    saveDisplayUnit(displayUnit);
+    set({ displayUnit });
+  },
   setActiveLayer: (name) => set({ activeLayer: name }),
   addLayer: () =>
     set((s) => {

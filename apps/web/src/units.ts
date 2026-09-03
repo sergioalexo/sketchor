@@ -60,3 +60,26 @@ export function displayUnitToDxfCode(unit: DisplayUnit): number {
 export function dxfCodeToDisplayUnit(code: number): DisplayUnit | null {
   return DXF_CODE_TO_UNIT.get(code) ?? null;
 }
+
+// --- last-used unit, remembered per browser ---
+
+const STORAGE_KEY = "sketchor.displayUnit";
+
+/** The display unit the user last chose, or null if none stored / unavailable. */
+export function loadDisplayUnit(): DisplayUnit | null {
+  try {
+    const v = localStorage.getItem(STORAGE_KEY);
+    return DISPLAY_UNITS.some((u) => u.id === v) ? (v as DisplayUnit) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Remembers `unit` as the default for the next session. Failures are ignored. */
+export function saveDisplayUnit(unit: DisplayUnit): void {
+  try {
+    localStorage.setItem(STORAGE_KEY, unit);
+  } catch {
+    /* private mode / storage disabled — the unit just won't persist */
+  }
+}
