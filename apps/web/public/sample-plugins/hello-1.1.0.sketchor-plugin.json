@@ -1,0 +1,6 @@
+{
+  "manifest": "{\n  \"id\": \"com.example.hello\",\n  \"version\": \"1.1.0\",\n  \"name\": \"Hello Circle\",\n  \"description\": \"Adds a circle (v1.1 adds an adjustable radius via storage).\",\n  \"publisher\": \"Example Co.\",\n  \"engines\": { \"sketchor\": \"^0.3.0\" },\n  \"main\": \"plugin.js\",\n  \"contributes\": {\n    \"commands\": [{ \"id\": \"hello.circle\", \"title\": \"Hello: add a circle (v1.1)\" }]\n  },\n  \"permissions\": [\"read-document\", \"write-document\", \"storage\"]\n}\n",
+  "code": "export default {\n  activate(sketchor) {\n    sketchor.commands.register(\"hello.circle\", async () => {\n      const r = Number(await sketchor.storage.get(\"radius\")) || 20;\n      const id = \"hp\" + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36);\n      sketchor.document.apply([\n        { type: \"add-entity\", entity: { id, type: \"circle\", center: { x: 0, y: 0 }, radius: r } },\n      ]);\n      sketchor.ui.notify(\"Hello Circle v1.1 added a circle r=\" + r);\n    });\n  },\n};\n",
+  "signature": "G2RYJxZ1sGSxGedivfB/jU/RNT12+up3nbcg9enub2Rvfe12M5ttld1kWjeWjhqhaRImVZcD+KbEj9LnVYu4Aw==",
+  "publicKey": "+1pH/DRY2Clt+Id9rRMTdHK20JzqHYwxIZk6AZg4ECQ="
+}

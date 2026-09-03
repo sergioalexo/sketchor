@@ -343,6 +343,224 @@ body {
   background: var(--border);
 }
 
+.action-menu-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--border);
+}
+
+/* ---------- plugin panels (sandboxed iframe) ---------- */
+
+.pluginpanel {
+  min-width: 220px;
+}
+
+.pluginpanel-frame {
+  flex: 1;
+  width: 100%;
+  min-height: 120px;
+  border: none;
+  background: var(--panel);
+}
+
+/* ---------- plugins manager ---------- */
+
+.plugin-row {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.plugin-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.plugin-row-ver {
+  font-size: 11px;
+  opacity: 0.55;
+}
+
+.plugin-origin {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  opacity: 0.85;
+}
+
+.plugin-origin.origin-bundled {
+  color: #7cc4a0;
+  border-color: #7cc4a0;
+}
+
+.plugin-origin.origin-registry {
+  color: #6aa0ff;
+  border-color: #6aa0ff;
+}
+
+.plugin-origin.origin-file {
+  color: #d0a463;
+  border-color: #d0a463;
+}
+
+.plugin-perm.disabled {
+  opacity: 0.6;
+}
+
+.plugin-row-head .btn {
+  margin-left: auto;
+}
+
+.plugin-row-pub {
+  margin-top: 2px;
+  font-size: 12px;
+  opacity: 0.65;
+}
+
+.plugin-row-desc {
+  margin-top: 4px;
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.plugin-perms {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.plugin-perm {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+}
+
+.plugin-perm-none,
+.install-perm-caption {
+  font-size: 12px;
+  opacity: 0.65;
+}
+
+.install-dialog {
+  width: min(420px, 92vw);
+  padding: 18px 20px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+}
+
+.install-dialog h3 {
+  margin: 0 0 12px;
+  font-size: 16px;
+}
+
+.install-signer {
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+
+.install-fingerprint {
+  margin-top: 4px;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.install-fingerprint code {
+  font-size: 11px;
+}
+
+.install-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+/* ---------- plugin command palette ---------- */
+
+.cmdpalette-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding-top: 14vh;
+  background: rgba(0, 0, 0, 0.35);
+}
+
+.cmdpalette {
+  display: flex;
+  flex-direction: column;
+  width: min(520px, 92vw);
+  max-height: 60vh;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+
+.cmdpalette-input {
+  padding: 12px 14px;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font-size: 15px;
+  outline: none;
+}
+
+.cmdpalette-list {
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.cmdpalette-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 9px 12px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.cmdpalette-item.active {
+  background: var(--border);
+}
+
+.cmdpalette-item-kind {
+  font-size: 11px;
+  opacity: 0.55;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.cmdpalette-empty,
+.cmdpalette-status {
+  padding: 12px 14px;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.cmdpalette-status {
+  border-top: 1px solid var(--border);
+}
+
 /* ---------- layer panel ---------- */
 
 .layerpanel {

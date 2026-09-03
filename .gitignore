@@ -12,3 +12,7 @@ native/dxf-quicklook/build/
 *.log
 .DS_Store
 Thumbs.db
+
+# Plugin signing private keys (never commit)
+plugin-key.json
+*.sketchor-key.json

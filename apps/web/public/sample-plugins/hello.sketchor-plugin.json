@@ -1,0 +1,6 @@
+{
+  "manifest": "{\n  \"id\": \"com.example.hello\",\n  \"version\": \"1.0.0\",\n  \"name\": \"Hello Circle\",\n  \"description\": \"A tiny signed sample plugin that adds a circle.\",\n  \"publisher\": \"Example Co.\",\n  \"engines\": { \"sketchor\": \"^0.3.0\" },\n  \"main\": \"plugin.js\",\n  \"contributes\": {\n    \"commands\": [{ \"id\": \"hello.circle\", \"title\": \"Hello: add a circle\" }]\n  },\n  \"permissions\": [\"read-document\", \"write-document\"]\n}\n",
+  "code": "// Self-contained plugin: no imports; uses only the injected `sketchor` client.\nexport default {\n  activate(sketchor) {\n    sketchor.commands.register(\"hello.circle\", () => {\n      const id = \"hp\" + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36);\n      sketchor.document.apply([\n        { type: \"add-entity\", entity: { id, type: \"circle\", center: { x: 0, y: 0 }, radius: 15 } },\n      ]);\n      sketchor.ui.notify(\"Hello Circle added a circle\");\n    });\n  },\n};\n",
+  "signature": "GRGBF1dAg5qDpSUFQrwsatEChLCMyYZqjo7rVlx3qB4dUwHdakWVTE+brUuUOy7a1mBbVL+cTHOm4ogfEh+KCw==",
+  "publicKey": "+1pH/DRY2Clt+Id9rRMTdHK20JzqHYwxIZk6AZg4ECQ="
+}
