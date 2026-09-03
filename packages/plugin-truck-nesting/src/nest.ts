@@ -1,4 +1,12 @@
-import type { NestResult, Order, PalletShape, PlacedItem, TrailerProfile, UnplacedItem } from "./types";
+import type {
+  NestOptions,
+  NestResult,
+  Order,
+  PalletShape,
+  PlacedItem,
+  TrailerProfile,
+  UnplacedItem,
+} from "./types";
 
 interface FlatItem {
   palletId: string;
@@ -7,9 +15,9 @@ interface FlatItem {
   city: string;
   color: string;
   shape: PalletShape;
-  /** Footprint along the length axis, mm (= width for a round pallet). */
+  /** Pallet footprint along the length axis, mm (= width for a round pallet). */
   length: number;
-  /** Footprint across the width axis, mm (= diameter for a round pallet). */
+  /** Pallet footprint across the width axis, mm (= diameter for a round pallet). */
   width: number;
 }
 
@@ -17,6 +25,15 @@ interface Orientation {
   length: number;
   width: number;
   rotated: boolean;
+}
+
+/** A placement in *slot* space — the margin-inflated box, before the wall offset. */
+interface SlotPlacement extends FlatItem {
+  rotated: boolean;
+  slotX: number;
+  slotY: number;
+  slotLength: number;
+  slotWidth: number;
 }
 
 const EPS = 1e-6;
@@ -43,25 +60,29 @@ function flattenOrders(orders: Order[]): FlatItem[] {
   return flat;
 }
 
-/** Orientations of `item` that fit across `trailerWidth` — the as-drawn footprint, plus the 90°-turned one for a rectangle whose sides differ. */
-function feasibleOrientations(item: FlatItem, trailerWidth: number): Orientation[] {
-  const opts: Orientation[] = [{ length: item.length, width: item.width, rotated: false }];
+/**
+ * Orientations of a slot (pallet + margin) that fit across `usableWidth` — the
+ * as-drawn footprint, plus the 90°-turned one for a rectangular pallet whose
+ * sides differ. Inflation is symmetric, so turning the slot === turning the
+ * pallet.
+ */
+function feasibleOrientations(item: FlatItem, inflate: number, usableWidth: number): Orientation[] {
+  const l = item.length + inflate;
+  const w = item.width + inflate;
+  const opts: Orientation[] = [{ length: l, width: w, rotated: false }];
   if (item.shape === "rect" && Math.abs(item.width - item.length) > EPS) {
-    opts.push({ length: item.width, width: item.length, rotated: true });
+    opts.push({ length: w, width: l, rotated: true });
   }
-  return opts.filter((o) => o.width <= trailerWidth + EPS && o.width > EPS && o.length > EPS);
+  return opts.filter((o) => o.width <= usableWidth + EPS && o.width > EPS && o.length > EPS);
 }
 
 // --- skyline (bottom-left) packing, "bottom" = the door (x = 0) ---
 
 interface SkySeg {
-  /** Start of this run across the trailer width. */
   y: number;
-  /** Depth from the door already occupied over [y, next.y). */
   top: number;
 }
 
-/** Skyline depth at width position `y`. */
 function depthAt(sky: SkySeg[], y: number): number {
   let d = 0;
   for (const s of sky) {
@@ -71,7 +92,6 @@ function depthAt(sky: SkySeg[], y: number): number {
   return d;
 }
 
-/** Max skyline depth over the width span [a, b). */
 function maxDepthOver(sky: SkySeg[], a: number, b: number): number {
   let m = 0;
   for (let i = 0; i < sky.length; i++) {
@@ -84,19 +104,17 @@ function maxDepthOver(sky: SkySeg[], a: number, b: number): number {
   return m;
 }
 
-/** Raise the skyline over [a, b) to `top`, keeping the run list normalised. */
 function raise(sky: SkySeg[], a: number, b: number, top: number): void {
   const restore = depthAt(sky, b);
   const kept = sky.filter((s) => s.y < a - EPS || s.y > b + EPS);
   kept.push({ y: a, top });
   kept.push({ y: b, top: restore });
   kept.sort((p, q) => p.y - q.y);
-  // Merge neighbours with the same depth; drop zero-width runs.
   const merged: SkySeg[] = [];
   for (const s of kept) {
     const last = merged[merged.length - 1];
     if (last && Math.abs(last.y - s.y) < EPS) {
-      last.top = s.top; // later entry wins at a shared boundary
+      last.top = s.top;
       continue;
     }
     if (last && Math.abs(last.top - s.top) < EPS) continue;
@@ -109,24 +127,28 @@ function raise(sky: SkySeg[], a: number, b: number, top: number): void {
 /**
  * Places every pallet with a bottom-left / skyline heuristic, packing toward
  * the nose from the door. **Pallets are fed in unload order** (order 0 first),
- * so any pallet is placed at a depth no less than the skyline already built by
- * earlier-unloaded pallets across the same width span — an earlier drop is
+ * so any pallet's slot is placed at a depth no less than the skyline earlier
+ * orders already built across the same width span — an earlier drop is
  * therefore never behind a later one over the width it occupies, and the load
- * still unloads cleanly. Because bands aren't reserved per order, a small order
- * drops into the width a bigger one left free at the same depth: two orders can
- * sit side by side in one length-slice.
+ * still unloads cleanly. Bands aren't reserved per order, so a small order
+ * drops into the width a bigger one left free at the same depth.
+ *
+ * `inflate` = 2 × pallet margin: every slot is that much bigger than its
+ * pallet, which is what keeps pallets (any order) from coming within twice the
+ * margin of each other.
  */
 function packSkyline(
   items: FlatItem[],
-  trailerWidth: number,
-): { placed: PlacedItem[]; unplaced: FlatItem[]; usedLength: number } {
+  usableWidth: number,
+  inflate: number,
+): { placed: SlotPlacement[]; unplaced: FlatItem[]; usedLength: number } {
   const sky: SkySeg[] = [{ y: 0, top: 0 }];
-  const placed: PlacedItem[] = [];
+  const placed: SlotPlacement[] = [];
   const unplaced: FlatItem[] = [];
   let usedLength = 0;
 
   for (const it of items) {
-    const opts = feasibleOrientations(it, trailerWidth);
+    const opts = feasibleOrientations(it, inflate, usableWidth);
     if (opts.length === 0) {
       unplaced.push(it);
       continue;
@@ -134,10 +156,9 @@ function packSkyline(
 
     let best: { x: number; y: number; opt: Orientation } | null = null;
     for (const opt of opts) {
-      // Candidate y positions: the start of every skyline run (bottom-left rule).
       for (const seg of sky) {
         const y = seg.y;
-        if (y + opt.width > trailerWidth + EPS) continue;
+        if (y + opt.width > usableWidth + EPS) continue;
         const x = maxDepthOver(sky, y, y + opt.width);
         if (!best || x < best.x - EPS || (Math.abs(x - best.x) < EPS && y < best.y - EPS)) {
           best = { x, y, opt };
@@ -152,17 +173,12 @@ function packSkyline(
 
     const { x, y, opt } = best;
     placed.push({
-      instanceId: it.palletId,
-      orderId: it.orderId,
-      orderIndex: it.orderIndex,
-      city: it.city,
-      color: it.color,
-      shape: it.shape,
-      x,
-      y,
-      length: opt.length,
-      width: opt.width,
+      ...it,
       rotated: opt.rotated,
+      slotX: x,
+      slotY: y,
+      slotLength: opt.length,
+      slotWidth: opt.width,
     });
     raise(sky, y, y + opt.width, x + opt.length);
     usedLength = Math.max(usedLength, x + opt.length);
@@ -173,14 +189,17 @@ function packSkyline(
 
 /**
  * Nests every pallet across the whole trailer, feeding them in unload sequence
- * so the load stays safe to unload (see {@link packSkyline}). Within an order,
- * bigger footprints go first for a tighter pack.
+ * so the load stays safe to unload. Within an order, bigger footprints go
+ * first for a tighter pack. `wallMargin` (on the trailer) is kept free along
+ * every wall; `opts.palletMargin` is kept free around every pallet.
  */
-export function nestByOrders(trailer: TrailerProfile, orders: Order[]): NestResult {
+export function nestByOrders(trailer: TrailerProfile, orders: Order[], opts: NestOptions = {}): NestResult {
+  const wall = Math.max(0, trailer.wallMargin ?? 0);
+  const pm = Math.max(0, opts.palletMargin ?? 0);
+  const usableWidth = Math.max(1, trailer.width - 2 * wall);
+
   const items = flattenOrders(orders)
     .map((it, seq) => ({ it, seq }))
-    // Primary key: unload order (never reordered across orders — the safety rule).
-    // Secondary: bigger first inside an order. Tertiary: stable input order.
     .sort((a, b) => {
       if (a.it.orderIndex !== b.it.orderIndex) return a.it.orderIndex - b.it.orderIndex;
       const sa = Math.max(a.it.length, a.it.width);
@@ -190,7 +209,27 @@ export function nestByOrders(trailer: TrailerProfile, orders: Order[]): NestResu
     })
     .map((x) => x.it);
 
-  const { placed, unplaced, usedLength } = packSkyline(items, trailer.width);
+  const { placed, unplaced, usedLength } = packSkyline(items, usableWidth, 2 * pm);
+
+  const placedItems: PlacedItem[] = placed.map((p) => ({
+    instanceId: p.palletId,
+    orderId: p.orderId,
+    orderIndex: p.orderIndex,
+    city: p.city,
+    color: p.color,
+    shape: p.shape,
+    // Slot in trailer coordinates (offset past the wall clearance).
+    slotX: wall + p.slotX,
+    slotY: wall + p.slotY,
+    slotLength: p.slotLength,
+    slotWidth: p.slotWidth,
+    // The pallet itself, inset by the pallet margin inside its slot.
+    x: wall + p.slotX + pm,
+    y: wall + p.slotY + pm,
+    length: p.slotLength - 2 * pm,
+    width: p.slotWidth - 2 * pm,
+    rotated: p.rotated,
+  }));
 
   const unplacedByOrder = new Map<string, { city: string; count: number }>();
   for (const u of unplaced) {
@@ -205,5 +244,11 @@ export function nestByOrders(trailer: TrailerProfile, orders: Order[]): NestResu
     reason: "too big for the trailer even turned",
   }));
 
-  return { trailer, placed, unplaced: unplacedItems, usedLength };
+  return {
+    trailer,
+    placed: placedItems,
+    unplaced: unplacedItems,
+    // Door-to-furthest-edge plus the nose clearance, so it compares to trailer.length.
+    usedLength: placed.length > 0 ? usedLength + 2 * wall : 0,
+  };
 }

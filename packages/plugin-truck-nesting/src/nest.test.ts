@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { nestByOrders } from "./nest";
-import type { Order, Pallet, TrailerProfile } from "./types";
+import type { NestResult, Order, Pallet, TrailerProfile } from "./types";
 
 const trailer: TrailerProfile = { name: "Test 13.6m", length: 13600, width: 2480 };
 
@@ -101,5 +101,35 @@ describe("nestByOrders", () => {
     const tiny: TrailerProfile = { name: "tiny", length: 1000, width: 2480 };
     const r = nestByOrders(tiny, [order("A", [pallet(), pallet(), pallet(), pallet(), pallet(), pallet()])]);
     expect(r.usedLength).toBeGreaterThan(tiny.length);
+  });
+
+  it("keeps pallets a wall clearance away from every edge", () => {
+    const r = nestByOrders({ ...trailer, wallMargin: 150 }, [order("A", [pallet(), pallet()])]);
+    for (const p of r.placed) {
+      expect(p.x).toBeGreaterThanOrEqual(150 - 1e-6);
+      expect(p.y).toBeGreaterThanOrEqual(150 - 1e-6);
+      expect(p.y + p.width).toBeLessThanOrEqual(trailer.width - 150 + 1e-6);
+    }
+  });
+
+  it("a wall clearance shrinks the usable width", () => {
+    // Two Ø1200 drums (no rotation) fit side by side across 2480, but not
+    // across 2480 - 2*250 = 1980 — the second then has to sit deeper.
+    const drums = [
+      order("A", [pallet({ shape: "round", width: 1200, length: 1200 }), pallet({ shape: "round", width: 1200, length: 1200 })]),
+    ];
+    const depths = (r: NestResult) => new Set(r.placed.map((p) => Math.round(p.x))).size;
+    expect(depths(nestByOrders(trailer, drums))).toBe(1);
+    expect(depths(nestByOrders({ ...trailer, wallMargin: 250 }, drums))).toBe(2);
+  });
+
+  it("keeps a gap of twice the pallet margin between pallets of different orders", () => {
+    const m = 40;
+    const r = nestByOrders(trailer, [order("A", [pallet()]), order("B", [pallet()])], { palletMargin: m });
+    const [a, b] = r.placed;
+    const gapX = Math.max(a.x - (b.x + b.length), b.x - (a.x + a.length));
+    const gapY = Math.max(a.y - (b.y + b.width), b.y - (a.y + a.width));
+    // separated on at least one axis by >= 2*margin
+    expect(Math.max(gapX, gapY)).toBeGreaterThanOrEqual(2 * m - 1e-6);
   });
 });

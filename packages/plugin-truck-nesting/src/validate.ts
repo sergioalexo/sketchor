@@ -54,8 +54,17 @@ export function validateNest(result: NestResult): ValidationFinding[] {
     }
   }
 
+  const clean = findings.every((f) => f.level === "info");
+  if (clean) findings.push({ level: "info", message: "No issues — the plan unloads cleanly." });
+
+  const wall = Math.max(0, trailer.wallMargin ?? 0);
+  if (wall > 1e-6) {
+    findings.push({
+      level: "info",
+      message: `Wall clearance ${Math.round(wall)} mm — usable floor ${Math.round(trailer.length - 2 * wall)} × ${Math.round(trailer.width - 2 * wall)} mm.`,
+    });
+  }
+
   const seen = new Set<string>();
-  const unique = findings.filter((f) => (seen.has(f.message) ? false : (seen.add(f.message), true)));
-  if (unique.length === 0) unique.push({ level: "info", message: "No issues — the plan unloads cleanly." });
-  return unique;
+  return findings.filter((f) => (seen.has(f.message) ? false : (seen.add(f.message), true)));
 }
