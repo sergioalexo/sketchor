@@ -15,6 +15,7 @@ interface FlatItem {
   city: string;
   color: string;
   shape: PalletShape;
+  tag?: string;
   /** Pallet footprint along the length axis, mm (= width for a round pallet). */
   length: number;
   /** Pallet footprint across the width axis, mm (= diameter for a round pallet). */
@@ -38,23 +39,27 @@ interface SlotPlacement extends FlatItem {
 
 const EPS = 1e-6;
 
-/** One `FlatItem` per pallet (duplicate a row to get two). Round pallets are squared off to their diameter. */
+/** One `FlatItem` per pallet copy — `pallet.qty` expands here. Round pallets are squared off to their diameter. */
 function flattenOrders(orders: Order[]): FlatItem[] {
   const flat: FlatItem[] = [];
   orders.forEach((order, orderIndex) => {
     for (const pallet of order.pallets) {
       const width = Math.max(0, pallet.width);
       const length = pallet.shape === "round" ? width : Math.max(0, pallet.length);
-      flat.push({
-        palletId: pallet.id,
-        orderId: order.id,
-        orderIndex,
-        city: order.city,
-        color: order.color,
-        shape: pallet.shape,
-        length,
-        width,
-      });
+      const qty = Math.max(1, Math.floor(pallet.qty ?? 1));
+      for (let n = 0; n < qty; n++) {
+        flat.push({
+          palletId: qty > 1 ? `${pallet.id}#${n}` : pallet.id,
+          orderId: order.id,
+          orderIndex,
+          city: order.city,
+          color: order.color,
+          shape: pallet.shape,
+          tag: pallet.tag,
+          length,
+          width,
+        });
+      }
     }
   });
   return flat;
@@ -218,6 +223,7 @@ export function nestByOrders(trailer: TrailerProfile, orders: Order[], opts: Nes
     city: p.city,
     color: p.color,
     shape: p.shape,
+    tag: p.tag,
     // Slot in trailer coordinates (offset past the wall clearance).
     slotX: wall + p.slotX,
     slotY: wall + p.slotY,
