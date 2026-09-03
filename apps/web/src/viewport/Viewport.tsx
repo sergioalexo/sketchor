@@ -42,7 +42,7 @@ import { openDrawing, saveCurrent } from "../io/drawingFile";
 import { printDrawing } from "../print/printDrawing";
 import { formatArea, formatLength } from "../units";
 import { render } from "./renderer";
-import { findSnap, type Snap } from "./snapping";
+import { findSnap, snapMovingSelection, snapRotation, type Snap } from "./snapping";
 import { fitToBounds, screenToWorld, worldToScreen, zoomAt, type View } from "./view";
 
 /**
@@ -68,8 +68,8 @@ type Interaction =
       startWorld: Point;
       dx: number;
       dy: number;
-      /** The selection vertex nearest the grab point; what snapping aligns to a target. */
-      base: Point | null;
+      /** Every vertex of the selection at grab time; a snapped move aligns whichever one lands closest to a target. */
+      baseVertices: Point[];
     }
   | { kind: "rotate-group"; ids: EntityId[]; pivot: Point; startAngle: number; rotation: number }
   | { kind: "box-select"; startScreen: Point; startWorld: Point; currentWorld: Point; additive: boolean };
@@ -90,26 +90,20 @@ function groupHandleScreenPos(view: View, bb: { minX: number; maxX: number; maxY
   return { x: s.x, y: s.y - GROUP_HANDLE_OFFSET_PX };
 }
 
-/**
- * The vertex of `ids` closest to `world` — the handle a snapped move aligns.
- * Grabbing near a corner therefore snaps that corner onto the target, which is
- * how you land a part exactly on the origin or on another corner.
- */
-function nearestVertex(ids: EntityId[], world: Point): Point | null {
-  let best: Point | null = null;
-  let bestDist = Infinity;
+/** Every vertex of the selection — the anchors a snapped move/rotate can align. */
+function selectionVertices(ids: EntityId[]): Point[] {
+  const out: Point[] = [];
   for (const id of ids) {
     const entity = doc.get(id);
     if (!entity) continue;
-    for (const p of entityPoints(entity)) {
-      const d = dist(p, world);
-      if (d < bestDist) {
-        bestDist = d;
-        best = p;
-      }
-    }
+    for (const p of entityPoints(entity)) out.push(p);
   }
-  return best;
+  return out;
+}
+
+/** Ctrl (or ⌘, or Alt) held during a drag turns off position and angle snapping. */
+function noSnap(e: { ctrlKey: boolean; metaKey: boolean; altKey: boolean }): boolean {
+  return e.ctrlKey || e.metaKey || e.altKey;
 }
 
 /** New geometry carries the active layer (omitted when it's the default). */
@@ -781,7 +775,7 @@ export function Viewport() {
               startWorld: world,
               dx: 0,
               dy: 0,
-              base: nearestVertex(ids, world),
+              baseVertices: selectionVertices(ids),
             };
           }
         } else {
@@ -930,26 +924,20 @@ export function Viewport() {
       view.oy += screen.y - interaction.lastY;
       interactionRef.current = { ...interaction, lastX: screen.x, lastY: screen.y };
     } else if (interaction.kind === "move") {
-      let dx = world.x - interaction.startWorld.x;
-      let dy = world.y - interaction.startWorld.y;
-      // Snap the moved geometry itself, not the cursor: the selection's base
-      // vertex (the one nearest where the drag began) is tested against every
-      // snap target — including the origin — and the whole selection is offset
-      // so that vertex lands exactly on it. Hold Alt for a free, unsnapped move.
-      if (interaction.base && !e.altKey) {
-        const moved = { x: interaction.base.x + dx, y: interaction.base.y + dy };
-        const candidate = findSnap(doc, view, moved, interaction.ids);
-        // Only real targets pull the selection; the grid fallback would
-        // quantise every move and make free positioning impossible.
-        if (candidate.kind !== "grid") {
-          dx = candidate.point.x - interaction.base.x;
-          dy = candidate.point.y - interaction.base.y;
-        }
-      }
+      const rawDx = world.x - interaction.startWorld.x;
+      const rawDy = world.y - interaction.startWorld.y;
+      // Snap the moved geometry itself, not the cursor: each axis is nudged so
+      // some dragged vertex lands on some anchor's x / y. Hold Ctrl (or Alt) to
+      // move completely free.
+      const { dx, dy } = noSnap(e)
+        ? { dx: rawDx, dy: rawDy }
+        : snapMovingSelection(doc, view, interaction.baseVertices, rawDx, rawDy, interaction.ids);
       interactionRef.current = { ...interaction, dx, dy };
     } else if (interaction.kind === "rotate-group") {
       const angle = Math.atan2(world.y - interaction.pivot.y, world.x - interaction.pivot.x);
-      interactionRef.current = { ...interaction, rotation: angle - interaction.startAngle };
+      // Snap to 45° steps so a turned pallet still lines up; Ctrl frees it.
+      const rotation = snapRotation(angle - interaction.startAngle, noSnap(e));
+      interactionRef.current = { ...interaction, rotation };
     } else if (interaction.kind === "box-select") {
       interactionRef.current = { ...interaction, currentWorld: world };
     }

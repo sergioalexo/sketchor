@@ -15,6 +15,8 @@ export type PalletShape = "rect" | "round";
 
 export interface Pallet {
   id: string;
+  /** Optional name — usually the pallet-size preset it came from. */
+  name?: string;
   /**
    * Footprint across the trailer's width axis, mm, before any 90° turn.
    * For a round pallet this is the diameter (and `length` is ignored).
@@ -23,6 +25,10 @@ export interface Pallet {
   /** Footprint along the trailer's length axis, mm. Ignored when `shape` is "round". */
   length: number;
   shape: PalletShape;
+  /** How many of this pallet to load (each nested independently). Default 1. */
+  qty?: number;
+  /** A short note drawn on the pallet for whoever loads it ("FRAGILE", "THIS WAY UP"). */
+  tag?: string;
 }
 
 export interface Order {
@@ -51,6 +57,16 @@ export interface NestOptions {
   palletMargin?: number;
 }
 
+/** How the layout should annotate the drawn plan. */
+export interface LayoutOptions {
+  /** Add a W×L (or Ø) dimension to every pallet. Default false. */
+  dimensions?: boolean;
+  /** Millimetres per display unit, for formatting dimension labels. Default 1 (mm). */
+  perMm?: number;
+  /** Display-unit suffix for labels ("mm", "in", …). Default "mm". */
+  unitLabel?: string;
+}
+
 /** One packed pallet — the unit the renderer draws and the summary lists. */
 export interface PlacedItem {
   /** `${palletId}` — stable across a re-nest as long as the order/pallet list doesn't change. */
@@ -61,6 +77,8 @@ export interface PlacedItem {
   city: string;
   color: string;
   shape: PalletShape;
+  /** The pallet's tag, carried through so layout can label it. */
+  tag?: string;
   /** Door-relative: x = 0 at the door, increasing toward the nose. */
   x: number;
   y: number;

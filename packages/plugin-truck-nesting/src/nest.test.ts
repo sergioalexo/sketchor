@@ -103,6 +103,18 @@ describe("nestByOrders", () => {
     expect(r.usedLength).toBeGreaterThan(tiny.length);
   });
 
+  it("expands a pallet's qty into that many placed instances", () => {
+    const r = nestByOrders(trailer, [order("A", [pallet({ qty: 5 })])]);
+    expect(r.placed).toHaveLength(5);
+    const r1 = nestByOrders(trailer, [order("A", [pallet({ qty: 5 }), pallet({ qty: 2 })])]);
+    expect(r1.placed).toHaveLength(7);
+  });
+
+  it("carries a pallet tag through to the placed items", () => {
+    const r = nestByOrders(trailer, [order("A", [pallet({ tag: "TOP" })])]);
+    expect(r.placed[0].tag).toBe("TOP");
+  });
+
   it("keeps pallets a wall clearance away from every edge", () => {
     const r = nestByOrders({ ...trailer, wallMargin: 150 }, [order("A", [pallet(), pallet()])]);
     for (const p of r.placed) {
