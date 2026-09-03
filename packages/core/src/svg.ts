@@ -276,7 +276,11 @@ function parsePathD(d: string, m: Mat, layer: string | undefined, out: Entity[],
   const flush = () => {
     if (subpath.length >= 2) {
       const closed = subpathClosed && dist(subpath[0], subpath[subpath.length - 1]) < 1e-9;
-      const points = closed ? subpath.slice(0, -1) : subpath;
+      // A Z repeats the start point, and most exporters (ours included) also
+      // write an explicit line back to it first — so drop *every* trailing
+      // duplicate, not just one, or the shape keeps a zero-length segment.
+      const points = subpath.slice();
+      while (closed && points.length > 1 && dist(points[0], points[points.length - 1]) < 1e-9) points.pop();
       if (points.length >= 2) {
         out.push({ id: newEntityId(), type: "polyline", ...(layer ? { layer } : {}), points, closed });
       }
@@ -291,6 +295,10 @@ function parsePathD(d: string, m: Mat, layer: string | undefined, out: Entity[],
   };
 
   while (i < tokens.length) {
+    // Z consumes no arguments, so a stray number after one (malformed, but
+    // real files contain them) would leave `i` where it was and spin forever,
+    // appending a point each pass until the process runs out of memory.
+    const startedAt = i;
     if (/^[a-zA-Z]$/.test(tokens[i])) cmd = tokens[i++];
     const relative = cmd === cmd.toLowerCase();
     const C = cmd.toUpperCase();
@@ -371,6 +379,7 @@ function parsePathD(d: string, m: Mat, layer: string | undefined, out: Entity[],
         break;
       }
     }
+    if (i === startedAt) i++; // no token consumed: skip it rather than loop
   }
   flush();
   if (sawCurve) warn("a path used curves (C/S/Q/T) — approximated as straight segments");

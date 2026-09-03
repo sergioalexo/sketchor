@@ -16,10 +16,27 @@ G-code parse, truck nesting — plus `pattern.ts`. The architectural core
 export, and every analysis module) had **zero** tests, and that is ~4,000 lines of
 pure, framework-free, node-testable TypeScript.
 
-Tiers 1–3 need no new dependencies or test infrastructure.
+Tiers 1–3 run on the plain `node` environment with one exception: `parseSvgText`
+uses the browser's `DOMParser`, so `svg.test.ts` opts into jsdom with a
+`// @vitest-environment jsdom` docblock (jsdom is a root devDependency; nothing
+else in the suite needs it).
 
-**Status:** Tier 1 is implemented (`commands`, `document`, `entities`,
-`sketchtext`). Tiers 2–5 are still open.
+**Status:** Tiers 1 and 2 are implemented — `commands`, `document`, `entities`,
+`sketchtext`, `dxf`, `dxfExport`, `svg`. Tiers 3–5 are still open.
+
+### Defects these tests found
+
+- **`SketchDocument.groupEntityIds` overflowed the stack on a group cycle.**
+  Fixed with a `visited` set (Tier 1).
+- **`parsePathD` looped forever on stray numbers after a `Z`.** `Z` consumes no
+  arguments, so `M0 0 L10 0 Z 5 5` left the token index where it was and
+  appended a point every pass — the process died of a heap OOM in about nine
+  seconds. Reachable from any user-opened SVG. Fixed with a forward-progress
+  guard (Tier 2).
+- **A closed path gained a duplicate vertex on import.** Most exporters (ours
+  included) write an explicit line back to the start *and* a `Z`, so the
+  importer's single trailing-point trim left one behind, giving the shape a
+  zero-length closing segment. It now drops every trailing duplicate (Tier 2).
 
 ---
 
@@ -107,9 +124,14 @@ This is the AI-facing surface — `window.sketchor.applyCode` runs on it.
 
 ---
 
-## Tier 2 — File IO (high; this is where data loss lives)
+## Tier 2 — File IO (high; this is where data loss lives) — DONE
 
 ### `packages/core/src/dxfExport.test.ts` (+ round-trip against `dxf.ts`)
+
+Note on precision: coordinates are rounded to six decimals *in file units*, so
+the error back in millimetres scales with the declared unit — half a micron for
+a millimetre file, ~1.5e-4 mm once the numbers are written as feet. The
+round-trip tests assert against that bound rather than a fixed epsilon.
 
 - `entitiesToDxf` -> `parseDxf` round-trip preserves geometry and layers for
   every entity type.
@@ -145,8 +167,14 @@ This is the AI-facing surface — `window.sketchor.applyCode` runs on it.
 
 ### `packages/core/src/svg.test.ts`
 
-- `entitiesToSvgDocument` -> `parseSvgText` round-trip; the Y-axis flip is
-  correct in both directions.
+- `entitiesToSvgDocument` -> `parseSvgText` round-trip. Note what this actually
+  guarantees: import undoes the Y flip but cannot recover the viewBox origin, so
+  a round-trip preserves shape and size *exactly* and lands the drawing
+  translated by a fixed offset (`padding - minX`, `-(maxY + padding)`). The
+  module docstring's "round-trips exactly" means dimensionally, not positionally.
+- Export is a rendering, so some records degrade on the way back and the tests
+  pin that deliberately: a point returns as a small circle, an arc and a bulged
+  polyline segment return as tessellated polylines.
 - `parseTransform`: `translate`, `scale`, `rotate`, `matrix`, and a composed
   chain; `matScale` for stroke/radius scaling.
 - `arcEndpointToCenter`: SVG `A` to centre/angles across all four
