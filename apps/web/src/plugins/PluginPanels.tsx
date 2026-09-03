@@ -46,7 +46,7 @@ function PluginPanel({ panel }: { panel: PanelState }) {
 
   return (
     <aside
-      className="diagpanel pluginpanel"
+      className="diagpanel pluginpanel dock-left"
       data-testid={`plugin-panel-${panel.pluginId}`}
       style={{ width: panel.width ? `${panel.width}px` : undefined }}
     >

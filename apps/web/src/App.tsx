@@ -674,6 +674,9 @@ export function App() {
           ))}
         </nav>
         <FileExplorerPanel hidden={!showFiles} onClose={() => setShowFiles(false)} />
+        {/* Plugin panels dock on the left, next to the file browser. */}
+        {showPlugins && <PluginsPanel onClose={() => setShowPlugins(false)} />}
+        <PluginPanels />
         <div className="center">
           <TabStrip />
           <main className="stage">
@@ -685,10 +688,9 @@ export function App() {
         {showDiag && <DiagnosticsPanel onClose={() => setShowDiag(false)} />}
         {showDup && <DuplicatesPanel onClose={() => setShowDup(false)} />}
         {showPattern && <PatternPanel onClose={() => setShowPattern(false)} />}
-        {showPlugins && <PluginsPanel onClose={() => setShowPlugins(false)} />}
-        {showLayers && <LayerPanel />}
         {showCode && <CodePanel />}
-        <PluginPanels />
+        {/* Layers is always the rightmost panel. */}
+        {showLayers && <LayerPanel />}
       </div>
 
       <footer className="statusbar" data-revision={revision}>
