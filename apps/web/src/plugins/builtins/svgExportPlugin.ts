@@ -53,6 +53,8 @@ function svgFor(e: Entity): string {
         ? `<polygon points="${pts}" />`
         : `<polyline points="${pts}" />`;
     }
+    case "text":
+      return `<text x="${num(e.at.x)}" y="${num(e.at.y)}" font-size="${num(e.height)}" fill="#000" stroke="none">${e.text.replace(/[&<>]/g, "")}</text>`;
   }
 }
 

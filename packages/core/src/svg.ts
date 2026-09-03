@@ -99,7 +99,8 @@ export function entitiesToSvgDocument(entities: Entity[], opts: SvgExportOptions
     const closed = e.type === "circle" || (e.type === "polyline" && e.closed);
     let out = "";
     if (e.color) out += ` stroke="${escapeXml(e.color)}"`;
-    if (closed && e.fill) out += ` fill="${escapeXml(e.fill)}" fill-opacity="0.3"`;
+    if (closed && "fill" in e && e.fill) out += ` fill="${escapeXml(e.fill)}" fill-opacity="0.3"`;
+    if ("dashed" in e && e.dashed) out += ` stroke-dasharray="${fmt(strokeWidth * 4)} ${fmt(strokeWidth * 3)}"`;
     return out;
   };
 
@@ -121,6 +122,13 @@ export function entitiesToSvgDocument(entities: Entity[], opts: SvgExportOptions
         body.push(`<circle cx="${fmt(p.x)}" cy="${fmt(p.y)}" r="${fmt(strokeWidth * 1.5)}" fill="${stroke}" stroke="none"/>`);
       } else if (e.type === "arc") {
         body.push(`<path d="${arcPathD(e, toSvg)}"${paint(e)}/>`);
+      } else if (e.type === "text") {
+        const p = toSvg(e.at);
+        const rot = e.rotation ? ` transform="rotate(${fmt((-e.rotation * 180) / Math.PI)} ${fmt(p.x)} ${fmt(p.y)})"` : "";
+        const col = e.color ? escapeXml(e.color) : stroke;
+        body.push(
+          `<text x="${fmt(p.x)}" y="${fmt(p.y)}" font-size="${fmt(e.height)}" fill="${col}" stroke="none"${rot}>${escapeXml(e.text)}</text>`,
+        );
       } else {
         body.push(`<path d="${polylinePathD(e, toSvg)}"${paint(e)}/>`);
       }

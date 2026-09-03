@@ -43,10 +43,10 @@ describe("buildNestLayout", () => {
     }
 
     // Pallet shapes carry their order's colour as stroke + hatch fill.
-    const pallets = added.filter((c) => c.type === "add-entity" && c.entity.fill);
+    const pallets = added.filter((c) => c.type === "add-entity" && "fill" in c.entity && c.entity.fill);
     expect(pallets).toHaveLength(result.placed.length);
     for (const c of pallets) {
-      if (c.type !== "add-entity") continue;
+      if (c.type !== "add-entity" || !("fill" in c.entity)) continue;
       expect(["#e2554e", "#4f86d6"]).toContain(c.entity.color);
       expect(c.entity.color).toBe(c.entity.fill);
     }
@@ -77,7 +77,7 @@ describe("buildNestLayout margins", () => {
     // one trailer clearance rect + one slot per placed pallet
     expect(guides).toHaveLength(1 + result.placed.length);
     for (const g of guides) {
-      if (g.type === "add-entity") expect(g.entity.fill).toBeUndefined();
+      if (g.type === "add-entity" && "fill" in g.entity) expect(g.entity.fill).toBeUndefined();
     }
     // pallets sit off the walls
     for (const p of result.placed) expect(p.x).toBeGreaterThanOrEqual(120 + 30 - 1e-6);

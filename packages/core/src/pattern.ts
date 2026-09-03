@@ -115,5 +115,7 @@ function centerOf(entity: Entity): Point {
       const n = Math.max(1, entity.points.length);
       return { x: sx / n, y: sy / n };
     }
+    case "text":
+      return entity.at;
   }
 }

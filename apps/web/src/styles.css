@@ -870,6 +870,20 @@ body {
   gap: 8px;
 }
 
+/* ---------- text tool inline editor ---------- */
+
+.text-editor {
+  z-index: 6;
+  min-width: 60px;
+  padding: 1px 3px;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  background: var(--panel);
+  color: var(--text);
+  font-family: system-ui, sans-serif;
+  line-height: 1.1;
+}
+
 /* ---------- diagnostics panel ---------- */
 
 .diagpanel {

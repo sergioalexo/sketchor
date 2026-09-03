@@ -234,7 +234,17 @@ export function overlayDxfText(text: string, label: string): { count: number; wa
   return { ...overlayEntities(entities, label), warnings };
 }
 
-export type ToolId = "select" | "line" | "polyline" | "circle" | "point" | "measure" | "straighten" | "fill";
+export type ToolId =
+  | "select"
+  | "line"
+  | "polyline"
+  | "circle"
+  | "point"
+  | "measure"
+  | "straighten"
+  | "fill"
+  | "text"
+  | "dim";
 
 export const TOOL_HINTS: Record<ToolId, string> = {
   select: "Click to select (Shift adds) - drag left-to-right to window-select, right-to-left to crossing-select - drag to move - Del deletes - G groups - U ungroups",
@@ -245,6 +255,8 @@ export const TOOL_HINTS: Record<ToolId, string> = {
   measure: "Click two points to measure distance (snaps to endpoints, midpoints, centers, on-line points, intersections) - Ctrl-click a line to set it as the angle reference - Alt-click a line/circle/arc for its whole length/radius, Shift-Alt-click more lines/arcs to total - click inside a closed area for its area+perimeter - Ctrl+C copies the readout",
   straighten: "Select the part with V, switch here, click the reference edge, then Enter to apply",
   fill: "Pick a colour, then click a closed shape to hatch-fill it - Alt-click removes a fill - use the panel to apply to a whole selection",
+  text: "Click where the text goes and type - Enter places it, Esc cancels - double-click existing text to edit it",
+  dim: "Click two points to place a linear dimension on the Dimensions layer, in the current display unit",
 };
 
 export type StraightenAxis = "horizontal" | "vertical";
@@ -473,6 +485,9 @@ interface AppState {
   /** The colour the Fill/Hatch tool applies on click and the Fill panel seeds from. */
   fillColor: string;
   setFillColor: (color: string) => void;
+  /** Cap height (world units / mm) for new text and dimension labels. */
+  textHeight: number;
+  setTextHeight: (h: number) => void;
   /** Findings from the most recent heal scan (see the Diagnostics panel). */
   healIssues: HealIssue[];
   healOptions: HealOptions;
@@ -576,6 +591,8 @@ export const useApp = create<AppState>((set, get) => ({
   setStraightenPivot: (pivot) => set({ straightenPivot: pivot }),
   fillColor: PALETTE[0],
   setFillColor: (color) => set({ fillColor: color }),
+  textHeight: 100,
+  setTextHeight: (textHeight) => set({ textHeight: Math.max(1, textHeight) }),
   healIssues: [],
   healOptions: DEFAULT_HEAL_OPTIONS,
   joinCollinear: false,

@@ -1,4 +1,4 @@
-import type { ArcEntity, CircleEntity, Entity, LineEntity, PointEntity, PolylineEntity } from "./entities";
+import type { ArcEntity, CircleEntity, Entity, LineEntity, PointEntity, PolylineEntity, TextEntity } from "./entities";
 import { layerOf, transformed } from "./entities";
 import { boundsOf } from "./dxf";
 
@@ -90,6 +90,19 @@ function polylineEntity(e: PolylineEntity): string {
   );
 }
 
+function textEntity(e: TextEntity): string {
+  return (
+    `0\nTEXT\n` +
+    pair(8, layerOf(e)) +
+    pair(10, e.at.x) +
+    pair(20, e.at.y) +
+    pair(30, 0) +
+    pair(40, e.height) +
+    pair(1, e.text) +
+    (e.rotation ? pair(50, (e.rotation * 180) / Math.PI) : "")
+  );
+}
+
 function entityDxf(e: Entity): string {
   switch (e.type) {
     case "line":
@@ -102,6 +115,8 @@ function entityDxf(e: Entity): string {
       return pointEntity(e);
     case "polyline":
       return polylineEntity(e);
+    case "text":
+      return textEntity(e);
   }
 }
 
