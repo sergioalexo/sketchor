@@ -48,7 +48,12 @@ export async function dispatchCall(ctx: HostContext, method: string, args: unkno
       const commands = args[0];
       assertCommands(commands);
       // Collapse the plugin's whole action into one undo step.
-      if (commands.length > 0) bus.execute({ type: "batch", commands });
+      if (commands.length > 0) {
+        bus.execute({ type: "batch", commands });
+        // A plugin can introduce a new layer (e.g. the load planner's "Load
+        // Plan"); surface it in the layer panel like any first-party edit would.
+        useApp.getState().syncLayersFromDoc();
+      }
       return doc.revision;
     }
 
