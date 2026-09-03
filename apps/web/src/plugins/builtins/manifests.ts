@@ -80,4 +80,18 @@ export const BUILTIN_MANIFESTS: PluginManifest[] = [
     },
     permissions: ["write-document"],
   },
+  {
+    id: "com.sketchor.nest",
+    version: "1.0.0",
+    name: "Sheet Nesting",
+    description: "Nest the selected flat parts onto stock sheets to minimise offcut.",
+    publisher: "Sketchor",
+    engines: { sketchor: `^${HOST_API_VERSION}` },
+    main: "nestPlugin.ts",
+    ui: "nest.html",
+    contributes: {
+      commands: [{ id: "nest.open", title: "Sheet Nesting (panel)" }],
+    },
+    permissions: ["read-document", "write-document", "storage"],
+  },
 ];
