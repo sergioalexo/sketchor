@@ -84,15 +84,26 @@ export class SketchDocument {
     return current;
   }
 
-  /** Every entity id under `groupId`, recursively flattening nested groups. Skips members that no longer exist. */
+  /**
+   * Every entity id under `groupId`, recursively flattening nested groups.
+   * Skips members that no longer exist, and visits each group at most once —
+   * group membership arrives as plain `Command` data, so a cycle (or a group
+   * reachable by two paths) is possible and must not recurse forever.
+   */
   groupEntityIds(groupId: GroupId): EntityId[] {
-    const group = this.groupsMap.get(groupId);
-    if (!group) return [];
     const out: EntityId[] = [];
-    for (const m of group.members) {
-      if (this.groupsMap.has(m)) out.push(...this.groupEntityIds(m));
-      else if (this.entities.has(m)) out.push(m);
-    }
+    const visited = new Set<GroupId>();
+    const walk = (id: GroupId): void => {
+      if (visited.has(id)) return;
+      visited.add(id);
+      const group = this.groupsMap.get(id);
+      if (!group) return;
+      for (const m of group.members) {
+        if (this.groupsMap.has(m)) walk(m);
+        else if (this.entities.has(m)) out.push(m);
+      }
+    };
+    walk(groupId);
     return out;
   }
 
