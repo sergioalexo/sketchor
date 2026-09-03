@@ -35,6 +35,9 @@ interface PersistedState {
   lastPresetName: string;
   wallMargin: number;
   palletMargin: number;
+  /** Whether the wall / pallet clearance is applied — the value is kept when off so it can be toggled back. */
+  wallOn: boolean;
+  palletOn: boolean;
   /** Add a W×L dimension to every drawn pallet. */
   dimensions: boolean;
   orders: Order[];
@@ -127,12 +130,17 @@ function asState(v: unknown): PersistedState {
     ? o.palletPresets.map(asPalletPreset).filter((p): p is PalletPreset => p !== null)
     : [];
   const orders = Array.isArray(o.orders) ? o.orders.map(asOrder).filter((x): x is Order => x !== null) : [];
+  const wallMargin = Math.max(0, num(o.wallMargin));
+  const palletMargin = Math.max(0, num(o.palletMargin));
   return {
     presets: presets.length > 0 ? presets : [...SEED_PRESETS],
     palletPresets: palletPresets.length > 0 ? palletPresets : [...SEED_PALLET_PRESETS],
     lastPresetName: str(o.lastPresetName) || presets[0]?.name || SEED_PRESETS[0].name,
-    wallMargin: Math.max(0, num(o.wallMargin)),
-    palletMargin: Math.max(0, num(o.palletMargin)),
+    wallMargin,
+    palletMargin,
+    // Older stored state has no flag — treat a non-zero margin as "on".
+    wallOn: typeof o.wallOn === "boolean" ? o.wallOn : wallMargin > 0,
+    palletOn: typeof o.palletOn === "boolean" ? o.palletOn : palletMargin > 0,
     dimensions: o.dimensions === true,
     orders: orders.length > 0 ? orders : [seedOrder()],
   };
@@ -236,6 +244,10 @@ const PANEL_HTML = `<!doctype html>
       .muted { opacity: 0.6; }
       .chk { display: flex; align-items: center; gap: 6px; margin: 4px 0 10px; }
       .chk input { width: auto; margin: 0; }
+      .mrow { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+      .mrow input[type="checkbox"] { width: auto; margin: 0; flex: none; }
+      .mrow .mval { width: 84px; margin: 0 0 0 auto; }
+      .mrow input:disabled { opacity: 0.4; }
 
       .order { border: 1px solid #3a3d42; border-radius: 6px; padding: 8px; margin-bottom: 8px; background: #232529; }
       .order.drop-before { box-shadow: 0 -3px 0 #4f7cff; }
@@ -278,9 +290,9 @@ const PANEL_HTML = `<!doctype html>
     <div class="grid2">
       <label>Length (<span class="u"></span>)<input id="t-length" type="number" min="0" step="any" /></label>
       <label>Width (<span class="u"></span>)<input id="t-width" type="number" min="0" step="any" /></label>
-      <label>From walls (<span class="u"></span>)<input id="m-wall" type="number" min="0" step="any" /></label>
-      <label>Around pallet (<span class="u"></span>)<input id="m-pallet" type="number" min="0" step="any" /></label>
     </div>
+    <label class="mrow"><input type="checkbox" id="m-wall-on" /> From walls (<span class="u"></span>)<input id="m-wall" class="mval" type="number" min="0" step="any" /></label>
+    <label class="mrow"><input type="checkbox" id="m-pallet-on" /> Around pallet (<span class="u"></span>)<input id="m-pallet" class="mval" type="number" min="0" step="any" /></label>
     <div class="row">
       <button class="ghost sm" id="presets-toggle">Manage sizes…</button>
     </div>
@@ -307,14 +319,18 @@ const PANEL_HTML = `<!doctype html>
 
       let unit = { unit: "mm", perMm: 1, label: "mm" };
       let palette = ["#4f86d6"];
-      let state = { presets: [], palletPresets: [], lastPresetName: "", wallMargin: 0, palletMargin: 0, dimensions: false, orders: [] };
+      let state = { presets: [], palletPresets: [], lastPresetName: "", wallMargin: 0, palletMargin: 0, wallOn: false, palletOn: false, dimensions: false, orders: [] };
       let saveTimer = 0;
-      let nested = false; // a plan is currently drawn — toggles re-run it live
+      let liveTimer = 0;
+      let nested = false; // a plan is currently drawn — edits re-run it live
 
       const toU = (mm) => Math.round(mm * unit.perMm * 100) / 100;
       const fromU = (v) => (Number(v) || 0) / unit.perMm;
       const rid = (p) => p + "-" + Math.random().toString(36).slice(2, 8);
       const persist = () => { clearTimeout(saveTimer); saveTimer = setTimeout(() => post({ type: "persist", state }), 400); };
+      // Persist, and if a plan is already drawn, redraw it (debounced) so trailer
+      // margins and the dimension toggle take effect without a manual re-nest.
+      const liveUpdate = () => { persist(); if (nested) { clearTimeout(liveTimer); liveTimer = setTimeout(runNest, 250); } };
 
       // ---- trailer ----
       const currentPreset = () => state.presets.find((p) => p.name === state.lastPresetName) || null;
@@ -329,6 +345,10 @@ const PANEL_HTML = `<!doctype html>
         if (p) { $("t-length").value = toU(p.length); $("t-width").value = toU(p.width); }
         $("m-wall").value = toU(state.wallMargin);
         $("m-pallet").value = toU(state.palletMargin);
+        $("m-wall-on").checked = !!state.wallOn;
+        $("m-pallet-on").checked = !!state.palletOn;
+        $("m-wall").disabled = !state.wallOn;
+        $("m-pallet").disabled = !state.palletOn;
         $("dim-each").checked = !!state.dimensions;
       }
       $("preset").addEventListener("change", (e) => {
@@ -347,16 +367,28 @@ const PANEL_HTML = `<!doctype html>
       };
       $("t-length").addEventListener("input", onTrailerInput);
       $("t-width").addEventListener("input", onTrailerInput);
-      $("m-wall").addEventListener("input", () => { state.wallMargin = fromU($("m-wall").value); persist(); });
-      $("m-pallet").addEventListener("input", () => { state.palletMargin = fromU($("m-pallet").value); persist(); });
-      $("dim-each").addEventListener("change", () => {
-        state.dimensions = $("dim-each").checked;
+      // Margins change the actual placement, so they only take effect on the
+      // next Auto-nest — editing or toggling them must not reshuffle a drawn
+      // plan out from under the user.
+      $("m-wall").addEventListener("input", () => {
+        state.wallMargin = fromU($("m-wall").value);
+        if (!state.wallOn && state.wallMargin > 0) { state.wallOn = true; $("m-wall-on").checked = true; }
         persist();
-        if (nested) runNest(); // redraw the existing plan with/without dimensions
       });
+      $("m-pallet").addEventListener("input", () => {
+        state.palletMargin = fromU($("m-pallet").value);
+        if (!state.palletOn && state.palletMargin > 0) { state.palletOn = true; $("m-pallet-on").checked = true; }
+        persist();
+      });
+      $("m-wall-on").addEventListener("change", () => { state.wallOn = $("m-wall-on").checked; $("m-wall").disabled = !state.wallOn; persist(); });
+      $("m-pallet-on").addEventListener("change", () => { state.palletOn = $("m-pallet-on").checked; $("m-pallet").disabled = !state.palletOn; persist(); });
+      // A dimension is an overlay — redrawing to add/remove it keeps every pallet put.
+      $("dim-each").addEventListener("change", () => { state.dimensions = $("dim-each").checked; liveUpdate(); });
+      const effWall = () => (state.wallOn ? Math.max(0, state.wallMargin) : 0);
+      const effPallet = () => (state.palletOn ? Math.max(0, state.palletMargin) : 0);
       function readTrailer() {
         const p = currentPreset();
-        return { name: p ? p.name : "Custom trailer", length: fromU($("t-length").value), width: fromU($("t-width").value), wallMargin: Math.max(0, state.wallMargin) };
+        return { name: p ? p.name : "Custom trailer", length: fromU($("t-length").value), width: fromU($("t-width").value), wallMargin: effWall() };
       }
 
       // ---- preset managers (trailer + pallet sizes, inline edit + delete) ----
@@ -559,7 +591,7 @@ const PANEL_HTML = `<!doctype html>
       });
 
       function runNest() {
-        post({ type: "nest", trailer: readTrailer(), orders: state.orders, palletMargin: Math.max(0, state.palletMargin), dimensions: !!state.dimensions });
+        post({ type: "nest", trailer: readTrailer(), orders: state.orders, palletMargin: effPallet(), dimensions: !!state.dimensions });
         $("results").innerHTML = "<div class='muted'>Nesting…</div>";
       }
       $("nest").addEventListener("click", runNest);

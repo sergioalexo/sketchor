@@ -147,3 +147,37 @@ export function findSnap(doc: SketchDocument, view: View, cursor: Point, exclude
     kind: "grid",
   };
 }
+
+/**
+ * Given a selection being dragged by `(rawDx, rawDy)`, returns the offset to
+ * actually apply — `raw` unless one of the selection's vertices, at its dragged
+ * position, lands within snap range of a real feature point (endpoint, centre,
+ * intersection, the origin, …). The closest such vertex/target pair wins and the
+ * whole selection is nudged so that vertex sits exactly on the target.
+ *
+ * `baseVertices` are the selection's vertices at grab time (world space);
+ * `excludeIds` is the selection itself, so it never snaps to its own geometry.
+ * The grid fallback is ignored here — it would quantise every drag.
+ */
+export function snapMovingSelection(
+  doc: SketchDocument,
+  view: View,
+  baseVertices: readonly Point[],
+  rawDx: number,
+  rawDy: number,
+  excludeIds: readonly string[],
+): { dx: number; dy: number } {
+  let best: { dx: number; dy: number } | null = null;
+  let bestDist = Infinity;
+  for (const v of baseVertices) {
+    const moved = { x: v.x + rawDx, y: v.y + rawDy };
+    const snap = findSnap(doc, view, moved, excludeIds);
+    if (snap.kind === "grid") continue;
+    const d = dist(snap.point, moved);
+    if (d < bestDist) {
+      bestDist = d;
+      best = { dx: rawDx + (snap.point.x - moved.x), dy: rawDy + (snap.point.y - moved.y) };
+    }
+  }
+  return best ?? { dx: rawDx, dy: rawDy };
+}
