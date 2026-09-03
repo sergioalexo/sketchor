@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { boundsOf, dxfToSvg, entitiesToSvg, parseDxf } from "./dxf";
-import type { ArcEntity, CircleEntity, Entity, LineEntity, PointEntity, PolylineEntity } from "./entities";
+import type { ArcEntity, CircleEntity, Entity, LineEntity, PointEntity, PolylineEntity, TextEntity } from "./entities";
 
 /**
  * The DXF importer — the widest surface in the codebase and the one fed by
@@ -235,55 +235,50 @@ describe("SPLINE", () => {
 });
 
 describe("TEXT and MTEXT", () => {
-  // "I" is a single vertical stroke from (0.3, 0) to (0.3, 1) in the unit em box.
+  // Text imports as a real, editable `text` entity — the string is kept
+  // verbatim; the insertion point, height (code 40) and rotation (code 50)
+  // carry over. It is no longer lowered to stroke geometry.
   const textRec = (content: string, pairs: Pair[] = []) =>
     entitiesOnly(rec("TEXT", [[10, 0], [20, 0], [40, 10], [1, content], ...pairs]));
+  const mtextRec = (pairs: Pair[]) => entitiesOnly(rec("MTEXT", [[10, 0], [20, 0], [40, 10], ...pairs]));
 
-  it("lowers a glyph to stroke geometry scaled by the text height", () => {
-    const [e] = entitiesOf(textRec("I")) as PolylineEntity[];
-    expect(e.type).toBe("polyline");
-    closeTo(e.points[0], 3, 0);
-    closeTo(e.points[1], 3, 10);
+  it("imports TEXT as one text entity at the insertion point", () => {
+    const [e] = entitiesOf(textRec("Hello 3")) as TextEntity[];
+    expect(e.type).toBe("text");
+    expect(e.text).toBe("Hello 3");
+    closeTo(e.at, 0, 0);
+    expect(e.height).toBe(10);
+    expect(e.rotation).toBe(0);
   });
 
-  it("advances left to right across characters", () => {
-    const entities = entitiesOf(textRec("AI")) as PolylineEntity[];
-    expect(entities).toHaveLength(3); // A is two strokes, I is one
-    const iStroke = entities[2];
-    closeTo(iStroke.points[0], (0.3 + 0.7 + 0.12) * 10, 0);
+  it("reads rotation from code 50 as degrees, stored in radians", () => {
+    const [e] = entitiesOf(textRec("I", [[50, 90]])) as TextEntity[];
+    expect(e.rotation).toBeCloseTo(Math.PI / 2, 9);
   });
 
-  it("rotates about the insertion point", () => {
-    const [e] = entitiesOf(textRec("I", [[50, 90]])) as PolylineEntity[];
-    closeTo(e.points[0], 0, 3);
-    closeTo(e.points[1], -10, 3);
-  });
-
-  it("upper-cases input and skips glyphs it has no strokes for", () => {
-    expect(entitiesOf(textRec("i"))).toHaveLength(1);
-    expect(entitiesOf(textRec("§"))).toEqual([]);
+  it("keeps the string verbatim and drops an empty one", () => {
+    expect((entitiesOf(textRec("iI§"))[0] as TextEntity).text).toBe("iI§");
     expect(entitiesOf(textRec(""))).toEqual([]);
   });
 
   it("falls back to a default height when code 40 is missing or zero", () => {
-    const [e] = entitiesOf(entitiesOnly(rec("TEXT", [[10, 0], [20, 0], [40, 0], [1, "I"]]))) as PolylineEntity[];
-    expect(e.points[1].y).toBeCloseTo(2.5, 9);
+    const [e] = entitiesOf(entitiesOnly(rec("TEXT", [[10, 0], [20, 0], [40, 0], [1, "I"]]))) as TextEntity[];
+    expect(e.height).toBeCloseTo(2.5, 9);
   });
 
-  it("strips MTEXT formatting codes before rendering", () => {
-    const plain = entitiesOf(textRec("I"));
-    const formatted = entitiesOf(entitiesOnly(rec("MTEXT", [[10, 0], [20, 0], [40, 10], [1, "{\\C1;I}"]])));
-    expect(formatted).toHaveLength(plain.length);
-    expect((formatted[0] as PolylineEntity).points).toEqual((plain[0] as PolylineEntity).points);
+  it("strips MTEXT formatting codes", () => {
+    const [e] = entitiesOf(mtextRec([[1, "{\\C1;red} text"]])) as TextEntity[];
+    expect(e.text).toBe("red text");
   });
 
   it("joins MTEXT continuation groups (code 3) ahead of code 1", () => {
-    const e = entitiesOf(entitiesOnly(rec("MTEXT", [[10, 0], [20, 0], [40, 10], [3, "I"], [1, "I"]])));
-    expect(e).toHaveLength(2);
+    const [e] = entitiesOf(mtextRec([[3, "AB"], [1, "CD"]])) as TextEntity[];
+    expect(e.text).toBe("ABCD");
   });
 
   it("turns an MTEXT paragraph break into a space", () => {
-    expect(entitiesOf(entitiesOnly(rec("MTEXT", [[10, 0], [20, 0], [40, 10], [1, "I\\PI"]])))).toHaveLength(2);
+    const [e] = entitiesOf(mtextRec([[1, "one\\Ptwo"]])) as TextEntity[];
+    expect(e.text).toBe("one two");
   });
 });
 

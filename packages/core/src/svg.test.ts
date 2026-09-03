@@ -28,6 +28,7 @@ const pointsOf = (e: Entity): Point[] => {
   if (e.type === "line") return [e.a, e.b];
   if (e.type === "point") return [e.p];
   if (e.type === "circle") return [e.center];
+  if (e.type === "text") return [e.at];
   return [e.center];
 };
 
