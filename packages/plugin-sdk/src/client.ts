@@ -2,6 +2,7 @@ import { HOST_API_VERSION } from "@sketchor/core";
 import type {
   Command,
   CommandHandler,
+  DisplayUnitInfo,
   DocumentReadModel,
   EntityId,
   ExporterHandler,
@@ -67,6 +68,12 @@ export function createClient(transport: RpcTransport): PluginHostApi {
       onMessage: (listener: (message: unknown) => void): Promise<Unsubscribe> =>
         transport.subscribe("ui.onMessage", [], (p) => listener(p)),
       notify: (message: string, options?: NotifyOptions) => transport.post("ui.notify", [message, options]),
+    },
+
+    app: {
+      displayUnit: () => transport.call("app.displayUnit", []) as Promise<DisplayUnitInfo>,
+      onDisplayUnitChange: (listener: (info: DisplayUnitInfo) => void): Promise<Unsubscribe> =>
+        transport.subscribe("app.onDisplayUnitChange", [], (p) => listener(p as DisplayUnitInfo)),
     },
 
     // Contribution registration is local to the sandbox — no RPC. Handlers land

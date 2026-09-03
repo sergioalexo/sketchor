@@ -39,6 +39,20 @@ export const BUILTIN_MANIFESTS: PluginManifest[] = [
     permissions: ["read-document", "write-document"],
   },
   {
+    id: "com.sketchor.truck-nesting",
+    version: "2.0.0",
+    name: "Truck Load Planner",
+    description: "Nest pallets into a trailer by delivery order and draw a colour-coded load plan.",
+    publisher: "Sketchor",
+    engines: { sketchor: `^${HOST_API_VERSION}` },
+    main: "truckNestingPlugin.ts",
+    ui: "truckNesting.html",
+    contributes: {
+      commands: [{ id: "truck-nesting.open", title: "Truck Load Planner (panel)" }],
+    },
+    permissions: ["read-document", "write-document", "storage"],
+  },
+  {
     id: "com.sketchor.svg-export",
     version: "1.0.0",
     name: "SVG Export",

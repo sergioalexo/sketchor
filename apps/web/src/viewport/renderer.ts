@@ -130,7 +130,8 @@ export function render(
           ? COLORS.hover
           : isFreeEndpoint
             ? COLORS.connectivityHint
-            : COLORS.entity;
+            : (shown.color ?? COLORS.entity);
+    if (shown.fill) drawHatch(ctx, view, shown, shown.fill);
     drawEntity(ctx, view, shown, color, selected || isReference || isHovered ? 2 : 1.5);
     if (selected) drawHandles(ctx, view, shown);
   }
@@ -221,6 +222,57 @@ function drawClosedRegions(ctx: CanvasRenderingContext2D, view: View, regions: r
     ctx.closePath();
     ctx.fill();
   }
+}
+
+/**
+ * Fills a closed shape (a `closed` polyline or a circle) with a 45° line hatch
+ * in `fill`. Clips to the shape and strokes parallel diagonals across its
+ * screen bounding box — cheap, resolution-independent, and reads as a fill
+ * without hiding the geometry underneath. Open shapes are skipped by the caller.
+ */
+function drawHatch(ctx: CanvasRenderingContext2D, view: View, entity: Entity, fill: string): void {
+  ctx.save();
+  ctx.beginPath();
+  if (entity.type === "circle") {
+    const c = worldToScreen(view, entity.center);
+    ctx.arc(c.x, c.y, entity.radius * view.scale, 0, Math.PI * 2);
+  } else if (entity.type === "polyline" && entity.closed && entity.points.length >= 3) {
+    const p0 = worldToScreen(view, entity.points[0]);
+    ctx.moveTo(p0.x, p0.y);
+    for (let i = 1; i < entity.points.length; i++) {
+      const p = worldToScreen(view, entity.points[i]);
+      ctx.lineTo(p.x, p.y);
+    }
+    ctx.closePath();
+  } else {
+    ctx.restore();
+    return;
+  }
+  ctx.clip();
+
+  const pts = entityPoints(entity).map((p) => worldToScreen(view, p));
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const p of pts) {
+    minX = Math.min(minX, p.x);
+    minY = Math.min(minY, p.y);
+    maxX = Math.max(maxX, p.x);
+    maxY = Math.max(maxY, p.y);
+  }
+  const span = maxX - minX + (maxY - minY);
+  const gap = 7;
+  ctx.strokeStyle = fill;
+  ctx.globalAlpha = 0.32;
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let d = -span; d <= span; d += gap) {
+    ctx.moveTo(minX + d, minY);
+    ctx.lineTo(minX + d + (maxY - minY), maxY);
+  }
+  ctx.stroke();
+  ctx.restore();
 }
 
 function drawGroupHandle(

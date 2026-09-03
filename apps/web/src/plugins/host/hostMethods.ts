@@ -1,6 +1,13 @@
-import { projectDocument, type Command, type UiShowOptions } from "@sketchor/core";
+import { projectDocument, type Command, type DisplayUnitInfo, type UiShowOptions } from "@sketchor/core";
 import { bus, doc, useApp } from "../../state/store";
+import { factorFromMm, type DisplayUnit } from "../../units";
 import { hidePanel, postToPanel, showPanel, subscribeToPanel } from "./uiManager";
+
+/** The current display unit as the plugin-facing {@link DisplayUnitInfo}. */
+function currentDisplayUnit(): DisplayUnitInfo {
+  const unit = useApp.getState().displayUnit as DisplayUnit;
+  return { unit, perMm: factorFromMm(unit), label: unit };
+}
 
 /**
  * The actual host-side implementations behind each RPC method. These run on the
@@ -48,7 +55,12 @@ export async function dispatchCall(ctx: HostContext, method: string, args: unkno
       const commands = args[0];
       assertCommands(commands);
       // Collapse the plugin's whole action into one undo step.
-      if (commands.length > 0) bus.execute({ type: "batch", commands });
+      if (commands.length > 0) {
+        bus.execute({ type: "batch", commands });
+        // A plugin can introduce a new layer (e.g. the load planner's "Load
+        // Plan"); surface it in the layer panel like any first-party edit would.
+        useApp.getState().syncLayersFromDoc();
+      }
       return doc.revision;
     }
 
@@ -81,6 +93,9 @@ export async function dispatchCall(ctx: HostContext, method: string, args: unkno
       hidePanel(ctx.pluginId);
       return undefined;
 
+    case "app.displayUnit":
+      return currentDisplayUnit();
+
     default:
       throw new Error(`Unhandled call method "${method}"`);
   }
@@ -100,6 +115,11 @@ export function dispatchSubscribe(
     case "selection.onChange":
       return useApp.subscribe((state, prev) => {
         if (state.selection !== prev.selection) emit(state.selection);
+      });
+
+    case "app.onDisplayUnitChange":
+      return useApp.subscribe((state, prev) => {
+        if (state.displayUnit !== prev.displayUnit) emit(currentDisplayUnit());
       });
 
     case "ui.onMessage":

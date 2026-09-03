@@ -19,6 +19,7 @@ import {
   layerOf,
   mid,
   newGroupId,
+  PALETTE,
   parseCode,
   parseDxf,
   patternCommands,
@@ -233,7 +234,7 @@ export function overlayDxfText(text: string, label: string): { count: number; wa
   return { ...overlayEntities(entities, label), warnings };
 }
 
-export type ToolId = "select" | "line" | "polyline" | "circle" | "point" | "measure" | "straighten";
+export type ToolId = "select" | "line" | "polyline" | "circle" | "point" | "measure" | "straighten" | "fill";
 
 export const TOOL_HINTS: Record<ToolId, string> = {
   select: "Click to select (Shift adds) - drag left-to-right to window-select, right-to-left to crossing-select - drag to move - Del deletes - G groups - U ungroups",
@@ -243,6 +244,7 @@ export const TOOL_HINTS: Record<ToolId, string> = {
   point: "Click to place a point",
   measure: "Click two points to measure distance (snaps to endpoints, midpoints, centers, on-line points, intersections) - Ctrl-click a line to set it as the angle reference - Alt-click a line/circle/arc for its whole length/radius, Shift-Alt-click more lines/arcs to total - click inside a closed area for its area+perimeter - Ctrl+C copies the readout",
   straighten: "Select the part with V, switch here, click the reference edge, then Enter to apply",
+  fill: "Pick a colour, then click a closed shape to hatch-fill it - Alt-click removes a fill - use the panel to apply to a whole selection",
 };
 
 export type StraightenAxis = "horizontal" | "vertical";
@@ -468,6 +470,9 @@ interface AppState {
   setReferenceEdge: (id: EntityId | null) => void;
   setStraightenAxis: (axis: StraightenAxis) => void;
   setStraightenPivot: (pivot: StraightenPivot) => void;
+  /** The colour the Fill/Hatch tool applies on click and the Fill panel seeds from. */
+  fillColor: string;
+  setFillColor: (color: string) => void;
   /** Findings from the most recent heal scan (see the Diagnostics panel). */
   healIssues: HealIssue[];
   healOptions: HealOptions;
@@ -569,6 +574,8 @@ export const useApp = create<AppState>((set, get) => ({
   setReferenceEdge: (id) => set({ referenceEdgeId: id }),
   setStraightenAxis: (axis) => set({ straightenAxis: axis }),
   setStraightenPivot: (pivot) => set({ straightenPivot: pivot }),
+  fillColor: PALETTE[0],
+  setFillColor: (color) => set({ fillColor: color }),
   healIssues: [],
   healOptions: DEFAULT_HEAL_OPTIONS,
   joinCollinear: false,

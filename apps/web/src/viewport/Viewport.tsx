@@ -152,6 +152,37 @@ function hitTest(view: View, world: Point): EntityId | null {
   return best;
 }
 
+/**
+ * The topmost closed shape (a `closed` polyline or a circle) whose interior
+ * contains `world` — the "click anywhere inside" target for the Fill tool.
+ * Later entities win, matching paint order.
+ */
+function closedEntityAt(world: Point): Entity | null {
+  const hidden = hiddenLayerSet();
+  let found: Entity | null = null;
+  for (const e of doc.all()) {
+    if (hidden.has(layerOf(e))) continue;
+    if (e.type === "circle") {
+      if (dist(world, e.center) <= e.radius) found = e;
+    } else if (e.type === "polyline" && e.closed && pointInPolygon(world, e.points)) {
+      found = e;
+    }
+  }
+  return found;
+}
+
+function pointInPolygon(p: Point, poly: Point[]): boolean {
+  let inside = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const a = poly[i];
+    const b = poly[j];
+    if (a.y > p.y !== b.y > p.y && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
 export function Viewport() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const viewRef = useRef<View>({ scale: 2, ox: 0, oy: 0 });
@@ -462,6 +493,8 @@ export function Viewport() {
         fitView(app.selection.length ? app.selection : undefined);
       } else if (e.key.toLowerCase() === "t") {
         app.setTool("straighten");
+      } else if (e.key.toLowerCase() === "h") {
+        app.setTool("fill");
       } else if (e.key === "Enter" && app.tool === "straighten") {
         applyStraighten();
       } else if (e.key === "Enter" && app.tool === "measure" && app.measurement) {
@@ -743,6 +776,23 @@ export function Viewport() {
         const entity = hit ? doc.get(hit) : null;
         if (hit && entity?.type === "line" && app.selection.includes(hit)) {
           app.setReferenceEdge(hit);
+        }
+        break;
+      }
+      case "fill": {
+        // Click a closed shape — on its edge or anywhere inside it — to
+        // hatch-fill it in the current colour; Alt-click clears a fill.
+        const hit = hitTest(view, world);
+        const hitEntity = hit ? doc.get(hit) : null;
+        const target =
+          hitEntity && (hitEntity.type === "circle" || (hitEntity.type === "polyline" && hitEntity.closed))
+            ? hitEntity
+            : closedEntityAt(world);
+        if (target) {
+          const next = { ...target };
+          if (e.altKey) delete next.fill;
+          else next.fill = app.fillColor;
+          bus.execute({ type: "update-entity", entity: next });
         }
         break;
       }
