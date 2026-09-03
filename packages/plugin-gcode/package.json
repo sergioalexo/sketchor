@@ -1,0 +1,17 @@
+{
+  "name": "@sketchor/plugin-gcode",
+  "version": "1.0.0",
+  "description": "First-party Sketchor plugin: decode G-code toolpaths into drawing geometry.",
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@sketchor/plugin-sdk": "*"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0"
+  }
+}

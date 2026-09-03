@@ -65,4 +65,19 @@ export const BUILTIN_MANIFESTS: PluginManifest[] = [
     },
     permissions: ["read-document"],
   },
+  {
+    id: "com.sketchor.gcode",
+    version: "1.0.0",
+    name: "G-code Ripper",
+    description: "Decode a CNC G-code program into drawing geometry.",
+    publisher: "Sketchor",
+    engines: { sketchor: `^${HOST_API_VERSION}` },
+    main: "gcodePlugin.ts",
+    ui: "gcode.html",
+    contributes: {
+      commands: [{ id: "gcode.import", title: "G-code Ripper (import)" }],
+      io: [{ id: "gcode", title: "G-code", direction: ["import"], extensions: ["nc", "gcode", "tap", "ngc"] }],
+    },
+    permissions: ["write-document"],
+  },
 ];

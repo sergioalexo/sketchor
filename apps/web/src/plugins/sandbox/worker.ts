@@ -19,6 +19,7 @@ const BUILTINS: Record<string, () => Promise<{ default: PluginModule }>> = {
   "com.sketchor.svg-export": () => import("../builtins/svgExportPlugin"),
   "com.sketchor.panel-demo": () => import("../builtins/panelDemoPlugin"),
   "com.sketchor.truck-nesting": () => import("../builtins/truckNestingPlugin"),
+  "com.sketchor.gcode": () => import("../builtins/gcodePlugin"),
 };
 
 const transport = new WorkerTransport();
