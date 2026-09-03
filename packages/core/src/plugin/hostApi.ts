@@ -25,10 +25,38 @@ export interface PluginHostApi {
   readonly network: NetworkApi;
   readonly filesystem: FilesystemApi;
   readonly ui: UiApi;
+  /** Ambient, read-only host/UI state a plugin can react to (no permission). */
+  readonly app: AppApi;
   /** Register handlers for the `commands`/`generators`/`io` a plugin contributes. */
   readonly commands: CommandsApi;
   readonly generators: GeneratorsApi;
   readonly io: IoApi;
+}
+
+/**
+ * The app's current display unit. Stored document coordinates are always
+ * millimetres; this is only how the user sees and types lengths, so a plugin
+ * with its own dimension inputs (e.g. the load planner) can match the toolbar.
+ */
+export interface DisplayUnitInfo {
+  /** The unit token shown in the toolbar dropdown. */
+  unit: "mm" | "cm" | "m" | "in" | "ft";
+  /** Multiply a millimetre value by this to get the displayed value; divide to go back. */
+  perMm: number;
+  /** Short label for UI (same as `unit` today, kept separate for future locale needs). */
+  label: string;
+}
+
+/**
+ * Ambient application state. Not gated by a capability — it's the same
+ * read-only UI context the host chrome already shows the user, nothing a
+ * plugin couldn't infer by other means. Mirrors {@link SelectionApi}'s shape.
+ */
+export interface AppApi {
+  /** The current display unit and its millimetre conversion factor. */
+  displayUnit(): Promise<DisplayUnitInfo>;
+  /** Fires whenever the user changes the display unit. Returns an unsubscribe function. */
+  onDisplayUnitChange(listener: (info: DisplayUnitInfo) => void): Promise<Unsubscribe>;
 }
 
 export interface DocumentApi {
@@ -201,6 +229,7 @@ export interface ImporterContext {
  * 0.2.0 (Phase 2, additive) added the `commands`/`generators`/`io` contribution
  * registration surface. 0.3.0 (Phase 3) reshaped `ui.show(options)` into
  * `ui.show(html, options)` for the sandboxed-iframe panel — a breaking change to
- * the `ui` sub-API, hence the minor bump on a pre-1.0 line.
+ * the `ui` sub-API, hence the minor bump on a pre-1.0 line. 0.4.0 added the
+ * ambient, permission-free {@link AppApi} (`app.displayUnit`) — additive.
  */
-export const HOST_API_VERSION = "0.3.0";
+export const HOST_API_VERSION = "0.4.0";

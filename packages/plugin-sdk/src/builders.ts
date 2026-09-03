@@ -23,13 +23,19 @@ export interface EntityOptions {
   name?: string;
   /** Layer name; omit for the default layer "0". */
   layer?: string;
+  /** Stroke colour (any CSS colour); omit for the theme default. */
+  color?: string;
+  /** Hatch-fill colour for closed shapes; omit for no fill. */
+  fill?: string;
 }
 
-function base(opts?: EntityOptions): { id: EntityId; name?: string; layer?: string } {
+function base(opts?: EntityOptions): { id: EntityId; name?: string; layer?: string; color?: string; fill?: string } {
   return {
     id: newEntityId(),
     ...(opts?.name !== undefined ? { name: opts.name } : {}),
     ...(opts?.layer !== undefined ? { layer: opts.layer } : {}),
+    ...(opts?.color !== undefined ? { color: opts.color } : {}),
+    ...(opts?.fill !== undefined ? { fill: opts.fill } : {}),
   };
 }
 

@@ -23,6 +23,8 @@ const REQUIRED: Record<string, Permission | null> = {
   "ui.postMessage": null,
   "ui.onMessage": null,
   "ui.notify": null,
+  "app.displayUnit": null,
+  "app.onDisplayUnitChange": null,
 };
 
 export class UnknownMethodError extends Error {

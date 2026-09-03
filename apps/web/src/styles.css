@@ -809,6 +809,67 @@ body {
   font-size: 12px;
 }
 
+/* ---------- fill / hatch tool ---------- */
+
+.fill-panel {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+  z-index: 5;
+}
+
+.fill-swatches {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.fill-swatch {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  border: 2px solid transparent;
+  padding: 0;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.25);
+}
+
+.fill-swatch.active {
+  border-color: var(--text);
+}
+
+.fill-swatch-custom {
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: linear-gradient(135deg, #e2554e, #4f86d6, #5aa74f);
+}
+
+.fill-swatch-custom input {
+  width: 28px;
+  height: 28px;
+  border: none;
+  padding: 0;
+  background: none;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.fill-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 /* ---------- diagnostics panel ---------- */
 
 .diagpanel {

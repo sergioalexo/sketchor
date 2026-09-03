@@ -2,113 +2,189 @@ import {
   buildNestLayout,
   clearPreviousLayout,
   LOAD_PLAN_LAYER,
-  nestTruck,
+  nestByOrders,
   validateNest,
-  type PalletItem,
+  type NestResult,
+  type Order,
+  type Pallet,
   type TrailerProfile,
   type ValidationFinding,
 } from "@sketchor/plugin-truck-nesting";
-import type { NestResult } from "@sketchor/plugin-truck-nesting";
-import type { PluginModule } from "@sketchor/plugin-sdk";
+import { PALETTE, type DisplayUnitInfo, type PluginModule } from "@sketchor/plugin-sdk";
 
 /**
- * First-party dogfood: the Truck Load Planner, built entirely over the public
- * plugin API. All the nesting maths lives in `@sketchor/plugin-truck-nesting`
- * (which imports only the SDK); this module is the sandbox glue — it shows the
- * panel, and on each panel request reads the document, runs the solver, and
- * applies the resulting `Command[]` through `document.apply` as one undo step.
- * It never touches `window.sketchor` or the host DOM — only `postMessage`.
+ * First-party dogfood: the Truck Load Planner. All the nesting maths lives in
+ * `@sketchor/plugin-truck-nesting` (SDK-only); this module is the sandbox glue —
+ * it shows the panel, keeps the user's trailer presets and orders in plugin
+ * `storage`, feeds the panel the app's display unit, and on each request reads
+ * the document, solves, and applies the coloured layout through `document.apply`
+ * as one undo step. It never touches `window.sketchor` or the host DOM.
  *
  * Contributes the command `truck-nesting.open` and declares a `ui` entry.
  */
 
-interface NestRequest {
-  type: "nest";
-  trailer: TrailerProfile;
-  items: PalletItem[];
-}
-interface ClearRequest {
-  type: "clear";
-}
-type PanelRequest = NestRequest | ClearRequest;
-
-function isTrailer(v: unknown): v is TrailerProfile {
-  if (!v || typeof v !== "object") return false;
-  const t = v as Record<string, unknown>;
-  return typeof t.name === "string" && typeof t.length === "number" && typeof t.width === "number";
+interface PersistedState {
+  presets: TrailerProfile[];
+  lastPresetName: string;
+  orders: Order[];
 }
 
-function isItemArray(v: unknown): v is PalletItem[] {
-  return (
-    Array.isArray(v) &&
-    v.every((it) => {
-      if (!it || typeof it !== "object") return false;
-      const i = it as Record<string, unknown>;
-      return (
-        typeof i.id === "string" &&
-        typeof i.label === "string" &&
-        typeof i.length === "number" &&
-        typeof i.width === "number" &&
-        typeof i.weightKg === "number" &&
-        typeof i.qty === "number" &&
-        typeof i.stop === "number" &&
-        typeof i.rotatable === "boolean"
-      );
-    })
-  );
+const STORAGE_KEY = "state";
+
+const SEED_PRESETS: TrailerProfile[] = [
+  { name: "13.6 m curtainsider", length: 13620, width: 2480 },
+  { name: "7.2 m rigid", length: 7200, width: 2450 },
+  { name: "6.1 m box van", length: 6100, width: 2400 },
+];
+
+function seedOrder(): Order {
+  return {
+    id: `o-${Date.now().toString(36)}`,
+    city: "",
+    color: PALETTE[0],
+    pallets: [{ id: `p-${Date.now().toString(36)}`, width: 1200, length: 800, shape: "rect" }],
+  };
 }
 
-function parseRequest(raw: unknown): PanelRequest | null {
-  if (!raw || typeof raw !== "object") return null;
-  const msg = raw as Record<string, unknown>;
-  if (msg.type === "clear") return { type: "clear" };
-  if (msg.type === "nest" && isTrailer(msg.trailer) && isItemArray(msg.items)) {
-    return { type: "nest", trailer: msg.trailer, items: msg.items };
-  }
-  return null;
+// --- untrusted panel input ---
+
+function num(v: unknown, fallback = 0): number {
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function asPallet(v: unknown): Pallet | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  const shape = o.shape === "round" ? "round" : "rect";
+  return {
+    id: typeof o.id === "string" ? o.id : `p-${Math.random().toString(36).slice(2)}`,
+    width: Math.max(0, num(o.width)),
+    length: Math.max(0, num(o.length)),
+    shape,
+  };
+}
+
+function asOrder(v: unknown): Order | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  const pallets = Array.isArray(o.pallets) ? o.pallets.map(asPallet).filter((p): p is Pallet => p !== null) : [];
+  return {
+    id: typeof o.id === "string" ? o.id : `o-${Math.random().toString(36).slice(2)}`,
+    city: typeof o.city === "string" ? o.city : "",
+    color: typeof o.color === "string" ? o.color : PALETTE[0],
+    pallets,
+  };
+}
+
+function asTrailer(v: unknown): TrailerProfile | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  const length = Math.max(1, num(o.length, 1));
+  const width = Math.max(1, num(o.width, 1));
+  return { name: typeof o.name === "string" && o.name ? o.name : "Trailer", length, width };
+}
+
+function asState(v: unknown): PersistedState {
+  const o = (v && typeof v === "object" ? v : {}) as Record<string, unknown>;
+  const presets = Array.isArray(o.presets)
+    ? o.presets.map(asTrailer).filter((t): t is TrailerProfile => t !== null)
+    : [];
+  const orders = Array.isArray(o.orders)
+    ? o.orders.map(asOrder).filter((x): x is Order => x !== null)
+    : [];
+  return {
+    presets: presets.length > 0 ? presets : [...SEED_PRESETS],
+    lastPresetName: typeof o.lastPresetName === "string" ? o.lastPresetName : (presets[0]?.name ?? SEED_PRESETS[0].name),
+    orders: orders.length > 0 ? orders : [seedOrder()],
+  };
 }
 
 const plugin: PluginModule = {
-  activate(sketchor) {
+  async activate(sketchor) {
+    let unit: DisplayUnitInfo = { unit: "mm", perMm: 1, label: "mm" };
+    try {
+      unit = await sketchor.app.displayUnit();
+    } catch {
+      /* keep the mm default */
+    }
+
+    const stored = await sketchor.storage.get(STORAGE_KEY).catch(() => undefined);
+    let state = asState(stored);
+
+    const pushInit = () => {
+      void sketchor.ui.postMessage({ type: "init", state, unit, palette: PALETTE });
+    };
+
+    void sketchor.app.onDisplayUnitChange((info) => {
+      unit = info;
+      void sketchor.ui.postMessage({ type: "unit", unit });
+    });
+
     sketchor.commands.register("truck-nesting.open", () => {
-      void sketchor.ui.show(PANEL_HTML, { title: "Load Plan", width: 340, height: 520 });
+      void sketchor.ui.show(PANEL_HTML, { title: "Load Plan", width: 360, height: 560 });
+      // The panel asks for state itself once its DOM is ready ("ready" below),
+      // but push now too in case it was already open.
+      pushInit();
     });
 
     sketchor.ui.onMessage(async (raw) => {
-      const req = parseRequest(raw);
-      if (!req) return;
-      try {
-        const model = await sketchor.document.read();
+      const msg = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
 
-        if (req.type === "clear") {
-          const commands = clearPreviousLayout(model);
-          if (commands.length > 0) await sketchor.document.apply(commands);
-          sketchor.ui.postMessage({ type: "cleared" });
+      if (msg.type === "ready") {
+        pushInit();
+        return;
+      }
+
+      if (msg.type === "persist") {
+        state = asState(msg.state);
+        await sketchor.storage.set(STORAGE_KEY, state).catch(() => undefined);
+        return;
+      }
+
+      if (msg.type === "clear") {
+        const model = await sketchor.document.read();
+        const commands = clearPreviousLayout(model);
+        if (commands.length > 0) await sketchor.document.apply(commands);
+        void sketchor.ui.postMessage({ type: "cleared" });
+        return;
+      }
+
+      if (msg.type === "nest") {
+        const trailer = asTrailer(msg.trailer);
+        const orders = Array.isArray(msg.orders)
+          ? msg.orders.map(asOrder).filter((o): o is Order => o !== null)
+          : [];
+        if (!trailer || orders.length === 0) {
+          void sketchor.ui.postMessage({ type: "error", message: "Add a trailer size and at least one order." });
           return;
         }
-
-        const result: NestResult = nestTruck(req.trailer, req.items);
-        const findings: ValidationFinding[] = validateNest(result);
-        await sketchor.document.apply([...clearPreviousLayout(model), ...buildNestLayout(result)]);
-        sketchor.ui.postMessage({ type: "result", result, findings });
-        const errors = findings.filter((f) => f.level === "error").length;
-        sketchor.ui.notify(
-          errors > 0
-            ? `Load plan drawn with ${errors} problem${errors === 1 ? "" : "s"} — see the panel.`
-            : `Load plan drawn on the "${LOAD_PLAN_LAYER}" layer.`,
-          { error: errors > 0 },
-        );
-      } catch (err) {
-        sketchor.ui.postMessage({ type: "error", message: err instanceof Error ? err.message : String(err) });
+        try {
+          const result: NestResult = nestByOrders(trailer, orders);
+          const findings: ValidationFinding[] = validateNest(result);
+          const model = await sketchor.document.read();
+          await sketchor.document.apply([...clearPreviousLayout(model), ...buildNestLayout(result)]);
+          void sketchor.ui.postMessage({ type: "result", result, findings });
+          const errors = findings.filter((f) => f.level === "error").length;
+          sketchor.ui.notify(
+            errors > 0
+              ? `Load plan drawn — ${errors} problem${errors === 1 ? "" : "s"}, see the panel.`
+              : `Load plan drawn on the "${LOAD_PLAN_LAYER}" layer.`,
+            { error: errors > 0 },
+          );
+        } catch (err) {
+          void sketchor.ui.postMessage({ type: "error", message: err instanceof Error ? err.message : String(err) });
+        }
       }
     });
   },
 };
 
 /**
- * The panel's markup — self-contained, sandboxed, talks to the plugin only via
- * `parent.postMessage({ pluginMessage })`. Keeps its own catalogue state and
- * sends the whole trailer + item list on each Auto-nest.
+ * The panel — self-contained, sandboxed, talks to the plugin only through
+ * `parent.postMessage({ pluginMessage })`. It owns the editable copy of the
+ * trailer presets and the order list, renders everything in the app's display
+ * unit, and posts a debounced `persist` after every edit.
  */
 const PANEL_HTML = `<!doctype html>
 <html>
@@ -116,171 +192,325 @@ const PANEL_HTML = `<!doctype html>
     <style>
       * { box-sizing: border-box; }
       body { margin: 0; padding: 12px; font: 12px system-ui, -apple-system, sans-serif; color: #dfe1e5; background: #1e1f22; }
-      h4 { margin: 0 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.6; }
-      section { margin-bottom: 14px; }
+      h4 { margin: 14px 0 6px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.55; }
+      h4:first-child { margin-top: 0; }
       label { display: block; margin-bottom: 6px; }
       .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 8px; }
-      input { width: 100%; margin-top: 3px; padding: 5px 6px; background: #2b2d31; color: inherit; border: 1px solid #3a3d42; border-radius: 4px; font: inherit; }
-      input[type="checkbox"] { width: auto; margin: 0; }
-      table { width: 100%; border-collapse: collapse; }
-      th { font-size: 10px; text-transform: uppercase; opacity: 0.5; font-weight: 600; padding: 2px; text-align: left; }
-      td { padding: 1px; }
-      td input { margin-top: 0; padding: 4px; }
-      .num { width: 100%; }
+      input, select { width: 100%; margin-top: 3px; padding: 5px 6px; background: #2b2d31; color: inherit; border: 1px solid #3a3d42; border-radius: 4px; font: inherit; }
+      input[type="color"] { padding: 0; height: 24px; }
       button { padding: 6px 10px; border: none; border-radius: 5px; background: #4f7cff; color: #fff; font: inherit; cursor: pointer; }
       button.ghost { background: #2b2d31; color: #dfe1e5; border: 1px solid #3a3d42; }
-      button.sm { padding: 2px 6px; font-size: 11px; }
-      .row { display: flex; gap: 8px; align-items: center; }
-      .actions { display: flex; gap: 8px; margin: 10px 0; }
-      .totals { margin-top: 6px; opacity: 0.7; }
+      button.sm { padding: 3px 7px; font-size: 11px; }
+      button:disabled { opacity: 0.5; cursor: default; }
+      .row { display: flex; gap: 6px; align-items: center; }
+      .between { justify-content: space-between; }
+      .actions { display: flex; gap: 8px; margin: 12px 0; }
+      .muted { opacity: 0.6; }
+
+      .order { border: 1px solid #3a3d42; border-radius: 6px; padding: 8px; margin-bottom: 8px; background: #232529; }
+      .order.drag-over { border-color: #4f7cff; }
+      .order-head { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+      .handle { cursor: grab; opacity: 0.5; padding: 0 2px; user-select: none; }
+      .dot { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+      .order-head input.city { flex: 1; margin: 0; }
+      .seq { font-size: 10px; opacity: 0.5; flex: none; }
+
+      table { width: 100%; border-collapse: collapse; }
+      th { font-size: 10px; text-transform: uppercase; opacity: 0.45; font-weight: 600; padding: 2px; text-align: left; }
+      td { padding: 1px; }
+      td input, td select { margin-top: 0; padding: 4px; }
+      .pallet-btns { display: flex; gap: 3px; }
+      .icon { background: none; border: none; color: #9aa0a6; cursor: pointer; padding: 2px 4px; font-size: 12px; }
+
       .findings { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
       .f { padding: 5px 7px; border-radius: 4px; background: #2b2d31; border-left: 3px solid #6b7280; }
       .f.error { border-left-color: #f0616d; }
       .f.warn { border-left-color: #e3a008; }
       .f.info { border-left-color: #4f9d69; }
-      .stop { padding: 5px 7px; background: #2b2d31; border-radius: 4px; margin-top: 4px; }
-      .stop b { font-weight: 600; }
-      .muted { opacity: 0.6; }
-      .del { background: none; border: none; color: #9aa0a6; cursor: pointer; padding: 0 4px; }
+      .stop { padding: 5px 7px; border-radius: 4px; margin-top: 4px; border-left: 3px solid #6b7280; background: #2b2d31; }
     </style>
   </head>
   <body>
-    <section>
-      <h4>Trailer</h4>
-      <label>Name<input id="t-name" type="text" value="Standard 13.6m curtainsider" /></label>
-      <div class="grid2">
-        <label>Length mm<input id="t-length" class="num" type="number" min="0" value="13600" /></label>
-        <label>Width mm<input id="t-width" class="num" type="number" min="0" value="2480" /></label>
-        <label>Max weight kg<input id="t-weight" class="num" type="number" min="0" value="24000" /></label>
-      </div>
-    </section>
+    <h4>Trailer</h4>
+    <label>Preset
+      <select id="preset"></select>
+    </label>
+    <div class="grid2">
+      <label>Length (<span class="u"></span>)<input id="t-length" type="number" min="0" step="any" /></label>
+      <label>Width (<span class="u"></span>)<input id="t-width" type="number" min="0" step="any" /></label>
+    </div>
+    <div class="row">
+      <button class="ghost sm" id="preset-save">Save as preset</button>
+      <button class="ghost sm" id="preset-del">Delete preset</button>
+    </div>
 
-    <section>
-      <div class="row" style="justify-content: space-between;">
-        <h4>Items</h4>
-        <button class="ghost sm" id="add">+ Add</button>
-      </div>
-      <table>
-        <thead>
-          <tr><th>Label</th><th>L</th><th>W</th><th>kg</th><th>Qty</th><th>Stop</th><th>Rot</th><th></th></tr>
-        </thead>
-        <tbody id="rows"></tbody>
-      </table>
-      <div class="totals" id="totals"></div>
-    </section>
+    <div class="row between"><h4>Orders (drag to set unload sequence)</h4></div>
+    <div id="orders"></div>
+    <button class="ghost sm" id="order-add">+ Add order</button>
 
     <div class="actions">
       <button id="nest">Auto-nest</button>
       <button class="ghost" id="clear">Clear layout</button>
     </div>
-
     <div id="results"></div>
 
     <script>
       const post = (m) => parent.postMessage({ pluginMessage: m }, "*");
-      let items = [
-        { id: "i1", label: "EUR pallet", length: 1200, width: 800, weightKg: 400, qty: 8, stop: 1, rotatable: true },
-        { id: "i2", label: "Half pallet", length: 800, width: 600, weightKg: 250, qty: 4, stop: 2, rotatable: true },
-      ];
-      let seq = 3;
+      const $ = (id) => document.getElementById(id);
+      const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
-      function num(id) { return Number(document.getElementById(id).value) || 0; }
+      let unit = { unit: "mm", perMm: 1, label: "mm" };
+      let palette = ["#4f86d6"];
+      let state = { presets: [], lastPresetName: "", orders: [] };
+      let saveTimer = 0;
+      let dragFrom = -1;
 
-      function renderRows() {
-        const tb = document.getElementById("rows");
-        tb.innerHTML = "";
-        items.forEach((it) => {
-          const tr = document.createElement("tr");
-          const cell = (key, type, min) => {
-            const td = document.createElement("td");
-            const inp = document.createElement("input");
-            inp.type = type; inp.value = it[key]; inp.className = "num";
-            if (min !== undefined) inp.min = String(min);
-            if (type === "checkbox") { inp.checked = it[key]; inp.className = ""; }
-            inp.addEventListener("input", () => {
-              it[key] = type === "checkbox" ? inp.checked : type === "number" ? Number(inp.value) || 0 : inp.value;
-              renderTotals();
+      const toU = (mm) => Math.round(mm * unit.perMm * 100) / 100;
+      const fromU = (v) => (Number(v) || 0) / unit.perMm;
+      const rid = (p) => p + "-" + Math.random().toString(36).slice(2, 8);
+
+      function persist() {
+        clearTimeout(saveTimer);
+        saveTimer = setTimeout(() => post({ type: "persist", state }), 400);
+      }
+
+      // ---- trailer ----
+      function currentPreset() {
+        return state.presets.find((p) => p.name === state.lastPresetName) || null;
+      }
+      function renderTrailer() {
+        document.querySelectorAll(".u").forEach((el) => (el.textContent = unit.label));
+        const sel = $("preset");
+        sel.innerHTML =
+          state.presets.map((p) => '<option value="' + esc(p.name) + '">' + esc(p.name) + "</option>").join("") +
+          '<option value="__custom">Custom…</option>';
+        const preset = currentPreset();
+        sel.value = preset ? preset.name : "__custom";
+        if (preset) {
+          $("t-length").value = toU(preset.length);
+          $("t-width").value = toU(preset.width);
+        }
+        $("preset-del").disabled = !preset;
+      }
+      $("preset").addEventListener("change", (e) => {
+        if (e.target.value === "__custom") return;
+        state.lastPresetName = e.target.value;
+        renderTrailer();
+        persist();
+      });
+      const onTrailerInput = () => {
+        // Manual edit ⇒ detach from the named preset unless it still matches.
+        const p = currentPreset();
+        if (!p || Math.abs(fromU($("t-length").value) - p.length) > 0.5 || Math.abs(fromU($("t-width").value) - p.width) > 0.5) {
+          state.lastPresetName = "";
+          $("preset").value = "__custom";
+          $("preset-del").disabled = true;
+        }
+        persist();
+      };
+      $("t-length").addEventListener("input", onTrailerInput);
+      $("t-width").addEventListener("input", onTrailerInput);
+      $("preset-save").addEventListener("click", () => {
+        const name = (prompt("Name this truck size:") || "").trim();
+        if (!name) return;
+        const entry = { name, length: fromU($("t-length").value), width: fromU($("t-width").value) };
+        state.presets = state.presets.filter((p) => p.name !== name).concat(entry);
+        state.lastPresetName = name;
+        renderTrailer();
+        persist();
+      });
+      $("preset-del").addEventListener("click", () => {
+        const p = currentPreset();
+        if (!p) return;
+        state.presets = state.presets.filter((x) => x.name !== p.name);
+        state.lastPresetName = state.presets[0] ? state.presets[0].name : "";
+        renderTrailer();
+        persist();
+      });
+
+      function readTrailer() {
+        const p = currentPreset();
+        return {
+          name: p ? p.name : "Custom trailer",
+          length: fromU($("t-length").value),
+          width: fromU($("t-width").value),
+        };
+      }
+
+      // ---- orders ----
+      function renderOrders() {
+        const host = $("orders");
+        host.innerHTML = "";
+        state.orders.forEach((order, oi) => {
+          const card = document.createElement("div");
+          card.className = "order";
+          card.draggable = true;
+          card.dataset.i = String(oi);
+
+          const rows = order.pallets
+            .map((p, pi) => {
+              const rectSel = p.shape === "rect" ? " selected" : "";
+              const roundSel = p.shape === "round" ? " selected" : "";
+              const lenDis = p.shape === "round" ? " disabled" : "";
+              return (
+                '<tr data-p="' + pi + '">' +
+                '<td><input type="number" min="0" step="any" class="pw" value="' + toU(p.width) + '"></td>' +
+                '<td><input type="number" min="0" step="any" class="pl" value="' + toU(p.length) + '"' + lenDis + '></td>' +
+                '<td><select class="ps"><option value="rect"' + rectSel + '>Rect</option><option value="round"' + roundSel + '>Round</option></select></td>' +
+                '<td class="pallet-btns"><button class="icon dup" title="Duplicate">&#8865;</button><button class="icon del" title="Delete">&#10005;</button></td>' +
+                "</tr>"
+              );
+            })
+            .join("");
+
+          card.innerHTML =
+            '<div class="order-head">' +
+            '<span class="handle" title="Drag to reorder">⠿</span>' +
+            '<span class="dot" style="background:' + esc(order.color) + '"></span>' +
+            '<input class="city" placeholder="City / drop" value="' + esc(order.city) + '">' +
+            '<span class="seq">#' + (oi + 1) + "</span>" +
+            '<button class="icon order-del" title="Remove order">✕</button>' +
+            "</div>" +
+            "<table><thead><tr><th>W (" + esc(unit.label) + ")</th><th>L (" + esc(unit.label) + ")</th><th>Shape</th><th></th></tr></thead><tbody>" +
+            rows +
+            "</tbody></table>" +
+            '<button class="ghost sm pallet-add" style="margin-top:6px">+ Pallet</button>';
+
+          host.appendChild(card);
+        });
+        bindOrderEvents();
+      }
+
+      function bindOrderEvents() {
+        $("orders").querySelectorAll(".order").forEach((card) => {
+          const oi = Number(card.dataset.i);
+          const order = state.orders[oi];
+
+          card.querySelector(".city").addEventListener("input", (e) => {
+            order.city = e.target.value;
+            persist();
+          });
+          card.querySelector(".order-del").addEventListener("click", () => {
+            state.orders.splice(oi, 1);
+            renderOrders();
+            persist();
+          });
+          card.querySelector(".pallet-add").addEventListener("click", () => {
+            // Standard EUR pallet footprint, stored in mm like every dimension.
+            order.pallets.push({ id: rid("p"), width: 1200, length: 800, shape: "rect" });
+            renderOrders();
+            persist();
+          });
+
+          card.querySelectorAll("tbody tr").forEach((tr) => {
+            const pi = Number(tr.dataset.p);
+            const pallet = order.pallets[pi];
+            tr.querySelector(".pw").addEventListener("input", (e) => { pallet.width = fromU(e.target.value); persist(); });
+            tr.querySelector(".pl").addEventListener("input", (e) => { pallet.length = fromU(e.target.value); persist(); });
+            tr.querySelector(".ps").addEventListener("change", (e) => {
+              pallet.shape = e.target.value === "round" ? "round" : "rect";
+              renderOrders();
+              persist();
             });
-            td.appendChild(inp); return td;
-          };
-          tr.appendChild(cell("label", "text"));
-          tr.appendChild(cell("length", "number", 0));
-          tr.appendChild(cell("width", "number", 0));
-          tr.appendChild(cell("weightKg", "number", 0));
-          tr.appendChild(cell("qty", "number", 0));
-          tr.appendChild(cell("stop", "number", 1));
-          tr.appendChild(cell("rotatable", "checkbox"));
-          const del = document.createElement("td");
-          const b = document.createElement("button");
-          b.className = "del"; b.textContent = "\\u2715"; b.title = "Remove";
-          b.addEventListener("click", () => { items = items.filter((x) => x !== it); renderRows(); renderTotals(); });
-          del.appendChild(b); tr.appendChild(del);
-          tb.appendChild(tr);
+            tr.querySelector(".dup").addEventListener("click", () => {
+              order.pallets.splice(pi + 1, 0, { ...pallet, id: rid("p") });
+              renderOrders();
+              persist();
+            });
+            tr.querySelector(".del").addEventListener("click", () => {
+              order.pallets.splice(pi, 1);
+              renderOrders();
+              persist();
+            });
+          });
+
+          card.addEventListener("dragstart", (e) => {
+            if (e.target.closest("input,select,button")) { e.preventDefault(); return; }
+            dragFrom = oi;
+            e.dataTransfer.effectAllowed = "move";
+          });
+          card.addEventListener("dragover", (e) => { e.preventDefault(); card.classList.add("drag-over"); });
+          card.addEventListener("dragleave", () => card.classList.remove("drag-over"));
+          card.addEventListener("drop", (e) => {
+            e.preventDefault();
+            card.classList.remove("drag-over");
+            if (dragFrom < 0 || dragFrom === oi) return;
+            const [moved] = state.orders.splice(dragFrom, 1);
+            state.orders.splice(oi, 0, moved);
+            dragFrom = -1;
+            renderOrders();
+            persist();
+          });
         });
       }
 
-      function renderTotals() {
-        const pallets = items.reduce((n, it) => n + Math.max(0, Math.floor(it.qty)), 0);
-        const kg = items.reduce((n, it) => n + it.weightKg * Math.max(0, Math.floor(it.qty)), 0);
-        document.getElementById("totals").textContent = pallets + " pallets, " + Math.round(kg) + " kg";
-      }
-
-      document.getElementById("add").addEventListener("click", () => {
-        const lastStop = items.length ? Math.max(...items.map((i) => i.stop)) : 1;
-        items.push({ id: "i" + seq++, label: "Pallet", length: 1200, width: 800, weightKg: 400, qty: 1, stop: lastStop, rotatable: true });
-        renderRows(); renderTotals();
-      });
-
-      document.getElementById("nest").addEventListener("click", () => {
-        const w = num("t-weight");
-        post({
-          type: "nest",
-          trailer: { name: document.getElementById("t-name").value || "Trailer", length: num("t-length"), width: num("t-width"), maxWeightKg: w > 0 ? w : undefined },
-          items: items.map((it) => ({
-            id: it.id, label: it.label,
-            length: Math.max(0, it.length), width: Math.max(0, it.width),
-            weightKg: Math.max(0, it.weightKg), qty: Math.max(0, Math.floor(it.qty)),
-            stop: Math.max(1, Math.floor(it.stop)), rotatable: !!it.rotatable,
-          })),
+      $("order-add").addEventListener("click", () => {
+        state.orders.push({
+          id: rid("o"),
+          city: "",
+          color: palette[state.orders.length % palette.length],
+          pallets: [{ id: rid("p"), width: 1200, length: 800, shape: "rect" }],
         });
-        document.getElementById("results").innerHTML = '<div class="muted">Nesting…</div>';
+        renderOrders();
+        persist();
       });
 
-      document.getElementById("clear").addEventListener("click", () => {
+      $("nest").addEventListener("click", () => {
+        post({ type: "nest", trailer: readTrailer(), orders: state.orders });
+        $("results").innerHTML = '<div class="muted">Nesting…</div>';
+      });
+      $("clear").addEventListener("click", () => {
         post({ type: "clear" });
-        document.getElementById("results").innerHTML = "";
+        $("results").innerHTML = "";
       });
+
+      // ---- results ----
+      function renderResult(m) {
+        const box = $("results");
+        if (m.type === "cleared") { box.innerHTML = '<div class="muted">Layout cleared.</div>'; return; }
+        if (m.type === "error") { box.innerHTML = '<div class="f error">' + esc(m.message) + "</div>"; return; }
+        const r = m.result;
+        let html =
+          "<h4>Result</h4><div class='muted'>" + r.placed.length + " placed, " + r.unplaced.length +
+          " unplaced &middot; " + Math.round(toU(r.usedLength)) + " / " + Math.round(toU(r.trailer.length)) + " " + esc(unit.label) + " used</div>";
+        html += "<div class='findings'>" + m.findings.map((f) => "<div class='f " + f.level + "'>" + esc(f.message) + "</div>").join("") + "</div>";
+
+        const byOrder = new Map();
+        r.placed.forEach((p) => {
+          const e = byOrder.get(p.orderId) || { city: p.city, color: p.color, index: p.orderIndex, n: 0 };
+          e.n += 1;
+          byOrder.set(p.orderId, e);
+        });
+        const seq = [...byOrder.values()].sort((a, b) => a.index - b.index);
+        if (seq.length) html += "<h4>Unload sequence</h4>";
+        seq.forEach((o) => {
+          html += "<div class='stop' style='border-left-color:" + esc(o.color) + "'>#" + (o.index + 1) + " " +
+            esc(o.city || "—") + " · " + o.n + " pallet" + (o.n === 1 ? "" : "s") + "</div>";
+        });
+        box.innerHTML = html;
+      }
 
       window.addEventListener("message", (e) => {
         const m = e.data && e.data.pluginMessage;
         if (!m) return;
-        const box = document.getElementById("results");
-        if (m.type === "cleared") { box.innerHTML = '<div class="muted">Layout cleared.</div>'; return; }
-        if (m.type === "error") { box.innerHTML = '<div class="f error">' + esc(m.message) + '</div>'; return; }
-        if (m.type !== "result") return;
-        const r = m.result;
-        let html = "<h4>Result</h4><div class='muted'>" + r.placed.length + " placed, " + r.unplaced.length +
-          " unplaced &middot; " + Math.round(r.usedLength) + " / " + r.trailer.length + " mm used</div>";
-        html += "<div class='findings'>" + m.findings.map((f) =>
-          "<div class='f " + f.level + "'>" + esc(f.message) + "</div>").join("") + "</div>";
-        const byStop = {};
-        r.placed.forEach((p) => { (byStop[p.stop] = byStop[p.stop] || []).push(p); });
-        const stops = Object.keys(byStop).map(Number).sort((a, b) => a - b);
-        if (stops.length) html += "<h4 style='margin-top:10px'>Unload order (load in reverse)</h4>";
-        stops.forEach((s) => {
-          const ps = byStop[s];
-          const kg = ps.reduce((n, p) => n + p.weightKg, 0);
-          const counts = {};
-          ps.forEach((p) => { counts[p.label] = (counts[p.label] || 0) + 1; });
-          const parts = Object.keys(counts).map((l) => counts[l] + "\\u00d7 " + esc(l)).join(", ");
-          html += "<div class='stop'><b>Stop " + s + "</b> &middot; " + ps.length + " items, " + Math.round(kg) + " kg<br><span class='muted'>" + parts + "</span></div>";
-        });
-        box.innerHTML = html;
+        if (m.type === "init") {
+          state = m.state;
+          unit = m.unit || unit;
+          palette = m.palette && m.palette.length ? m.palette : palette;
+          renderTrailer();
+          renderOrders();
+          return;
+        }
+        if (m.type === "unit") {
+          unit = m.unit;
+          renderTrailer();
+          renderOrders();
+          return;
+        }
+        renderResult(m);
       });
 
-      function esc(s) { return String(s).replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c])); }
-
-      renderRows(); renderTotals();
+      post({ type: "ready" });
     </script>
   </body>
 </html>`;

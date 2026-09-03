@@ -10,6 +10,14 @@ export interface LineEntity {
   name?: string;
   /** Layer this entity belongs to; absent means the default layer "0". */
   layer?: string;
+  /** Stroke colour (any CSS colour). Absent = the theme's default entity colour. */
+  color?: string;
+  /**
+   * Hatch-fill colour for closed shapes (a `closed` polyline or a circle);
+   * ignored for open shapes. Absent = no fill. Set by the Fill/Hatch tool and
+   * by plugins (e.g. the load planner colours pallets by order).
+   */
+  fill?: string;
   a: Point;
   b: Point;
 }
@@ -21,6 +29,14 @@ export interface CircleEntity {
   name?: string;
   /** Layer this entity belongs to; absent means the default layer "0". */
   layer?: string;
+  /** Stroke colour (any CSS colour). Absent = the theme's default entity colour. */
+  color?: string;
+  /**
+   * Hatch-fill colour for closed shapes (a `closed` polyline or a circle);
+   * ignored for open shapes. Absent = no fill. Set by the Fill/Hatch tool and
+   * by plugins (e.g. the load planner colours pallets by order).
+   */
+  fill?: string;
   center: Point;
   radius: number;
 }
@@ -32,6 +48,14 @@ export interface ArcEntity {
   name?: string;
   /** Layer this entity belongs to; absent means the default layer "0". */
   layer?: string;
+  /** Stroke colour (any CSS colour). Absent = the theme's default entity colour. */
+  color?: string;
+  /**
+   * Hatch-fill colour for closed shapes (a `closed` polyline or a circle);
+   * ignored for open shapes. Absent = no fill. Set by the Fill/Hatch tool and
+   * by plugins (e.g. the load planner colours pallets by order).
+   */
+  fill?: string;
   center: Point;
   radius: number;
   /** Radians. The arc runs from startAngle to endAngle; both map to real points via {@link arcPointAt}. */
@@ -48,6 +72,14 @@ export interface PointEntity {
   name?: string;
   /** Layer this entity belongs to; absent means the default layer "0". */
   layer?: string;
+  /** Stroke colour (any CSS colour). Absent = the theme's default entity colour. */
+  color?: string;
+  /**
+   * Hatch-fill colour for closed shapes (a `closed` polyline or a circle);
+   * ignored for open shapes. Absent = no fill. Set by the Fill/Hatch tool and
+   * by plugins (e.g. the load planner colours pallets by order).
+   */
+  fill?: string;
   p: Point;
 }
 
@@ -58,6 +90,14 @@ export interface PolylineEntity {
   name?: string;
   /** Layer this entity belongs to; absent means the default layer "0". */
   layer?: string;
+  /** Stroke colour (any CSS colour). Absent = the theme's default entity colour. */
+  color?: string;
+  /**
+   * Hatch-fill colour for closed shapes (a `closed` polyline or a circle);
+   * ignored for open shapes. Absent = no fill. Set by the Fill/Hatch tool and
+   * by plugins (e.g. the load planner colours pallets by order).
+   */
+  fill?: string;
   /** Ordered vertices. Does not repeat the first point when `closed`. */
   points: Point[];
   /**

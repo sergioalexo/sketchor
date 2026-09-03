@@ -50,6 +50,8 @@ export type {
   NetworkApi,
   FilesystemApi,
   UiApi,
+  AppApi,
+  DisplayUnitInfo,
   DocumentReadModel,
   PluginManifest,
   PluginContributions,
@@ -86,7 +88,7 @@ export type {
   CircularPattern,
 } from "@sketchor/core";
 
-export { HOST_API_VERSION, PERMISSIONS } from "@sketchor/core";
+export { HOST_API_VERSION, PERMISSIONS, PALETTE, colorAt } from "@sketchor/core";
 
 import type { PluginHostApi } from "@sketchor/core";
 

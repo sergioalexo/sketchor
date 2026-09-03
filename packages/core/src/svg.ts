@@ -92,6 +92,17 @@ export function entitiesToSvgDocument(entities: Entity[], opts: SvgExportOptions
     byLayer.get(l)!.push(e);
   }
 
+  // Per-entity overrides of the document-level stroke/fill: `color` becomes a
+  // stroke, and `fill` (closed shapes only) a low-opacity fill so the geometry
+  // still reads through it.
+  const paint = (e: Entity): string => {
+    const closed = e.type === "circle" || (e.type === "polyline" && e.closed);
+    let out = "";
+    if (e.color) out += ` stroke="${escapeXml(e.color)}"`;
+    if (closed && e.fill) out += ` fill="${escapeXml(e.fill)}" fill-opacity="0.3"`;
+    return out;
+  };
+
   const groups: string[] = [];
   for (const [layer, ents] of byLayer) {
     const body: string[] = [];
@@ -99,19 +110,19 @@ export function entitiesToSvgDocument(entities: Entity[], opts: SvgExportOptions
       if (e.type === "line") {
         const a = toSvg(e.a);
         const c = toSvg(e.b);
-        body.push(`<line x1="${fmt(a.x)}" y1="${fmt(a.y)}" x2="${fmt(c.x)}" y2="${fmt(c.y)}"/>`);
+        body.push(`<line x1="${fmt(a.x)}" y1="${fmt(a.y)}" x2="${fmt(c.x)}" y2="${fmt(c.y)}"${paint(e)}/>`);
       } else if (e.type === "circle") {
         const center = toSvg(e.center);
-        body.push(`<circle cx="${fmt(center.x)}" cy="${fmt(center.y)}" r="${fmt(e.radius)}"/>`);
+        body.push(`<circle cx="${fmt(center.x)}" cy="${fmt(center.y)}" r="${fmt(e.radius)}"${paint(e)}/>`);
       } else if (e.type === "point") {
         // SVG has no native point primitive — a small filled dot stands in,
         // sized off stroke width (not to world scale) like a CAD PDMODE marker.
         const p = toSvg(e.p);
         body.push(`<circle cx="${fmt(p.x)}" cy="${fmt(p.y)}" r="${fmt(strokeWidth * 1.5)}" fill="${stroke}" stroke="none"/>`);
       } else if (e.type === "arc") {
-        body.push(`<path d="${arcPathD(e, toSvg)}"/>`);
+        body.push(`<path d="${arcPathD(e, toSvg)}"${paint(e)}/>`);
       } else {
-        body.push(`<path d="${polylinePathD(e, toSvg)}"/>`);
+        body.push(`<path d="${polylinePathD(e, toSvg)}"${paint(e)}/>`);
       }
     }
     groups.push(`<g data-layer="${escapeXml(layer)}">${body.join("")}</g>`);

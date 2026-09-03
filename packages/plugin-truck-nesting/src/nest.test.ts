@@ -1,58 +1,105 @@
 import { describe, expect, it } from "vitest";
-import { nestTruck } from "./nest";
-import type { PalletItem, TrailerProfile } from "./types";
+import { nestByOrders } from "./nest";
+import type { Order, Pallet, TrailerProfile } from "./types";
 
-const trailer: TrailerProfile = { name: "Test 13.6m", length: 13600, width: 2480, maxWeightKg: 24000 };
+const trailer: TrailerProfile = { name: "Test 13.6m", length: 13600, width: 2480 };
 
-function item(over: Partial<PalletItem> & Pick<PalletItem, "id" | "stop">): PalletItem {
-  return { label: "Pallet", length: 1200, width: 800, weightKg: 400, qty: 1, rotatable: true, ...over };
+let seq = 0;
+function pallet(over: Partial<Pallet> = {}): Pallet {
+  seq += 1;
+  return { id: `p${seq}`, width: 1200, length: 800, shape: "rect", ...over };
+}
+function order(city: string, pallets: Pallet[], color = "#000"): Order {
+  seq += 1;
+  return { id: `o${seq}`, city, color, pallets };
 }
 
-describe("nestTruck", () => {
-  it("flattens qty into one placed instance each", () => {
-    const r = nestTruck(trailer, [item({ id: "a", stop: 1, qty: 5 })]);
-    expect(r.placed).toHaveLength(5);
+describe("nestByOrders", () => {
+  it("places one entry per pallet row", () => {
+    const r = nestByOrders(trailer, [order("A", [pallet(), pallet(), pallet()])]);
+    expect(r.placed).toHaveLength(3);
     expect(r.unplaced).toHaveLength(0);
   });
 
-  it("bands later stops deeper so nothing blocks the door (LIFO holds by construction)", () => {
-    const r = nestTruck(trailer, [
-      item({ id: "a", stop: 1, qty: 4 }),
-      item({ id: "b", stop: 2, qty: 4 }),
-      item({ id: "c", stop: 3, qty: 4 }),
+  it("bands orders in unload sequence — first order at the door, later orders deeper", () => {
+    const r = nestByOrders(trailer, [
+      order("First", [pallet(), pallet()]),
+      order("Second", [pallet(), pallet()]),
+      order("Third", [pallet(), pallet()]),
     ]);
-    const doorEdge = (stop: number) => Math.min(...r.placed.filter((p) => p.stop === stop).map((p) => p.x));
-    // Each later stop starts no closer to the door (x=0) than the previous one.
+    const doorEdge = (idx: number) => Math.min(...r.placed.filter((p) => p.orderIndex === idx).map((p) => p.x));
+    expect(doorEdge(0)).toBeCloseTo(0);
+    expect(doorEdge(0)).toBeLessThanOrEqual(doorEdge(1));
     expect(doorEdge(1)).toBeLessThanOrEqual(doorEdge(2));
-    expect(doorEdge(2)).toBeLessThanOrEqual(doorEdge(3));
-    // Stop 1 is flush against the door.
-    expect(doorEdge(1)).toBeCloseTo(0);
   });
 
-  it("flushes the load against the door, leaving any slack at the nose", () => {
-    const r = nestTruck(trailer, [item({ id: "a", stop: 1, qty: 2 })]);
-    expect(Math.min(...r.placed.map((p) => p.x))).toBeCloseTo(0);
-    expect(r.usedLength).toBeLessThan(trailer.length);
+  it("reordering the orders moves the bands", () => {
+    const a = order("A", [pallet(), pallet(), pallet(), pallet()]);
+    const b = order("B", [pallet()]);
+    const first = nestByOrders(trailer, [a, b]);
+    const swapped = nestByOrders(trailer, [b, a]);
+    const bDoor = (r: typeof first) => Math.min(...r.placed.filter((p) => p.city === "B").map((p) => p.x));
+    // B is deep when it's second, at the door when it's first.
+    expect(bDoor(first)).toBeGreaterThan(bDoor(swapped));
+    expect(bDoor(swapped)).toBeCloseTo(0);
   });
 
-  it("reports items wider than the trailer as unplaced", () => {
-    const r = nestTruck(trailer, [item({ id: "big", stop: 1, width: 3000, length: 3000, rotatable: false })]);
-    expect(r.placed).toHaveLength(0);
-    expect(r.unplaced[0]).toMatchObject({ itemId: "big", count: 1 });
+  it("places a round pallet and keeps it within the trailer width", () => {
+    const r = nestByOrders(trailer, [order("A", [pallet({ shape: "round", width: 1000, length: 1000 })])]);
+    expect(r.placed).toHaveLength(1);
+    expect(r.placed[0].shape).toBe("round");
+    expect(r.placed[0].y + r.placed[0].width).toBeLessThanOrEqual(trailer.width + 1e-6);
   });
 
-  it("rotates a rotatable item to fit across the width", () => {
+  it("turns a rectangle 90° to fit a narrow trailer", () => {
     const narrow: TrailerProfile = { name: "narrow", length: 5000, width: 1300 };
-    // As-drawn (width 1400) is too wide; only the turned orientation (width 1000) fits.
-    const r = nestTruck(narrow, [item({ id: "r", stop: 1, length: 1000, width: 1400, rotatable: true })]);
+    const r = nestByOrders(narrow, [order("A", [pallet({ width: 1400, length: 1000 })])]);
     expect(r.placed).toHaveLength(1);
     expect(r.placed[0].rotated).toBe(true);
     expect(r.placed[0].width).toBeLessThanOrEqual(narrow.width);
   });
 
-  it("keeps negative coordinates when the load overflows the trailer", () => {
+  it("lets a later order fill the width an earlier one left free at the same depth", () => {
+    // A: 3 pallets across a 2500-wide trailer; the 3rd opens a second row but
+    // leaves the far half of that row empty. B's one pallet should drop into it,
+    // sharing the length-slice rather than starting a fresh band behind A.
+    const t: TrailerProfile = { name: "wide", length: 13600, width: 2500 };
+    const a = order("A", [pallet(), pallet(), pallet()]);
+    const b = order("B", [pallet()]);
+    const r = nestByOrders(t, [a, b]);
+    expect(r.unplaced).toHaveLength(0);
+    const aFar = Math.max(...r.placed.filter((p) => p.city === "A").map((p) => p.x + p.length));
+    const bNear = Math.min(...r.placed.filter((p) => p.city === "B").map((p) => p.x));
+    // B starts before A's deepest edge — i.e. it's tucked alongside, not behind.
+    expect(bNear).toBeLessThan(aFar);
+  });
+
+  it("never parks a later order in front of an earlier one over the same width", () => {
+    const t: TrailerProfile = { name: "T", length: 13600, width: 2500 };
+    const r = nestByOrders(t, [
+      order("A", [pallet(), pallet(), pallet()]),
+      order("B", [pallet(), pallet()]),
+      order("C", [pallet()]),
+    ]);
+    for (const a of r.placed) {
+      for (const b of r.placed) {
+        const overlapY = a.y < b.y + b.width - 1e-6 && b.y < a.y + a.width - 1e-6;
+        if (b.orderIndex > a.orderIndex && overlapY) {
+          expect(b.x).toBeGreaterThanOrEqual(a.x - 1e-6);
+        }
+      }
+    }
+  });
+
+  it("reports pallets too wide for the trailer as unplaced", () => {
+    const r = nestByOrders(trailer, [order("A", [pallet({ width: 3000, length: 3000 })])]);
+    expect(r.placed).toHaveLength(0);
+    expect(r.unplaced[0]).toMatchObject({ city: "A", count: 1 });
+  });
+
+  it("keeps the overflow visible when the load is longer than the trailer", () => {
     const tiny: TrailerProfile = { name: "tiny", length: 1000, width: 2480 };
-    const r = nestTruck(tiny, [item({ id: "a", stop: 1, qty: 6 })]);
+    const r = nestByOrders(tiny, [order("A", [pallet(), pallet(), pallet(), pallet(), pallet(), pallet()])]);
     expect(r.usedLength).toBeGreaterThan(tiny.length);
   });
 });

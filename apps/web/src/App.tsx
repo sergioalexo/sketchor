@@ -11,10 +11,11 @@ import { DuplicatesPanel } from "./heal/DuplicatesPanel";
 import { ImportReportBanner } from "./dxf/ImportReportBanner";
 import { LayerPanel } from "./layers/LayerPanel";
 import { PatternPanel } from "./pattern/PatternPanel";
+import { FillPanel } from "./fill/FillPanel";
 import { PluginCommandPalette } from "./plugins/PluginCommandPalette";
 import { PluginPanels } from "./plugins/PluginPanels";
 import { PluginsPanel } from "./plugins/PluginsPanel";
-import { listExporters, onRegistriesChange, runExporter } from "./plugins/host/registries";
+import { listActions, listExporters, onRegistriesChange, runCommand, runExporter, runGenerator } from "./plugins/host/registries";
 import { StraightenPanel } from "./viewport/StraightenPanel";
 import { TabStrip } from "./tabs/TabStrip";
 import { UpdateBanner, UpdateButton } from "./update/UpdatePanel";
@@ -125,6 +126,24 @@ const TOOLS: { id: ToolId; label: string; keyHint: string; icon: JSX.Element }[]
       </svg>
     ),
   },
+  {
+    id: "fill",
+    label: "Fill",
+    keyHint: "H",
+    icon: (
+      <svg viewBox="0 0 24 24" width="20" height="20">
+        <path
+          d="M5 12L12 5l6 6-7 7z"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          fill="none"
+          strokeLinejoin="round"
+        />
+        <path d="M5 12h9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        <path d="M19 15c0 1.7 1.5 3 1.5 3s1.5-1.3 1.5-3-1.5-2-1.5-2-1.5.3-1.5 2z" fill="currentColor" />
+      </svg>
+    ),
+  },
 ];
 
 /**
@@ -180,6 +199,7 @@ export function App() {
   const [showPlugins, setShowPlugins] = useState(false);
   const [showSaveMenu, setShowSaveMenu] = useState(false);
   const [showUpdateMenu, setShowUpdateMenu] = useState(false);
+  const [showPluginMenu, setShowPluginMenu] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
   // Bumped when plugins load/unload, so the export menu re-reads its list.
   const [pluginVersion, setPluginVersion] = useState(0);
@@ -207,17 +227,18 @@ export function App() {
   // Refresh plugin-derived menus (export list) as plugins load/unload.
   useEffect(() => onRegistriesChange(() => setPluginVersion((v) => v + 1)), []);
 
-  // Close the Save-format and update popovers on an outside click.
+  // Close the Save-format, update and plugin popovers on an outside click.
   useEffect(() => {
-    if (!showSaveMenu && !showUpdateMenu) return;
+    if (!showSaveMenu && !showUpdateMenu && !showPluginMenu) return;
     const onClick = (e: MouseEvent) => {
       if ((e.target as HTMLElement).closest(".action-menu-wrap")) return;
       setShowSaveMenu(false);
       setShowUpdateMenu(false);
+      setShowPluginMenu(false);
     };
     document.addEventListener("click", onClick);
     return () => document.removeEventListener("click", onClick);
-  }, [showSaveMenu, showUpdateMenu]);
+  }, [showSaveMenu, showUpdateMenu, showPluginMenu]);
 
   // Which real file a plain Save would overwrite. Subscribing to
   // `sessionsVersion` is what makes it refresh: the binding itself lives in
@@ -517,23 +538,64 @@ export function App() {
               <circle cx="18" cy="18" r="2.2" fill="currentColor" />
             </svg>
           </button>
-          <button
-            className={`action ${showPlugins ? "toggled" : ""}`}
-            title="Toggle plugins panel (install and manage plugins)"
-            data-testid="toggle-plugins"
-            onClick={() => setShowPlugins((v) => !v)}
-          >
-            <svg viewBox="0 0 24 24" width="18" height="18">
-              <path
-                d="M10 3v4M14 3v4M6 7h12v5a6 6 0 01-12 0zM12 18v3"
-                stroke="currentColor"
-                strokeWidth="2"
-                fill="none"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </button>
+          <div className="action-menu-wrap">
+            <button
+              className={`action ${showPluginMenu ? "toggled" : ""}`}
+              title="Plugins — run a plugin command or manage installed plugins"
+              data-testid="plugin-menu"
+              onClick={() => {
+                setShowSaveMenu(false);
+                setShowUpdateMenu(false);
+                setShowPluginMenu((v) => !v);
+              }}
+            >
+              <svg viewBox="0 0 24 24" width="18" height="18">
+                <path
+                  d="M10 3v4M14 3v4M6 7h12v5a6 6 0 01-12 0zM12 18v3"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  fill="none"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+            {showPluginMenu && (
+              <div className="action-menu" data-testid="plugin-menu-list" data-plugin-rev={pluginVersion}>
+                <div className="action-menu-caption">Plugin commands</div>
+                {listActions().length === 0 ? (
+                  <div className="action-menu-caption" style={{ opacity: 0.6 }}>
+                    No plugin commands — install a plugin below.
+                  </div>
+                ) : (
+                  listActions().map((a) => (
+                    <button
+                      key={a.id}
+                      data-testid={`plugin-cmd-${a.id}`}
+                      onClick={() => {
+                        setShowPluginMenu(false);
+                        if (a.kind === "command") void runCommand(a.id);
+                        else void runGenerator(a.id);
+                      }}
+                    >
+                      {a.title}
+                      {a.kind === "generator" && <span style={{ opacity: 0.5 }}> (selection)</span>}
+                    </button>
+                  ))
+                )}
+                <div className="action-menu-sep" />
+                <button
+                  data-testid="plugin-menu-manage"
+                  onClick={() => {
+                    setShowPluginMenu(false);
+                    setShowPlugins(true);
+                  }}
+                >
+                  Manage plugins…
+                </button>
+              </div>
+            )}
+          </div>
           <button
             className={`action ${showFiles ? "toggled" : ""}`}
             title="Toggle file browser"
@@ -617,6 +679,7 @@ export function App() {
           <main className="stage">
             <Viewport />
             {tool === "straighten" && <StraightenPanel />}
+            {tool === "fill" && <FillPanel />}
           </main>
         </div>
         {showDiag && <DiagnosticsPanel onClose={() => setShowDiag(false)} />}

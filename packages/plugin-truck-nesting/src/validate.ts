@@ -11,78 +11,51 @@ function rectsOverlap(a: PlacedItem, b: PlacedItem): boolean {
 }
 
 /**
- * The validation pass: overlap, overhang (doesn't fit),
- * blocked-access, and a coarse weight-distribution check. Overlap and
- * blocked-access should never fire against `nestTruck`'s own output — the
- * zone/shelf construction rules them out by design — so they're kept here
- * as the self-check that starts paying off the moment anything (a future
- * drag-to-renest) can move a placed item independently of its band.
+ * Sanity-checks a nest result: pallets that didn't fit, a load longer than the
+ * trailer, pallets overlapping, and the load-order rule — no later drop parked
+ * between an earlier drop and the door. Overlap and blocked-access shouldn't
+ * fire against `nestByOrders`'s own output (the banding rules them out), so they
+ * pay off the moment anything can move a pallet independently of its band.
  */
 export function validateNest(result: NestResult): ValidationFinding[] {
   const { trailer, placed, unplaced } = result;
   const findings: ValidationFinding[] = [];
 
   for (const u of unplaced) {
-    findings.push({ level: "error", message: `${u.count}× "${u.label}" ${u.reason} — not placed.` });
+    findings.push({ level: "error", message: `${u.count} pallet${u.count === 1 ? "" : "s"} for ${u.city || "an order"} ${u.reason} — not placed.` });
   }
 
   if (result.usedLength > trailer.length + EPS) {
     const shortBy = Math.ceil(result.usedLength - trailer.length);
     findings.push({
       level: "error",
-      message: `Load doesn't fit: needs ${shortBy} mm more trailer length than "${trailer.name}" has (${trailer.length} mm).`,
+      message: `Load doesn't fit: needs ${shortBy} mm more length than "${trailer.name}" has (${trailer.length} mm).`,
     });
   }
 
   for (let i = 0; i < placed.length; i++) {
     for (let j = i + 1; j < placed.length; j++) {
       if (rectsOverlap(placed[i], placed[j])) {
-        findings.push({ level: "error", message: `"${placed[i].label}" and "${placed[j].label}" overlap.` });
+        findings.push({ level: "error", message: `Pallets for ${placed[i].city || "?"} and ${placed[j].city || "?"} overlap.` });
       }
     }
   }
 
   for (const a of placed) {
     for (const b of placed) {
-      if (b.stop <= a.stop) continue;
+      if (b.orderIndex <= a.orderIndex) continue;
       if (!overlapsY(a, b)) continue;
       if (b.x < a.x - EPS) {
         findings.push({
           level: "error",
-          message: `"${b.label}" (stop ${b.stop}) blocks "${a.label}" (stop ${a.stop}) from reaching the door.`,
+          message: `${b.city || `Drop ${b.orderIndex + 1}`} (unloaded after ${a.city || `drop ${a.orderIndex + 1}`}) blocks it from the door.`,
         });
       }
     }
   }
 
-  if (placed.length > 0) {
-    const midpoint = trailer.length / 2;
-    let front = 0;
-    let rear = 0;
-    for (const p of placed) {
-      const center = p.x + p.length / 2;
-      if (center < midpoint) front += p.weightKg;
-      else rear += p.weightKg;
-    }
-    const total = front + rear;
-    if (total > 0) {
-      const frontPct = (front / total) * 100;
-      const rearPct = (rear / total) * 100;
-      if (frontPct > 65 || rearPct > 65) {
-        findings.push({
-          level: "warn",
-          message: `Weight is lopsided: ${frontPct.toFixed(0)}% door-half / ${rearPct.toFixed(0)}% nose-half. This is a floor-position estimate, not an axle-load calculation.`,
-        });
-      }
-      if (trailer.maxWeightKg !== undefined && total > trailer.maxWeightKg + EPS) {
-        findings.push({
-          level: "error",
-          message: `Total load ${Math.round(total)} kg exceeds ${trailer.name}'s ${trailer.maxWeightKg} kg limit.`,
-        });
-      }
-    }
-  }
-
-  if (findings.length === 0) findings.push({ level: "info", message: "No issues found." });
-  return findings;
+  const seen = new Set<string>();
+  const unique = findings.filter((f) => (seen.has(f.message) ? false : (seen.add(f.message), true)));
+  if (unique.length === 0) unique.push({ level: "info", message: "No issues — the plan unloads cleanly." });
+  return unique;
 }

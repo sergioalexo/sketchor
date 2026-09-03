@@ -1,4 +1,4 @@
-import { add, polyline, type Command, type DocumentReadModel } from "@sketchor/plugin-sdk";
+import { add, circle, polyline, type Command, type DocumentReadModel } from "@sketchor/plugin-sdk";
 import type { NestResult, TrailerProfile } from "./types";
 
 /**
@@ -8,9 +8,8 @@ import type { NestResult, TrailerProfile } from "./types";
  * Everything this plugin draws goes on one dedicated layer, {@link LOAD_PLAN_LAYER}.
  * That layer *is* the persistence mechanism: `clearPreviousLayout` recovers the
  * prior layout from the document read-model alone (every entity on the layer,
- * plus the single-entity groups wrapping them), so nothing has to be remembered
- * between sessions and "Clear" works even after a reload. It also keeps the plan
- * one toggle away from being hidden without touching the real drawing.
+ * plus the per-order groups wrapping them), so nothing has to be remembered
+ * between sessions and "Clear" works even after a reload.
  */
 export const LOAD_PLAN_LAYER = "Load Plan";
 
@@ -20,31 +19,38 @@ function newGroupId(): string {
   return `tn-g-${Date.now().toString(36)}-${groupCounter.toString(36)}`;
 }
 
-/** A closed rectangle polyline, door-relative coordinates, on the load-plan layer. */
-function rect(x: number, y: number, length: number, width: number, name: string): Command {
-  return add(
-    polyline(
-      [
-        { x, y },
-        { x: x + length, y },
-        { x: x + length, y: y + width },
-        { x, y: y + width },
-      ],
-      true,
-      { name, layer: LOAD_PLAN_LAYER },
-    ),
+function rectEntity(x: number, y: number, length: number, width: number, color: string) {
+  return polyline(
+    [
+      { x, y },
+      { x: x + length, y },
+      { x: x + length, y: y + width },
+      { x, y: y + width },
+    ],
+    true,
+    { layer: LOAD_PLAN_LAYER, color, fill: color },
   );
 }
 
 function trailerOutline(trailer: TrailerProfile): Command {
-  return rect(0, 0, trailer.length, trailer.width, `${trailer.name} — outline`);
+  return add(
+    polyline(
+      [
+        { x: 0, y: 0 },
+        { x: trailer.length, y: 0 },
+        { x: trailer.length, y: trailer.width },
+        { x: 0, y: trailer.width },
+      ],
+      true,
+      { layer: LOAD_PLAN_LAYER, name: `${trailer.name} — outline` },
+    ),
+  );
 }
 
 /**
  * Commands that remove whatever the last Auto-nest run drew: every entity on the
  * {@link LOAD_PLAN_LAYER} layer, and any group all of whose members are those
- * entities (the per-item wrappers this plugin creates). Returns `[]` when the
- * layer is empty, so it's safe to prepend unconditionally.
+ * entities (the per-order wrappers). Returns `[]` when the layer is empty.
  */
 export function clearPreviousLayout(model: DocumentReadModel): Command[] {
   const planEntityIds = new Set(
@@ -63,32 +69,37 @@ export function clearPreviousLayout(model: DocumentReadModel): Command[] {
 }
 
 /**
- * Draws a nest result: a trailer outline plus one rectangle per placed item,
- * each wrapped in its own named group ("<label> — stop <n>") so it moves and
- * selects as a unit. Prepend {@link clearPreviousLayout} and apply the whole
- * thing as one batch.
+ * Draws a nest result: a trailer outline plus one hatched shape per placed
+ * pallet (a rectangle, or a circle for a round pallet), coloured by its order
+ * and wrapped — per order — in a group named after the city, so a whole drop
+ * moves and selects as a unit. Prepend {@link clearPreviousLayout}, apply as one
+ * batch.
  */
 export function buildNestLayout(result: NestResult): Command[] {
   const commands: Command[] = [trailerOutline(result.trailer)];
 
+  // Entity ids collected per order, in unload sequence, for the group wrappers.
+  const byOrder = new Map<string, { city: string; ids: string[] }>();
+
   for (const p of result.placed) {
-    const entity = polyline(
-      [
-        { x: p.x, y: p.y },
-        { x: p.x + p.length, y: p.y },
-        { x: p.x + p.length, y: p.y + p.width },
-        { x: p.x, y: p.y + p.width },
-      ],
-      true,
-      { name: `${p.label} (stop ${p.stop})`, layer: LOAD_PLAN_LAYER },
-    );
+    const entity =
+      p.shape === "round"
+        ? circle({ x: p.x + p.width / 2, y: p.y + p.width / 2 }, p.width / 2, {
+            layer: LOAD_PLAN_LAYER,
+            color: p.color,
+            fill: p.color,
+          })
+        : rectEntity(p.x, p.y, p.length, p.width, p.color);
     commands.push(add(entity));
-    commands.push({
-      type: "group-entities",
-      groupId: newGroupId(),
-      ids: [entity.id],
-      name: `${p.label} — stop ${p.stop}`,
-    });
+
+    const bucket = byOrder.get(p.orderId) ?? { city: p.city, ids: [] };
+    bucket.ids.push(entity.id);
+    byOrder.set(p.orderId, bucket);
+  }
+
+  for (const { city, ids } of byOrder.values()) {
+    if (ids.length === 0) continue;
+    commands.push({ type: "group-entities", groupId: newGroupId(), ids, name: city || "Order" });
   }
 
   return commands;
