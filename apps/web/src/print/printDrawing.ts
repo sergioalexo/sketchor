@@ -16,7 +16,8 @@ export function printDrawing(): void {
   const title = activeSaveTarget()?.name ?? "Sketchor drawing";
   const unit = useApp.getState().displayUnit;
 
-  const win = window.open("", "_blank", "noopener");
+  // No `noopener` — we need the handle to write the document into it.
+  const win = window.open("", "_blank", "width=900,height=700");
   if (!win) return;
   win.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title)}</title>
 <style>
