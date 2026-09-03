@@ -1,0 +1,17 @@
+[package]
+name = "dxf-quicklook-ffi"
+version = "0.1.0"
+edition = "2021"
+description = "C ABI over the shared DXF parser/projection, linked into the macOS Quick Look thumbnail extension"
+
+[lib]
+name = "dxf_quicklook_ffi"
+crate-type = ["staticlib"]
+
+[dependencies]
+dxf-parse = { path = "../../dxf-parse" }
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true

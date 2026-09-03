@@ -9,6 +9,9 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 windows-core = "0.58"
+# The DXF parser + fit-to-box projection, shared with the macOS Quick Look
+# extension so previews match across platforms. See native/dxf-parse.
+dxf-parse = { path = "../dxf-parse" }
 
 [dev-dependencies]
 image = { version = "0.25", default-features = false, features = ["png"] }

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Merged into the generated macOS app Info.plist by Tauri. Its one job is to
+  export a concrete Uniform Type Identifier for .dxf (macOS has no built-in
+  one), so Finder resolves .dxf files to `com.sketchor.dxf` — the exact UTI the
+  Quick Look thumbnail extension lists in QLSupportedContentTypes. Without an
+  exact match, Quick Look won't route .dxf thumbnails to the extension.
+-->
+<plist version="1.0">
+<dict>
+  <key>UTExportedTypeDeclarations</key>
+  <array>
+    <dict>
+      <key>UTTypeIdentifier</key>
+      <string>com.sketchor.dxf</string>
+      <key>UTTypeDescription</key>
+      <string>AutoCAD DXF drawing</string>
+      <key>UTTypeConformsTo</key>
+      <array>
+        <string>public.data</string>
+      </array>
+      <key>UTTypeTagSpecification</key>
+      <dict>
+        <key>public.filename-extension</key>
+        <array>
+          <string>dxf</string>
+        </array>
+      </dict>
+    </dict>
+  </array>
+</dict>
+</plist>

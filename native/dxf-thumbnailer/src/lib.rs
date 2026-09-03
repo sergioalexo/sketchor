@@ -10,7 +10,6 @@
 //! Register (admin): regsvr32 dxf_thumbnailer.dll
 //! Unregister:       regsvr32 /u dxf_thumbnailer.dll
 
-pub mod dxf;
 pub mod render;
 
 use std::ffi::c_void;
@@ -71,7 +70,7 @@ impl IThumbnailProvider_Impl for DxfThumb_Impl {
             .clone()
             .ok_or_else(|| windows::core::Error::from(E_UNEXPECTED))?;
         let text = std::fs::read_to_string(&path).map_err(|_| E_UNEXPECTED)?;
-        let shapes = dxf::parse(&text);
+        let shapes = dxf_parse::parse(&text);
         let hbmp = render::render_thumbnail(&shapes, cx.max(16))
             .map_err(|_| windows::core::Error::from(E_UNEXPECTED))?;
         unsafe {

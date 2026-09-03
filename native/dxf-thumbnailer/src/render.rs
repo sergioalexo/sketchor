@@ -2,7 +2,7 @@
 //! with a dark background and light strokes, returning an HBITMAP that
 //! Explorer takes ownership of.
 
-use crate::dxf::{bounds, Shape};
+use dxf_parse::{bounds, Shape};
 use windows::Win32::Foundation::{COLORREF, HANDLE, HWND, RECT};
 use windows::Win32::Graphics::Gdi::*;
 
