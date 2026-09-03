@@ -1,5 +1,5 @@
-import { useEffect, useRef } from "react";
-import type { BoxSelectMode, ClosedRegion, Entity, EntityId, Point } from "@sketchor/core";
+import { useEffect, useRef, useState } from "react";
+import type { BoxSelectMode, ClosedRegion, Command, Entity, EntityId, Point, TextEntity } from "@sketchor/core";
 import {
   arcSweep,
   boundsOf,
@@ -18,6 +18,9 @@ import {
   newEntityId,
   nextEntityName,
   polylineLength,
+  textCorners,
+  linearDimension,
+  newGroupId,
   wholeGroupSelected,
 } from "@sketchor/core";
 import {
@@ -36,6 +39,7 @@ import {
   useApp,
 } from "../state/store";
 import { openDrawing, saveCurrent } from "../io/drawingFile";
+import { printDrawing } from "../print/printDrawing";
 import { formatArea, formatLength } from "../units";
 import { render } from "./renderer";
 import { findSnap, type Snap } from "./snapping";
@@ -51,7 +55,8 @@ type DrawInteraction =
   | { kind: "draw-line"; start: Point }
   | { kind: "draw-polyline"; points: Point[] }
   | { kind: "draw-circle"; center: Point }
-  | { kind: "measure"; start: Point };
+  | { kind: "measure"; start: Point }
+  | { kind: "dim"; start: Point };
 
 type Interaction =
   | { kind: "idle" }
@@ -69,7 +74,7 @@ type Interaction =
   | { kind: "rotate-group"; ids: EntityId[]; pivot: Point; startAngle: number; rotation: number }
   | { kind: "box-select"; startScreen: Point; startWorld: Point; currentWorld: Point; additive: boolean };
 
-const DRAW_KINDS = ["draw-line", "draw-polyline", "draw-circle", "measure"] as const;
+const DRAW_KINDS = ["draw-line", "draw-polyline", "draw-circle", "measure", "dim"] as const;
 
 /** Narrows to the states worth preserving across a pan (see DrawInteraction). */
 function resumable(i: Interaction): DrawInteraction | { kind: "idle" } {
@@ -126,7 +131,13 @@ function hitTest(view: View, world: Point): EntityId | null {
           ? Math.abs(dist(world, e.center) - e.radius)
           : e.type === "point"
             ? dist(world, e.p)
-            : e.type === "arc"
+            : e.type === "text"
+              ? // Anywhere inside the label's box counts.
+                textCorners(e).some((p, i, c) => distToSegment(world, p, c[(i + 1) % c.length]) < tol) ||
+                pointInPolygon(world, textCorners(e))
+                ? 0
+                : Infinity
+              : e.type === "arc"
               ? distToArc(world, e.center, e.radius, e.startAngle, e.endAngle, e.ccw)
               : // Polyline: whichever of its segments the cursor is nearest to.
                 Math.min(
@@ -194,6 +205,16 @@ export function Viewport() {
   const selection = useApp((s) => s.selection);
   const revision = useApp((s) => s.revision);
   const layers = useApp((s) => s.layers);
+
+  // The floating text editor: open while placing or editing a text entity.
+  const [textEdit, setTextEdit] = useState<{
+    screen: Point;
+    world: Point;
+    value: string;
+    id: EntityId | null;
+    rotation: number;
+    height: number;
+  } | null>(null);
 
   const redraw = () => {
     const canvas = canvasRef.current;
@@ -443,6 +464,9 @@ export function Viewport() {
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "o") {
         e.preventDefault();
         void openDrawing();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "p") {
+        e.preventDefault();
+        printDrawing();
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "w") {
         // Desktop only in practice: browsers reserve Ctrl+W to close their own
         // tab and won't let a page preventDefault it.
@@ -495,6 +519,10 @@ export function Viewport() {
         app.setTool("straighten");
       } else if (e.key.toLowerCase() === "h") {
         app.setTool("fill");
+      } else if (e.key.toLowerCase() === "x") {
+        app.setTool("text");
+      } else if (e.key.toLowerCase() === "d" && !e.ctrlKey && !e.metaKey) {
+        app.setTool("dim");
       } else if (e.key === "Enter" && app.tool === "straighten") {
         applyStraighten();
       } else if (e.key === "Enter" && app.tool === "measure" && app.measurement) {
@@ -796,8 +824,98 @@ export function Viewport() {
         }
         break;
       }
+      case "text": {
+        // Edit the text under the cursor, or start a fresh one where you clicked.
+        const hit = hitTest(view, world);
+        const existing = hit ? doc.get(hit) : null;
+        if (existing && existing.type === "text") {
+          openTextEditor(existing);
+        } else {
+          setTextEdit({ screen, world, value: "", id: null, rotation: 0, height: app.textHeight });
+        }
+        break;
+      }
+      case "dim": {
+        if (interaction.kind === "dim") {
+          placeDimension(interaction.start, snapped);
+          interactionRef.current = { kind: "idle" };
+          app.setMeasurement(null);
+        } else {
+          interactionRef.current = { kind: "dim", start: snapped };
+          app.setMeasurement({ kind: "distance", a: snapped, b: snapped });
+        }
+        break;
+      }
     }
     redraw();
+  };
+
+  /** Opens the floating editor for an existing text entity. */
+  const openTextEditor = (t: TextEntity) => {
+    const screen = worldToScreen(viewRef.current, t.at);
+    setTextEdit({ screen, world: t.at, value: t.text, id: t.id, rotation: t.rotation, height: t.height });
+  };
+
+  /** Commits the floating text editor (add or update) and closes it. */
+  const commitText = () => {
+    const edit = textEdit;
+    setTextEdit(null);
+    if (!edit) return;
+    const value = edit.value.trim();
+    if (!value) {
+      if (edit.id) bus.execute({ type: "delete-entities", ids: [edit.id] });
+      return;
+    }
+    const app = useApp.getState();
+    if (edit.id) {
+      const cur = doc.get(edit.id);
+      if (cur && cur.type === "text") {
+        bus.execute({ type: "update-entity", entity: { ...cur, text: value, height: edit.height } });
+      }
+    } else {
+      bus.execute({
+        type: "add-entity",
+        entity: {
+          id: newEntityId(),
+          type: "text",
+          name: nextEntityName(doc, "text"),
+          layer: app.activeLayer,
+          at: edit.world,
+          text: value,
+          height: edit.height,
+          rotation: edit.rotation,
+        },
+      });
+    }
+    redraw();
+  };
+
+  /** Draws a linear dimension between two points as a grouped batch on the Dimensions layer. */
+  const placeDimension = (a: Point, b: Point) => {
+    if (dist(a, b) < 1e-6) return;
+    const app = useApp.getState();
+    const d = linearDimension(a, b, {
+      offset: Math.max(app.textHeight * 2, dist(a, b) * 0.12),
+      textHeight: app.textHeight,
+      label: formatLength(dist(a, b), app.displayUnit),
+    });
+    const layer = "Dimensions";
+    const ids: EntityId[] = [];
+    const commands: Command[] = [];
+    for (const pts of d.lines) {
+      const id = newEntityId();
+      ids.push(id);
+      commands.push({ type: "add-entity", entity: { id, type: "polyline", layer, points: pts, closed: false } });
+    }
+    const textId = newEntityId();
+    ids.push(textId);
+    commands.push({
+      type: "add-entity",
+      entity: { id: textId, type: "text", layer, at: d.text.at, text: d.text.text, height: d.text.height, rotation: d.text.rotation },
+    });
+    commands.push({ type: "group-entities", groupId: newGroupId(), ids, name: d.text.text });
+    bus.execute({ type: "batch", commands });
+    useApp.getState().syncLayersFromDoc?.();
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
@@ -839,7 +957,7 @@ export function Viewport() {
     const snap = findSnap(doc, view, world);
     snapRef.current = snap;
     hoverRef.current = app.tool === "measure" ? hitTest(view, world) : null;
-    if (interaction.kind === "measure") {
+    if (interaction.kind === "measure" || interaction.kind === "dim") {
       app.setMeasurement({ kind: "distance", a: interaction.start, b: snap.point });
     }
     const shown = app.tool === "select" ? world : snap.point;
@@ -934,6 +1052,13 @@ export function Viewport() {
       return;
     }
 
+    // Double-click any text to edit it (from select or the text tool).
+    const dblEntity = hit ? doc.get(hit) : null;
+    if (dblEntity && dblEntity.type === "text" && (app.tool === "select" || app.tool === "text")) {
+      openTextEditor(dblEntity);
+      return;
+    }
+
     if (hit && app.tool === "select") {
       const top = doc.topLevelGroupOf(hit);
       if (top && top.id !== app.enteredGroupId) {
@@ -952,16 +1077,39 @@ export function Viewport() {
   };
 
   return (
-    <canvas
-      ref={canvasRef}
-      className="viewport"
-      data-testid="viewport"
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onWheel={onWheel}
-      onDoubleClick={onDoubleClick}
-      onContextMenu={(e) => e.preventDefault()}
-    />
+    <>
+      <canvas
+        ref={canvasRef}
+        className="viewport"
+        data-testid="viewport"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onWheel={onWheel}
+        onDoubleClick={onDoubleClick}
+        onContextMenu={(e) => e.preventDefault()}
+      />
+      {textEdit && (
+        <input
+          className="text-editor"
+          data-testid="text-editor"
+          autoFocus
+          value={textEdit.value}
+          style={{
+            position: "absolute",
+            left: textEdit.screen.x,
+            top: textEdit.screen.y - textEdit.height * viewRef.current.scale,
+            fontSize: Math.max(9, textEdit.height * viewRef.current.scale),
+          }}
+          onChange={(ev) => setTextEdit((s) => (s ? { ...s, value: ev.target.value } : s))}
+          onKeyDown={(ev) => {
+            if (ev.key === "Enter") commitText();
+            else if (ev.key === "Escape") setTextEdit(null);
+            ev.stopPropagation();
+          }}
+          onBlur={commitText}
+        />
+      )}
+    </>
   );
 }

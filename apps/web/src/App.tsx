@@ -12,6 +12,8 @@ import { ImportReportBanner } from "./dxf/ImportReportBanner";
 import { LayerPanel } from "./layers/LayerPanel";
 import { PatternPanel } from "./pattern/PatternPanel";
 import { FillPanel } from "./fill/FillPanel";
+import { TextPanel } from "./text/TextPanel";
+import { printDrawing } from "./print/printDrawing";
 import { PluginCommandPalette } from "./plugins/PluginCommandPalette";
 import { PluginPanels } from "./plugins/PluginPanels";
 import { PluginsPanel } from "./plugins/PluginsPanel";
@@ -141,6 +143,27 @@ const TOOLS: { id: ToolId; label: string; keyHint: string; icon: JSX.Element }[]
         />
         <path d="M5 12h9" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
         <path d="M19 15c0 1.7 1.5 3 1.5 3s1.5-1.3 1.5-3-1.5-2-1.5-2-1.5.3-1.5 2z" fill="currentColor" />
+      </svg>
+    ),
+  },
+  {
+    id: "text",
+    label: "Text",
+    keyHint: "X",
+    icon: (
+      <svg viewBox="0 0 24 24" width="20" height="20">
+        <path d="M5 6h14M12 6v13M9 19h6" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" />
+      </svg>
+    ),
+  },
+  {
+    id: "dim",
+    label: "Dimension",
+    keyHint: "D",
+    icon: (
+      <svg viewBox="0 0 24 24" width="20" height="20">
+        <path d="M4 8v8M20 8v8M4 12h16" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" />
+        <path d="M4 12l3-2M4 12l3 2M20 12l-3-2M20 12l-3 2" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" />
       </svg>
     ),
   },
@@ -417,6 +440,22 @@ export function App() {
               </div>
             )}
           </div>
+          <button
+            className="action"
+            title="Print / Save as PDF (Ctrl+P)"
+            data-testid="print"
+            onClick={() => printDrawing()}
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18">
+              <path
+                d="M6 9V3h12v6M6 18H4a2 2 0 01-2-2v-4a2 2 0 012-2h16a2 2 0 012 2v4a2 2 0 01-2 2h-2M6 14h12v7H6z"
+                stroke="currentColor"
+                strokeWidth="2"
+                fill="none"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
           <div className="action-sep" />
           <button
             className="action"
@@ -683,6 +722,7 @@ export function App() {
             <Viewport />
             {tool === "straighten" && <StraightenPanel />}
             {tool === "fill" && <FillPanel />}
+            {(tool === "text" || tool === "dim") && <TextPanel />}
           </main>
         </div>
         {showDiag && <DiagnosticsPanel onClose={() => setShowDiag(false)} />}

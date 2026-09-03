@@ -39,6 +39,9 @@ export {
   patternCopyCount,
   newEntityId,
   entityPoints,
+  textWidth,
+  textCorners,
+  linearDimension,
 } from "@sketchor/core";
 
 // Re-export the contract types authors need, so a plugin depends only on the SDK.
@@ -69,7 +72,10 @@ export type {
   ArcEntity,
   PointEntity,
   PolylineEntity,
+  TextEntity,
   Point,
+  LinearDimensionOptions,
+  LinearDimension,
   // Contribution registration contract.
   CommandsApi,
   GeneratorsApi,

@@ -18,6 +18,8 @@ export interface LineEntity {
    * by plugins (e.g. the load planner colours pallets by order).
    */
   fill?: string;
+  /** Draw the outline dashed rather than solid (construction / guide lines). */
+  dashed?: boolean;
   a: Point;
   b: Point;
 }
@@ -37,6 +39,8 @@ export interface CircleEntity {
    * by plugins (e.g. the load planner colours pallets by order).
    */
   fill?: string;
+  /** Draw the outline dashed rather than solid (construction / guide lines). */
+  dashed?: boolean;
   center: Point;
   radius: number;
 }
@@ -56,6 +60,8 @@ export interface ArcEntity {
    * by plugins (e.g. the load planner colours pallets by order).
    */
   fill?: string;
+  /** Draw the outline dashed rather than solid (construction / guide lines). */
+  dashed?: boolean;
   center: Point;
   radius: number;
   /** Radians. The arc runs from startAngle to endAngle; both map to real points via {@link arcPointAt}. */
@@ -80,6 +86,8 @@ export interface PointEntity {
    * by plugins (e.g. the load planner colours pallets by order).
    */
   fill?: string;
+  /** Draw the outline dashed rather than solid (construction / guide lines). */
+  dashed?: boolean;
   p: Point;
 }
 
@@ -98,6 +106,8 @@ export interface PolylineEntity {
    * by plugins (e.g. the load planner colours pallets by order).
    */
   fill?: string;
+  /** Draw the outline dashed rather than solid (construction / guide lines). */
+  dashed?: boolean;
   /** Ordered vertices. Does not repeat the first point when `closed`. */
   points: Point[];
   /**
@@ -112,6 +122,29 @@ export interface PolylineEntity {
   closed: boolean;
 }
 
+/**
+ * A single line of text placed in the drawing. Rendered in a plain sans font;
+ * `at` is the baseline start (DXF `TEXT` convention), `height` the cap height in
+ * world units, `rotation` radians CCW about `at`. Editable in place with the
+ * text tool.
+ */
+export interface TextEntity {
+  id: EntityId;
+  type: "text";
+  name?: string;
+  layer?: string;
+  /** Text colour (any CSS colour). Absent = the theme's default entity colour. */
+  color?: string;
+  /** Ignored for text — present only so every entity shares one shape. */
+  fill?: string;
+  /** Ignored for text — present only so every entity shares one shape. */
+  dashed?: boolean;
+  at: Point;
+  text: string;
+  height: number;
+  rotation: number;
+}
+
 /** The layer an entity is drawn on, defaulting to "0" (DXF convention). */
 export function layerOf(entity: Entity): string {
   return entity.layer ?? DEFAULT_LAYER;
@@ -119,7 +152,24 @@ export function layerOf(entity: Entity): string {
 
 export const DEFAULT_LAYER = "0";
 
-export type Entity = LineEntity | CircleEntity | ArcEntity | PointEntity | PolylineEntity;
+export type Entity = LineEntity | CircleEntity | ArcEntity | PointEntity | PolylineEntity | TextEntity;
+
+/** Rough width of a {@link TextEntity} string in world units — one built-in font, ~0.55 em per glyph. */
+export function textWidth(text: string, height: number): number {
+  return text.length * height * 0.55;
+}
+
+/** The four corners of a text entity's bounding box, in world space (rotated about `at`). */
+export function textCorners(entity: TextEntity): Point[] {
+  const w = textWidth(entity.text, entity.height);
+  const h = entity.height;
+  return [
+    { x: entity.at.x, y: entity.at.y },
+    { x: entity.at.x + w, y: entity.at.y },
+    { x: entity.at.x + w, y: entity.at.y + h },
+    { x: entity.at.x, y: entity.at.y + h },
+  ].map((p) => rotatePoint(p, entity.at, entity.rotation));
+}
 
 /** `entity.points[i]` to `entity.points[i+1]` for every segment, wrapping once more if `closed`. Bulge defaults to 0 (straight). */
 export function polylineSegments(entity: PolylineEntity): { a: Point; b: Point; bulge: number }[] {
@@ -165,6 +215,8 @@ export function translated<T extends Entity>(entity: T, dx: number, dy: number):
       return { ...entity, p: { x: entity.p.x + dx, y: entity.p.y + dy } };
     case "polyline":
       return { ...entity, points: entity.points.map((p) => ({ x: p.x + dx, y: p.y + dy })) };
+    case "text":
+      return { ...entity, at: { x: entity.at.x + dx, y: entity.at.y + dy } };
   }
 }
 
@@ -191,6 +243,8 @@ export function rotated<T extends Entity>(entity: T, pivot: Point, angle: number
     case "polyline":
       // Bulge is a ratio of angle, not position, so it's unaffected by rotation.
       return { ...entity, points: entity.points.map((p) => rotatePoint(p, pivot, angle)) };
+    case "text":
+      return { ...entity, at: rotatePoint(entity.at, pivot, angle), rotation: entity.rotation + angle };
   }
 }
 
@@ -230,6 +284,8 @@ export function transformed<T extends Entity>(
     case "polyline":
       // Uniform scale changes segment length but not the angle bulge encodes, so bulges carry over unchanged.
       return { ...entity, points: entity.points.map(movePoint) };
+    case "text":
+      return { ...entity, at: movePoint(entity.at), rotation: entity.rotation + rotation, height: entity.height * scale };
   }
 }
 
@@ -254,6 +310,8 @@ export function entityPoints(entity: Entity): Point[] {
       return [entity.p];
     case "polyline":
       return entity.points;
+    case "text":
+      return [entity.at, ...textCorners(entity)];
   }
 }
 

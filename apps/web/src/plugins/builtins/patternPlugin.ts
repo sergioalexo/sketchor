@@ -99,6 +99,8 @@ function anchorOf(entity: Entity): Point {
       return { x: (entity.a.x + entity.b.x) / 2, y: (entity.a.y + entity.b.y) / 2 };
     case "polyline":
       return centroidOfPoints(entity.points);
+    case "text":
+      return entity.at;
   }
 }
 

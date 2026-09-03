@@ -630,6 +630,21 @@ function drawEntity(
 ): void {
   ctx.strokeStyle = color;
   ctx.lineWidth = lineWidth;
+
+  if (entity.type === "text") {
+    const p = worldToScreen(view, entity.at);
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate(-entity.rotation); // world CCW → screen CW
+    ctx.fillStyle = color;
+    ctx.textBaseline = "alphabetic";
+    ctx.font = `${Math.max(1, entity.height * view.scale)}px ui-sans-serif, system-ui, sans-serif`;
+    ctx.fillText(entity.text, 0, 0);
+    ctx.restore();
+    return;
+  }
+
+  ctx.setLineDash(entity.dashed ? [6, 4] : []);
   ctx.beginPath();
   if (entity.type === "line") {
     const a = worldToScreen(view, entity.a);
@@ -670,6 +685,7 @@ function drawEntity(
     if (entity.closed) ctx.closePath();
   }
   ctx.stroke();
+  ctx.setLineDash([]);
 }
 
 function drawHandles(ctx: CanvasRenderingContext2D, view: View, entity: Entity): void {

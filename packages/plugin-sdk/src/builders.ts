@@ -6,10 +6,13 @@ import type {
   Entity,
   EntityId,
   LineEntity,
+  LinearDimensionOptions,
   Point,
   PointEntity,
   PolylineEntity,
+  TextEntity,
 } from "@sketchor/core";
+import { linearDimension } from "@sketchor/core";
 
 /**
  * Convenience builders so plugin authors write `line(a, b)` / `add(line(a, b))`
@@ -27,15 +30,25 @@ export interface EntityOptions {
   color?: string;
   /** Hatch-fill colour for closed shapes; omit for no fill. */
   fill?: string;
+  /** Draw the outline dashed (construction / guide lines). */
+  dashed?: boolean;
 }
 
-function base(opts?: EntityOptions): { id: EntityId; name?: string; layer?: string; color?: string; fill?: string } {
+function base(opts?: EntityOptions): {
+  id: EntityId;
+  name?: string;
+  layer?: string;
+  color?: string;
+  fill?: string;
+  dashed?: boolean;
+} {
   return {
     id: newEntityId(),
     ...(opts?.name !== undefined ? { name: opts.name } : {}),
     ...(opts?.layer !== undefined ? { layer: opts.layer } : {}),
     ...(opts?.color !== undefined ? { color: opts.color } : {}),
     ...(opts?.fill !== undefined ? { fill: opts.fill } : {}),
+    ...(opts?.dashed ? { dashed: true } : {}),
   };
 }
 
@@ -60,6 +73,34 @@ export function arc(
 
 export function point(p: Point, opts?: EntityOptions): PointEntity {
   return { ...base(opts), type: "point", p };
+}
+
+/** A single line of text with its baseline start at `at`. `rotation` is radians, CCW. */
+export function text(
+  at: Point,
+  str: string,
+  opts?: EntityOptions & { height?: number; rotation?: number },
+): TextEntity {
+  const { fill: _f, dashed: _d, ...b } = base(opts);
+  return { ...b, type: "text", at, text: str, height: opts?.height ?? 10, rotation: opts?.rotation ?? 0 };
+}
+
+/**
+ * Linear dimension geometry (see core's `linearDimension`) as ready-to-add
+ * `Command`s: the extension/dimension lines as polylines plus the label as a
+ * text entity, all on `layer`.
+ */
+export function linearDimensionCommands(
+  a: Point,
+  b: Point,
+  opts: LinearDimensionOptions & { layer?: string; color?: string },
+): Command[] {
+  const d = linearDimension(a, b, opts);
+  const common = { layer: opts.layer, color: opts.color };
+  return [
+    ...d.lines.map((pts) => add(polyline(pts, false, common))),
+    add(text(d.text.at, d.text.text, { ...common, height: d.text.height, rotation: d.text.rotation })),
+  ];
 }
 
 export function polyline(

@@ -76,6 +76,8 @@ export function findSnap(doc: SketchDocument, view: View, cursor: Point, exclude
       );
     } else if (e.type === "point") {
       featurePoints.push({ point: e.p, kind: "endpoint" });
+    } else if (e.type === "text") {
+      featurePoints.push({ point: e.at, kind: "endpoint" });
     } else if (e.type === "arc") {
       featurePoints.push(
         { point: e.center, kind: "center" },

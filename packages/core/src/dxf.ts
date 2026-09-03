@@ -1,8 +1,12 @@
 import type { Entity } from "./entities";
-import { newEntityId, polylineSegments, transformed } from "./entities";
+import { newEntityId, polylineSegments, textCorners, transformed } from "./entities";
 import type { Point } from "./geometry";
 import { arcExtentPoints, arcPointAt, arcSweep, bulgeToArc, dist } from "./geometry";
-import { textToStrokes } from "./font";
+
+/** Minimal XML text-content escape for the thumbnail SVG. */
+function escapeXml(s: string): string {
+  return s.replace(/[&<>]/g, (c) => (c === "&" ? "&amp;" : c === "<" ? "&lt;" : "&gt;"));
+}
 
 /**
  * Minimal ASCII DXF support: enough to import and preview typical 2D
@@ -461,6 +465,8 @@ function placeEntity(
         ccw: mirrored ? !entity.ccw : entity.ccw,
       };
     }
+    case "text":
+      return { ...entity, id, at: map(entity.at), height: entity.height * radiusScale, rotation: entity.rotation + rotation };
   }
 }
 
@@ -554,7 +560,7 @@ function convertRecords(raws: RawEntity[], ctx: ConvertContext): Entity[] {
       }
       case "TEXT":
       case "MTEXT": {
-        const insertion = { x: num(raw, 10), y: num(raw, 20) };
+        const at = { x: num(raw, 10), y: num(raw, 20) };
         const height = num(raw, 40, 2.5) || 2.5;
         const rotation = (num(raw, 50, 0) * Math.PI) / 180;
         const raw1 = str(raw, 1, "");
@@ -562,8 +568,8 @@ function convertRecords(raws: RawEntity[], ctx: ConvertContext): Entity[] {
           raw.type === "MTEXT"
             ? cleanMtext(raw.pairs.filter((p) => p.code === 3).map((p) => p.value).join("") + raw1)
             : raw1;
-        for (const stroke of textToStrokes(content, insertion, height, rotation)) {
-          polyline(stroke, entities, layer);
+        if (content) {
+          entities.push({ id: newEntityId(), type: "text", layer, at, text: content, height, rotation });
         }
         break;
       }
@@ -750,6 +756,8 @@ export function boundsOf(entities: Entity[]): Bounds | null {
       for (const p of arcExtentPoints(e.center, e.radius, e.startAngle, e.endAngle, e.ccw)) {
         acc(p.x, p.y);
       }
+    } else if (e.type === "text") {
+      for (const p of textCorners(e)) acc(p.x, p.y);
     } else {
       for (const seg of polylineSegments(e)) {
         acc(seg.a.x, seg.a.y);
@@ -811,6 +819,10 @@ export function entitiesToSvg(entities: Entity[], opts: ThumbnailOptions = {}): 
         );
       } else if (e.type === "point") {
         body.push(`<circle cx="${f(sx(e.p.x))}" cy="${f(sy(e.p.y))}" r="1.5" fill="${stroke}"/>`);
+      } else if (e.type === "text") {
+        body.push(
+          `<text x="${f(sx(e.at.x))}" y="${f(sy(e.at.y))}" font-size="${f(e.height * scale)}" fill="${stroke}">${escapeXml(e.text)}</text>`,
+        );
       } else if (e.type === "arc") {
         // Tessellated for display only — the document keeps the arc as one entity.
         const sweep = arcSweep(e.startAngle, e.endAngle, e.ccw);

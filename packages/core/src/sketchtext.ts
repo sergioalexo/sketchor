@@ -46,6 +46,9 @@ const POLYLINE_RE = new RegExp(
   String.raw`^polyline\s+(?<name>[A-Za-z_]\w*)\s+pts\s+(?<pts>(?:${POINT_PAIR}\s*)+)(?<closed>closed)?$`,
 );
 const POINT_PAIR_CAPTURE = new RegExp(String.raw`\(\s*(${NUM})\s*,\s*(${NUM})\s*\)`, "g");
+const TEXT_RE = new RegExp(
+  String.raw`^text\s+([A-Za-z_]\w*)\s+at\s*\(\s*(${NUM})\s*,\s*(${NUM})\s*\)\s+("(?:[^"\\]|\\.)*")\s+h\s+(${NUM})(?:\s+rot\s+(${NUM}))?$`,
+);
 
 function fmt(n: number): string {
   const rounded = Math.round(n * 10000) / 10000;
@@ -65,7 +68,7 @@ export function assignNames(doc: SketchDocument): Map<EntityId, string> {
       used.add(e.name);
     }
   }
-  const counters: Record<Entity["type"], number> = { line: 1, circle: 1, arc: 1, point: 1, polyline: 1 };
+  const counters: Record<Entity["type"], number> = { line: 1, circle: 1, arc: 1, point: 1, polyline: 1, text: 1 };
   for (const e of doc.all()) {
     if (names.has(e.id)) continue;
     const prefix = NAME_PREFIX[e.type];
@@ -78,7 +81,7 @@ export function assignNames(doc: SketchDocument): Map<EntityId, string> {
   return names;
 }
 
-const NAME_PREFIX: Record<Entity["type"], string> = { line: "L", circle: "C", arc: "A", point: "P", polyline: "PL" };
+const NAME_PREFIX: Record<Entity["type"], string> = { line: "L", circle: "C", arc: "A", point: "P", polyline: "PL", text: "T" };
 
 /** Next free name for a newly drawn entity (used by the tools). */
 export function nextEntityName(doc: SketchDocument, type: Entity["type"]): string {
@@ -111,6 +114,11 @@ export function toCode(doc: SketchDocument): string {
       );
     } else if (e.type === "point") {
       out.push(`point ${name} at (${fmt(e.p.x)}, ${fmt(e.p.y)})`);
+    } else if (e.type === "text") {
+      out.push(
+        `text ${name} at (${fmt(e.at.x)}, ${fmt(e.at.y)}) ${JSON.stringify(e.text)} h ${fmt(e.height)}` +
+          (e.rotation ? ` rot ${fmt(toDeg(e.rotation))}` : ""),
+      );
     } else {
       const pts = e.points.map((p) => `(${fmt(p.x)}, ${fmt(p.y)})`).join(" ");
       out.push(`polyline ${name} pts ${pts}${e.closed ? " closed" : ""}`);
@@ -133,7 +141,8 @@ export type ParsedEntity =
       ccw: boolean;
     }
   | { type: "point"; name: string; p: { x: number; y: number } }
-  | { type: "polyline"; name: string; points: { x: number; y: number }[]; closed: boolean };
+  | { type: "polyline"; name: string; points: { x: number; y: number }[]; closed: boolean }
+  | { type: "text"; name: string; at: { x: number; y: number }; text: string; height: number; rotation: number };
 
 export interface ParseIssue {
   line: number;
@@ -198,6 +207,27 @@ export function parseCode(text: string): { entities: ParsedEntity[]; errors: Par
       };
     } else if ((match = row.match(POINT_RE))) {
       parsed = { type: "point", name: match[1], p: { x: Number(match[2]), y: Number(match[3]) } };
+    } else if ((match = row.match(TEXT_RE))) {
+      const height = Number(match[5]);
+      if (height <= 0) {
+        errors.push({ line: lineNo, message: "text height must be positive" });
+        continue;
+      }
+      let content = "";
+      try {
+        content = JSON.parse(match[4]) as string;
+      } catch {
+        errors.push({ line: lineNo, message: "text content must be a quoted string" });
+        continue;
+      }
+      parsed = {
+        type: "text",
+        name: match[1],
+        at: { x: Number(match[2]), y: Number(match[3]) },
+        text: content,
+        height,
+        rotation: match[6] ? (Number(match[6]) * Math.PI) / 180 : 0,
+      };
     } else if ((match = row.match(POLYLINE_RE))) {
       const points: { x: number; y: number }[] = [];
       POINT_PAIR_CAPTURE.lastIndex = 0;
@@ -213,7 +243,7 @@ export function parseCode(text: string): { entities: ParsedEntity[]; errors: Par
     }
 
     if (!parsed) {
-      const known = ["line", "circle", "arc", "point", "polyline"];
+      const known = ["line", "circle", "arc", "point", "polyline", "text"];
       errors.push({
         line: lineNo,
         message: known.includes(keyword)
@@ -226,7 +256,9 @@ export function parseCode(text: string): { entities: ParsedEntity[]; errors: Par
                   ? "arc NAME at (x, y) r RADIUS from DEG to DEG [cw]"
                   : keyword === "point"
                     ? "point NAME at (x, y)"
-                    : "polyline NAME pts (x, y) (x, y) ... [closed]")
+                    : keyword === "text"
+                      ? 'text NAME at (x, y) "content" h HEIGHT [rot DEG]'
+                      : "polyline NAME pts (x, y) (x, y) ... [closed]")
           : `unknown statement '${keyword}'`,
       });
       continue;
@@ -283,6 +315,15 @@ function sameGeometry(existing: Entity, parsed: ParsedEntity): boolean {
       )
     );
   }
+  if (existing.type === "text" && parsed.type === "text") {
+    return (
+      existing.text === parsed.text &&
+      Math.abs(existing.at.x - parsed.at.x) < EPS &&
+      Math.abs(existing.at.y - parsed.at.y) < EPS &&
+      Math.abs(existing.height - parsed.height) < EPS &&
+      Math.abs(existing.rotation - parsed.rotation) < EPS
+    );
+  }
   return false;
 }
 
@@ -315,6 +356,17 @@ function toEntity(parsed: ParsedEntity, id: EntityId, layer?: string, bulges?: n
       };
     case "point":
       return { id, type: "point", name: parsed.name, ...layerProp, p: parsed.p };
+    case "text":
+      return {
+        id,
+        type: "text",
+        name: parsed.name,
+        ...layerProp,
+        at: parsed.at,
+        text: parsed.text,
+        height: parsed.height,
+        rotation: parsed.rotation,
+      };
     case "polyline":
       return {
         id,
