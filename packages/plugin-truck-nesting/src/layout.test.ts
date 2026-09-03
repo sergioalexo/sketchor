@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DocumentReadModel } from "@sketchor/plugin-sdk";
-import { buildNestLayout, clearPreviousLayout, LOAD_PLAN_LAYER } from "./layout";
+import { buildNestLayout, clearPreviousLayout, LOAD_PLAN_GUIDE_LAYER, LOAD_PLAN_LAYER } from "./layout";
 import { nestByOrders } from "./nest";
 import type { Order, TrailerProfile } from "./types";
 
@@ -85,9 +85,14 @@ describe("buildNestLayout margins", () => {
     for (const g of guides) {
       if (g.type === "add-entity") {
         expect(g.entity.dashed).toBe(true);
+        // guides live on their own layer so they can be hidden from the plan
+        expect(g.entity.layer).toBe(LOAD_PLAN_GUIDE_LAYER);
         if ("fill" in g.entity) expect(g.entity.fill).toBeUndefined();
       }
     }
+    // the pallets themselves stay on the main layer
+    const pallets = added(cmds).filter((c) => c.type === "add-entity" && "fill" in c.entity && c.entity.fill);
+    for (const p of pallets) if (p.type === "add-entity") expect(p.entity.layer).toBe(LOAD_PLAN_LAYER);
   });
 });
 
@@ -96,15 +101,16 @@ describe("clearPreviousLayout", () => {
     expect(clearPreviousLayout(model())).toEqual([]);
   });
 
-  it("deletes every Load Plan entity and ungroups its wrappers, nested groups included", () => {
+  it("deletes every plan entity — margins layer included — and ungroups its wrappers, nested groups too", () => {
     const m = model({
       entities: [
         { id: "e1", type: "polyline", layer: LOAD_PLAN_LAYER, points: [], closed: true },
         { id: "e2", type: "circle", layer: LOAD_PLAN_LAYER, center: { x: 0, y: 0 }, radius: 1 },
+        { id: "guide", type: "polyline", layer: LOAD_PLAN_GUIDE_LAYER, points: [], closed: true },
         { id: "keep", type: "polyline", layer: "0", points: [], closed: false },
       ] as DocumentReadModel["entities"],
       groups: [
-        { id: "pg", name: "Leeds", members: ["e1", "e2"] },
+        { id: "pg", name: "Leeds", members: ["e1", "e2", "guide"] },
         { id: "og", name: "Leeds", members: ["pg"] },
         { id: "gkeep", name: "user group", members: ["keep"] },
       ],
@@ -114,6 +120,6 @@ describe("clearPreviousLayout", () => {
     expect(commands.some((c) => c.type === "ungroup" && c.groupId === "og")).toBe(true);
     expect(commands.some((c) => c.type === "ungroup" && c.groupId === "gkeep")).toBe(false);
     const del = commands.find((c) => c.type === "delete-entities");
-    expect(del && del.type === "delete-entities" && del.ids.sort()).toEqual(["e1", "e2"]);
+    expect(del && del.type === "delete-entities" && del.ids.sort()).toEqual(["e1", "e2", "guide"]);
   });
 });

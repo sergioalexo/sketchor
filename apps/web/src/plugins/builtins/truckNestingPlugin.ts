@@ -1,6 +1,7 @@
 import {
   buildNestLayout,
   clearPreviousLayout,
+  LOAD_PLAN_GUIDE_LAYER,
   LOAD_PLAN_LAYER,
   nestByOrders,
   validateNest,
@@ -213,7 +214,7 @@ const plugin: PluginModule = {
           sketchor.ui.notify(
             errors > 0
               ? `Load plan drawn — ${errors} problem${errors === 1 ? "" : "s"}, see the panel.`
-              : `Load plan drawn on the "${LOAD_PLAN_LAYER}" layer.`,
+              : `Load plan on "${LOAD_PLAN_LAYER}" — hide "${LOAD_PLAN_GUIDE_LAYER}" to drop the guides.`,
             { error: errors > 0 },
           );
         } catch (err) {

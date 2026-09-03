@@ -13,14 +13,20 @@ import type { LayoutOptions, NestResult, PlacedItem, TrailerProfile, ValidationF
  * Turns a {@link NestResult} into `Command[]` the host applies as one undo step,
  * and finds the previous run's output so a re-nest can replace it.
  *
- * Everything this plugin draws goes on one dedicated layer, {@link LOAD_PLAN_LAYER}
- * — that layer is the persistence mechanism (`clearPreviousLayout` recovers the
- * prior run from the read-model alone). Each pallet, together with its
- * construction guide, its tag and any dimensions, is one group — and that's the
- * only grouping, so a click selects a single pallet and dragging it snaps to its
- * neighbours (its guide and label move with it).
+ * Everything this plugin draws goes on two dedicated layers: {@link LOAD_PLAN_LAYER}
+ * for the pallets, tags, dimensions and summary, and {@link LOAD_PLAN_GUIDE_LAYER}
+ * for the dashed wall-clearance and per-pallet margin guides — kept apart so the
+ * margins can be hidden/shown from the Layers panel without touching the plan
+ * (their visibility survives a re-nest). Those layers are also the persistence
+ * mechanism: `clearPreviousLayout` recovers the prior run from the read-model
+ * alone. Each pallet, together with its guide, tag and any dimensions, is one
+ * group — the only grouping — so a click selects a single pallet and dragging it
+ * snaps to its neighbours (its guide and label move with it).
  */
 export const LOAD_PLAN_LAYER = "Load Plan";
+
+/** The dashed construction guides live on their own layer so they can be toggled off. */
+export const LOAD_PLAN_GUIDE_LAYER = "Load Plan — margins";
 
 /** Construction guides (wall clearance, per-pallet spacing) are white + dashed, no fill. */
 const GUIDE_COLOR = "#ffffff";
@@ -50,14 +56,17 @@ function trailerOutline(trailer: TrailerProfile): Command {
   );
 }
 
+/** The layers this plugin owns — a re-nest wipes everything on them. */
+const PLAN_LAYERS = new Set<string>([LOAD_PLAN_LAYER, LOAD_PLAN_GUIDE_LAYER]);
+
 /**
- * Commands that remove whatever the last Auto-nest run drew: every entity on
- * {@link LOAD_PLAN_LAYER}, and any group all of whose members are those entities
- * (or nested groups thereof). Returns `[]` when the layer is empty.
+ * Commands that remove whatever the last Auto-nest run drew: every entity on a
+ * {@link PLAN_LAYERS} layer, and any group all of whose members are those
+ * entities (or nested groups thereof). Returns `[]` when they're empty.
  */
 export function clearPreviousLayout(model: DocumentReadModel): Command[] {
   const planEntityIds = new Set(
-    model.entities.filter((e) => e.layer === LOAD_PLAN_LAYER).map((e) => e.id),
+    model.entities.filter((e) => e.layer !== undefined && PLAN_LAYERS.has(e.layer)).map((e) => e.id),
   );
   if (planEntityIds.size === 0) return [];
 
@@ -90,17 +99,18 @@ function palletCommands(p: PlacedItem, opts: LayoutOptions): { commands: Command
     ids.push(id);
   };
 
-  // The reserved slot (dashed white) when a pallet margin is set.
+  // The reserved slot (dashed white) when a pallet margin is set — on the
+  // margins layer so it can be hidden without touching the pallet.
   if (p.x - p.slotX > EPS) {
     const guide =
       p.shape === "round"
         ? circle({ x: p.slotX + p.slotWidth / 2, y: p.slotY + p.slotWidth / 2 }, p.slotWidth / 2, {
-            layer: LOAD_PLAN_LAYER,
+            layer: LOAD_PLAN_GUIDE_LAYER,
             color: GUIDE_COLOR,
             dashed: true,
           })
         : polyline(rectPoints(p.slotX, p.slotY, p.slotLength, p.slotWidth), true, {
-            layer: LOAD_PLAN_LAYER,
+            layer: LOAD_PLAN_GUIDE_LAYER,
             color: GUIDE_COLOR,
             dashed: true,
           });
@@ -188,7 +198,7 @@ export function buildNestLayout(
     commands.push(
       add(
         polyline(rectPoints(wall, wall, result.trailer.length - 2 * wall, result.trailer.width - 2 * wall), true, {
-          layer: LOAD_PLAN_LAYER,
+          layer: LOAD_PLAN_GUIDE_LAYER,
           color: GUIDE_COLOR,
           dashed: true,
         }),

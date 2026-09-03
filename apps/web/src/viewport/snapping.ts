@@ -148,16 +148,60 @@ export function findSnap(doc: SketchDocument, view: View, cursor: Point, exclude
   };
 }
 
+/** 45° in radians — the step a rotate-drag snaps to. */
+const ANGLE_STEP = Math.PI / 4;
+
+/** Rounds a rotation (radians) to the nearest 45°, unless `free` (Ctrl held). */
+export function snapRotation(radians: number, free: boolean): number {
+  return free ? radians : Math.round(radians / ANGLE_STEP) * ANGLE_STEP;
+}
+
+/**
+ * Corner / endpoint / centre points of every entity except `excludeIds`, plus
+ * the world origin — the anchors a dragged selection can align to.
+ */
+function featureAnchors(doc: SketchDocument, excludeIds: readonly string[]): Point[] {
+  const out: Point[] = [{ x: 0, y: 0 }];
+  for (const e of doc.all()) {
+    if (excludeIds.includes(e.id)) continue;
+    if (e.type === "line") {
+      out.push(e.a, e.b);
+    } else if (e.type === "circle") {
+      const { center: c, radius: r } = e;
+      out.push(
+        c,
+        { x: c.x + r, y: c.y },
+        { x: c.x - r, y: c.y },
+        { x: c.x, y: c.y + r },
+        { x: c.x, y: c.y - r },
+      );
+    } else if (e.type === "point") {
+      out.push(e.p);
+    } else if (e.type === "text") {
+      out.push(e.at);
+    } else if (e.type === "arc") {
+      out.push(
+        e.center,
+        arcPointAt(e.center, e.radius, e.startAngle),
+        arcPointAt(e.center, e.radius, e.endAngle),
+      );
+    } else {
+      for (const p of e.points) out.push(p);
+    }
+  }
+  return out;
+}
+
 /**
  * Given a selection being dragged by `(rawDx, rawDy)`, returns the offset to
- * actually apply — `raw` unless one of the selection's vertices, at its dragged
- * position, lands within snap range of a real feature point (endpoint, centre,
- * intersection, the origin, …). The closest such vertex/target pair wins and the
- * whole selection is nudged so that vertex sits exactly on the target.
+ * actually apply. The two axes snap **independently**: `dx` is nudged by the
+ * smallest correction that lands some dragged vertex exactly on some anchor's x,
+ * and `dy` likewise for y. Snapping the axes apart is what lets one edge slide
+ * flush along another (only one axis catches) while a corner still locks when
+ * both catch at once — "snap to a corner, or to two lines at the same time".
  *
  * `baseVertices` are the selection's vertices at grab time (world space);
  * `excludeIds` is the selection itself, so it never snaps to its own geometry.
- * The grid fallback is ignored here — it would quantise every drag.
  */
 export function snapMovingSelection(
   doc: SketchDocument,
@@ -167,17 +211,27 @@ export function snapMovingSelection(
   rawDy: number,
   excludeIds: readonly string[],
 ): { dx: number; dy: number } {
-  let best: { dx: number; dy: number } | null = null;
-  let bestDist = Infinity;
+  const tol = SNAP_PX / view.scale;
+  const anchors = featureAnchors(doc, excludeIds);
+  let dxAdj = 0;
+  let dyAdj = 0;
+  let bestX = tol;
+  let bestY = tol;
   for (const v of baseVertices) {
-    const moved = { x: v.x + rawDx, y: v.y + rawDy };
-    const snap = findSnap(doc, view, moved, excludeIds);
-    if (snap.kind === "grid") continue;
-    const d = dist(snap.point, moved);
-    if (d < bestDist) {
-      bestDist = d;
-      best = { dx: rawDx + (snap.point.x - moved.x), dy: rawDy + (snap.point.y - moved.y) };
+    const mx = v.x + rawDx;
+    const my = v.y + rawDy;
+    for (const a of anchors) {
+      const ex = Math.abs(a.x - mx);
+      if (ex < bestX) {
+        bestX = ex;
+        dxAdj = a.x - mx;
+      }
+      const ey = Math.abs(a.y - my);
+      if (ey < bestY) {
+        bestY = ey;
+        dyAdj = a.y - my;
+      }
     }
   }
-  return best ?? { dx: rawDx, dy: rawDy };
+  return { dx: rawDx + dxAdj, dy: rawDy + dyAdj };
 }

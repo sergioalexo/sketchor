@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SketchDocument, entityPoints, type Entity } from "@sketchor/core";
-import { snapMovingSelection } from "./snapping";
+import { snapMovingSelection, snapRotation } from "./snapping";
 import type { View } from "./view";
 
 const view: View = { scale: 1, ox: 0, oy: 0 }; // 1 px = 1 world unit → snap tol = 10
@@ -71,9 +71,40 @@ describe("snapMovingSelection", () => {
   });
 
   it("does not snap the selection to its own geometry", () => {
-    const b = rect("b", 1500, 0, 1000, 1000);
+    const b = rect("b", 1500, 50, 1000, 1000); // off both axes
     // only entity present is the one being moved — must be a free move
     const out = snapMovingSelection(doc(b), view, verts(b), -12, -8, ["b"]);
     expect(out).toEqual({ dx: -12, dy: -8 });
+  });
+
+  it("snaps the two axes independently — to different lines at once", () => {
+    const vbar = rect("v", 1000, -5000, 10, 10000); // vertical edge, corners x ∈ {1000, 1010}
+    const hbar = rect("h", -5000, 500, 10000, 10); // horizontal edge, corners y ∈ {500, 510}
+    const b = rect("b", 1600, 900, 200, 200); // left edge x = 1600, bottom edge y = 900
+    // drag toward x = 1000 (short by 4) and y = 500 (short by 4)
+    const { dx, dy } = snapMovingSelection(doc(vbar, hbar, b), view, verts(b), -596, -396, ["b"]);
+    expect(dx).toBeCloseTo(-600); // x caught on the vertical bar
+    expect(dy).toBeCloseTo(-400); // y caught on the horizontal bar
+  });
+
+  it("slides an edge flush along another without pinning the free axis", () => {
+    const a = rect("a", 0, 0, 1000, 1000);
+    const b = rect("b", 1004, 400, 500, 500);
+    const { dx, dy } = snapMovingSelection(doc(a, b), view, verts(b), 0, 250, ["b"]);
+    expect(dx).toBeCloseTo(-4);
+    expect(dy).toBeCloseTo(250);
+  });
+});
+
+describe("snapRotation", () => {
+  const deg = (d: number) => (d * Math.PI) / 180;
+  it("rounds to the nearest 45°", () => {
+    expect(snapRotation(deg(40), false)).toBeCloseTo(deg(45));
+    expect(snapRotation(deg(20), false)).toBeCloseTo(0);
+    expect(snapRotation(deg(80), false)).toBeCloseTo(deg(90));
+    expect(snapRotation(deg(-50), false)).toBeCloseTo(deg(-45));
+  });
+  it("passes the angle through untouched when free (Ctrl held)", () => {
+    expect(snapRotation(deg(37), true)).toBeCloseTo(deg(37));
   });
 });
