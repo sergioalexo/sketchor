@@ -32,15 +32,15 @@ const isColor = (c: ReturnType<typeof buildNestLayout>[number], col: string) =>
   c.type === "add-entity" && c.entity.color === col;
 
 describe("buildNestLayout", () => {
-  it("draws one hatched shape per pallet, each in its own group, nested per order", () => {
+  it("draws one hatched shape per pallet, each in its own group", () => {
     const result = nestByOrders(trailer, orders);
     const cmds = buildNestLayout(result);
     const pallets = added(cmds).filter((c) => c.type === "add-entity" && "fill" in c.entity && c.entity.fill);
     expect(pallets).toHaveLength(result.placed.length);
 
     const groups = cmds.filter((c) => c.type === "group-entities");
-    // one group per pallet + one per order
-    expect(groups.length).toBe(result.placed.length + 2);
+    // one group per pallet (shape + guide + tag + dims)
+    expect(groups.length).toBe(result.placed.length);
 
     const round = added(cmds).find((c) => c.type === "add-entity" && c.entity.type === "circle" && c.entity.fill);
     expect(round).toBeTruthy();

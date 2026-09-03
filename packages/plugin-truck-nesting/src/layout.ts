@@ -16,8 +16,9 @@ import type { LayoutOptions, NestResult, PlacedItem, TrailerProfile, ValidationF
  * Everything this plugin draws goes on one dedicated layer, {@link LOAD_PLAN_LAYER}
  * — that layer is the persistence mechanism (`clearPreviousLayout` recovers the
  * prior run from the read-model alone). Each pallet, together with its
- * construction guide, its tag and any dimensions, is one group; the per-order
- * group holds those, so a whole drop — or a single pallet — moves as a unit.
+ * construction guide, its tag and any dimensions, is one group — and that's the
+ * only grouping, so a click selects a single pallet and dragging it snaps to its
+ * neighbours (its guide and label move with it).
  */
 export const LOAD_PLAN_LAYER = "Load Plan";
 
@@ -121,10 +122,12 @@ function palletCommands(p: PlacedItem, opts: LayoutOptions): { commands: Command
         });
   push(add(shape), shape.id);
 
-  // Tag text, centred on the pallet.
+  // Tag text, roughly centred on the pallet.
   if (p.tag && p.tag.trim()) {
-    const h = Math.min(p.length, p.width) * 0.28;
-    const t = text({ x: p.x + p.width * 0.12, y: p.y + p.width / 2 - h / 2 }, p.tag.trim(), {
+    const label = p.tag.trim();
+    const h = Math.min(Math.min(p.length, p.width) * 0.13, 70);
+    const w = label.length * h * 0.55;
+    const t = text({ x: p.x + Math.max(p.length / 2 - w / 2, p.length * 0.06), y: p.y + p.width / 2 - h / 2 }, label, {
       layer: LOAD_PLAN_LAYER,
       color: "#111111",
       height: h,
@@ -134,7 +137,7 @@ function palletCommands(p: PlacedItem, opts: LayoutOptions): { commands: Command
 
   // Per-pallet dimensions.
   if (opts.dimensions) {
-    const th = Math.max(Math.min(p.length, p.width) * 0.16, 30);
+    const th = Math.min(Math.max(Math.min(p.length, p.width) * 0.08, 18), 45);
     if (p.shape === "round") {
       for (const c of linearDimensionCommands({ x: p.x, y: p.y + p.width / 2 }, { x: p.x + p.width, y: p.y + p.width / 2 }, {
         offset: -th * 2,
@@ -193,28 +196,20 @@ export function buildNestLayout(
     );
   }
 
-  // One group per pallet, collected per order.
-  const orderGroups = new Map<string, { city: string; members: string[] }>();
+  // One group per pallet — shape + guide + tag + dimensions. A single group
+  // (not nested per order) so a click selects one pallet and dragging it snaps
+  // to its neighbours; the guide and label come along because they're in the
+  // same group.
   for (const p of result.placed) {
     const { commands: pc, ids } = palletCommands(p, opts);
     commands.push(...pc);
-    const gid = newGroupId();
-    commands.push({ type: "group-entities", groupId: gid, ids, name: `${p.city || "Pallet"}` });
-    let og = orderGroups.get(p.orderId);
-    if (!og) {
-      og = { city: p.city, members: [] };
-      orderGroups.set(p.orderId, og);
-    }
-    og.members.push(gid);
-  }
-  for (const { city, members } of orderGroups.values()) {
-    if (members.length > 0) commands.push({ type: "group-entities", groupId: newGroupId(), ids: members, name: city || "Order" });
+    commands.push({ type: "group-entities", groupId: newGroupId(), ids, name: p.city ? `${p.city} pallet` : "Pallet" });
   }
 
   // A printable summary block, just past the nose of the trailer.
   const summary = summaryLines(result, opts.findings ?? []);
   if (summary.length > 0) {
-    const h = result.trailer.width * 0.045;
+    const h = Math.min(result.trailer.width * 0.028, 55);
     summary.forEach((line, i) => {
       commands.push(
         add(

@@ -252,7 +252,7 @@ const PANEL_HTML = `<!doctype html>
       .pallet:first-child { border-top: 0; margin-top: 0; padding-top: 0; }
       .p-line { display: flex; gap: 4px; align-items: center; margin-bottom: 4px; }
       .p-line input { margin-top: 0; padding: 4px; }
-      .p-name { flex: 1; min-width: 0; }
+      .p-preset { flex: 1; min-width: 0; margin-top: 0; padding: 4px; }
       .p-num { width: 46px; text-align: center; }
       .p-tag { flex: 1; min-width: 0; }
       .times { opacity: 0.5; }
@@ -282,12 +282,9 @@ const PANEL_HTML = `<!doctype html>
       <label>Around pallet (<span class="u"></span>)<input id="m-pallet" type="number" min="0" step="any" /></label>
     </div>
     <div class="row">
-      <button class="ghost sm" id="preset-save">Save trailer size</button>
-      <button class="ghost sm" id="presets-toggle">Manage presets…</button>
+      <button class="ghost sm" id="presets-toggle">Manage sizes…</button>
     </div>
     <div class="presets" id="presets" hidden></div>
-
-    <datalist id="pallet-names"></datalist>
 
     <h4>Orders — drag <span style="opacity:.6">&#10303;</span> or use &#9650;&#9660; to set unload order</h4>
     <div id="orders"></div>
@@ -312,6 +309,7 @@ const PANEL_HTML = `<!doctype html>
       let palette = ["#4f86d6"];
       let state = { presets: [], palletPresets: [], lastPresetName: "", wallMargin: 0, palletMargin: 0, dimensions: false, orders: [] };
       let saveTimer = 0;
+      let nested = false; // a plan is currently drawn — toggles re-run it live
 
       const toU = (mm) => Math.round(mm * unit.perMm * 100) / 100;
       const fromU = (v) => (Number(v) || 0) / unit.perMm;
@@ -332,7 +330,6 @@ const PANEL_HTML = `<!doctype html>
         $("m-wall").value = toU(state.wallMargin);
         $("m-pallet").value = toU(state.palletMargin);
         $("dim-each").checked = !!state.dimensions;
-        $("pallet-names").innerHTML = state.palletPresets.map((pp) => "<option value='" + esc(pp.name) + "'>").join("");
       }
       $("preset").addEventListener("change", (e) => {
         if (e.target.value === "__custom") return;
@@ -352,14 +349,10 @@ const PANEL_HTML = `<!doctype html>
       $("t-width").addEventListener("input", onTrailerInput);
       $("m-wall").addEventListener("input", () => { state.wallMargin = fromU($("m-wall").value); persist(); });
       $("m-pallet").addEventListener("input", () => { state.palletMargin = fromU($("m-pallet").value); persist(); });
-      $("dim-each").addEventListener("change", () => { state.dimensions = $("dim-each").checked; persist(); });
-      $("preset-save").addEventListener("click", () => {
-        const name = (prompt("Name this trailer size:") || "").trim();
-        if (!name) return;
-        state.presets = state.presets.filter((p) => p.name !== name).concat({ name, length: fromU($("t-length").value), width: fromU($("t-width").value) });
-        state.lastPresetName = name;
-        renderTrailer();
+      $("dim-each").addEventListener("change", () => {
+        state.dimensions = $("dim-each").checked;
         persist();
+        if (nested) runNest(); // redraw the existing plan with/without dimensions
       });
       function readTrailer() {
         const p = currentPreset();
@@ -430,10 +423,14 @@ const PANEL_HTML = `<!doctype html>
           const pallets = order.pallets
             .map((p, pi) => {
               const round = p.shape === "round";
+              const known = state.palletPresets.some((x) => x.name === p.name);
+              const opts =
+                state.palletPresets.map((x) => "<option value='" + esc(x.name) + "'" + (x.name === p.name ? " selected" : "") + ">" + esc(x.name) + "</option>").join("") +
+                "<option value='__custom'" + (known ? "" : " selected") + ">Custom size</option>";
               return (
                 "<div class='pallet' data-p='" + pi + "'>" +
                 "<div class='p-line'>" +
-                "<input class='p-name' list='pallet-names' placeholder='Pallet name' value='" + esc(p.name || "") + "'>" +
+                "<select class='p-preset'>" + opts + "</select>" +
                 "<span class='shape-btn ps' title='Rectangular / round'>" + (round ? ROUND_SVG : RECT_SVG) + "</span>" +
                 "<input class='p-num pq' type='number' min='1' step='1' title='Quantity' value='" + (p.qty || 1) + "'>" +
                 "<button class='icon dup' title='Duplicate'>&#8865;</button>" +
@@ -474,10 +471,6 @@ const PANEL_HTML = `<!doctype html>
         persist();
       }
 
-      function matchPreset(p) {
-        return state.palletPresets.find((pp) => pp.name === p.name && Math.abs(pp.width - p.width) < 1 && Math.abs(pp.length - p.length) < 1 && pp.shape === p.shape);
-      }
-
       function bindOrderEvents() {
         $("orders").querySelectorAll(".order").forEach((card) => {
           const oi = Number(card.dataset.i);
@@ -497,21 +490,13 @@ const PANEL_HTML = `<!doctype html>
           card.querySelectorAll(".pallet").forEach((row) => {
             const pi = Number(row.dataset.p);
             const p = order.pallets[pi];
-            const nameEl = row.querySelector(".p-name");
-            nameEl.addEventListener("input", (e) => {
-              p.name = e.target.value;
-              const pp = state.palletPresets.find((x) => x.name === e.target.value);
-              if (pp) { p.width = pp.width; p.length = pp.length; p.shape = pp.shape; renderOrders(); }
+            row.querySelector(".p-preset").addEventListener("change", (e) => {
+              const v = e.target.value;
+              const pp = state.palletPresets.find((x) => x.name === v);
+              if (pp) { p.name = pp.name; p.width = pp.width; p.length = pp.length; p.shape = pp.shape; }
+              else p.name = "";
+              renderOrders();
               persist();
-            });
-            nameEl.addEventListener("blur", () => {
-              if (p.name && p.width > 0 && !matchPreset(p) && !state.palletPresets.some((x) => x.name === p.name)) {
-                if (confirm('Save "' + p.name + '" as a pallet size?')) {
-                  state.palletPresets.push({ name: p.name, width: p.width, length: p.length, shape: p.shape });
-                  renderTrailer();
-                  persist();
-                }
-              }
             });
             row.querySelector(".pq").addEventListener("input", (e) => { p.qty = Math.max(1, Math.floor(Number(e.target.value) || 1)); persist(); });
             row.querySelector(".pw").addEventListener("input", (e) => { p.width = fromU(e.target.value); persist(); });
@@ -532,28 +517,37 @@ const PANEL_HTML = `<!doctype html>
           const handle = card.querySelector(".handle");
           handle.addEventListener("pointerdown", (e) => {
             e.preventDefault();
+            try { handle.setPointerCapture(e.pointerId); } catch (_) {}
             const cards = [...$("orders").querySelectorAll(".order")];
             const clear = () => cards.forEach((c) => c.classList.remove("drop-before", "drop-after"));
-            let target = oi;
+            // insertBefore is an index in 0..cards.length: where the dragged card
+            // should land relative to the *current* list.
+            let insertBefore = oi;
+            let moved = false;
             const onMove = (ev) => {
+              moved = true;
               clear();
+              insertBefore = cards.length;
               for (let k = 0; k < cards.length; k++) {
                 const r = cards[k].getBoundingClientRect();
-                if (ev.clientY < r.top + r.height / 2) { target = k; cards[k].classList.add("drop-before"); return; }
+                if (ev.clientY < r.top + r.height / 2) { insertBefore = k; break; }
               }
-              target = cards.length - 1;
-              cards[target].classList.add("drop-after");
+              if (insertBefore >= cards.length) cards[cards.length - 1].classList.add("drop-after");
+              else cards[insertBefore].classList.add("drop-before");
             };
             const onUp = () => {
               clear();
-              window.removeEventListener("pointermove", onMove);
-              window.removeEventListener("pointerup", onUp);
-              // target is an insert-before index in the current list; drop the
-              // dragged card and adjust for positions that shift left.
-              move(oi, target > oi ? target - 1 : target);
+              handle.removeEventListener("pointermove", onMove);
+              handle.removeEventListener("pointerup", onUp);
+              try { handle.releasePointerCapture(e.pointerId); } catch (_) {}
+              if (!moved) return;
+              // Remove the dragged card first, then insert — every slot at or past
+              // oi shifts down by one.
+              const to = insertBefore > oi ? insertBefore - 1 : insertBefore;
+              move(oi, Math.max(0, Math.min(to, state.orders.length - 1)));
             };
-            window.addEventListener("pointermove", onMove);
-            window.addEventListener("pointerup", onUp);
+            handle.addEventListener("pointermove", onMove);
+            handle.addEventListener("pointerup", onUp);
           });
         });
       }
@@ -564,17 +558,19 @@ const PANEL_HTML = `<!doctype html>
         persist();
       });
 
-      $("nest").addEventListener("click", () => {
+      function runNest() {
         post({ type: "nest", trailer: readTrailer(), orders: state.orders, palletMargin: Math.max(0, state.palletMargin), dimensions: !!state.dimensions });
         $("results").innerHTML = "<div class='muted'>Nesting…</div>";
-      });
-      $("clear").addEventListener("click", () => { post({ type: "clear" }); $("results").innerHTML = ""; });
+      }
+      $("nest").addEventListener("click", runNest);
+      $("clear").addEventListener("click", () => { nested = false; post({ type: "clear" }); $("results").innerHTML = ""; });
 
       // ---- results ----
       function renderResult(m) {
         const box = $("results");
-        if (m.type === "cleared") { box.innerHTML = "<div class='muted'>Layout cleared.</div>"; return; }
+        if (m.type === "cleared") { nested = false; box.innerHTML = "<div class='muted'>Layout cleared.</div>"; return; }
         if (m.type === "error") { box.innerHTML = "<div class='f error'>" + esc(m.message) + "</div>"; return; }
+        nested = true;
         const r = m.result;
         let html =
           "<h4>Result</h4><div class='muted'>" + r.placed.length + " placed, " + r.unplaced.length +
