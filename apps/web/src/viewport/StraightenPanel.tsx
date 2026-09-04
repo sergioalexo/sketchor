@@ -54,7 +54,7 @@ export function StraightenPanel() {
             ? "Select the part first (V)"
             : referenceEdgeId
               ? "Reference edge picked — Enter to apply"
-              : "Click a selected line as the reference edge"}
+              : "Click a selected line, or a straight polyline segment, as the reference edge"}
         </span>
         <button
           className="btn primary"

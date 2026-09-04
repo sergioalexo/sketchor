@@ -23,6 +23,7 @@ const REQUIRED: Record<string, Permission | null> = {
   "ui.postMessage": null,
   "ui.onMessage": null,
   "ui.notify": null,
+  "ui.print": null,
   "app.displayUnit": null,
   "app.onDisplayUnitChange": null,
 };

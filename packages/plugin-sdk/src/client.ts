@@ -68,6 +68,7 @@ export function createClient(transport: RpcTransport): PluginHostApi {
       onMessage: (listener: (message: unknown) => void): Promise<Unsubscribe> =>
         transport.subscribe("ui.onMessage", [], (p) => listener(p)),
       notify: (message: string, options?: NotifyOptions) => transport.post("ui.notify", [message, options]),
+      print: (bodyHtml: string) => transport.post("ui.print", [bodyHtml]),
     },
 
     app: {

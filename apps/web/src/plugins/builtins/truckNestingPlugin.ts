@@ -4,6 +4,7 @@ import {
   LOAD_PLAN_GUIDE_LAYER,
   LOAD_PLAN_LAYER,
   nestByOrders,
+  setDimensionsOnLayout,
   validateNest,
   type NestResult,
   type Order,
@@ -42,17 +43,29 @@ interface PersistedState {
   /** Add a W×L dimension to every drawn pallet. */
   dimensions: boolean;
   orders: Order[];
+  /** Free-text label for the printed load plan — defaults to the trailer name when blank. */
+  loadName: string;
+  /** Free-text truck/driver info shown on the printed load plan. */
+  truckInfo: string;
 }
 
 const STORAGE_KEY = "state";
 
+// Standard sizes are entered in inches (630"×90" trailer, 48"×42" pallet) but
+// stored in mm like everything else in the document — 1 in = 25.4 mm.
+const IN = 25.4;
+
 const SEED_PRESETS: TrailerProfile[] = [
+  { name: "Standard trailer (630×90 in)", length: 630 * IN, width: 90 * IN },
   { name: "13.6 m curtainsider", length: 13620, width: 2480 },
   { name: "7.2 m rigid", length: 7200, width: 2450 },
   { name: "6.1 m box van", length: 6100, width: 2400 },
 ];
 
+const STANDARD_PALLET_NAME = "Standard pallet (48×42 in)";
+
 const SEED_PALLET_PRESETS: PalletPreset[] = [
+  { name: STANDARD_PALLET_NAME, width: 48 * IN, length: 42 * IN, shape: "rect" },
   { name: "EUR pallet", width: 1200, length: 800, shape: "rect" },
   { name: "EUR-6 half", width: 800, length: 600, shape: "rect" },
   { name: "Industrial", width: 1200, length: 1000, shape: "rect" },
@@ -64,7 +77,9 @@ function seedOrder(): Order {
     id: `o-${Date.now().toString(36)}`,
     city: "",
     color: PALETTE[0],
-    pallets: [{ id: `p-${Date.now().toString(36)}`, name: "EUR pallet", width: 1200, length: 800, shape: "rect", qty: 1 }],
+    pallets: [
+      { id: `p-${Date.now().toString(36)}`, name: STANDARD_PALLET_NAME, width: 48 * IN, length: 42 * IN, shape: "rect", qty: 1 },
+    ],
   };
 }
 
@@ -144,6 +159,8 @@ function asState(v: unknown): PersistedState {
     palletOn: typeof o.palletOn === "boolean" ? o.palletOn : palletMargin > 0,
     dimensions: o.dimensions === true,
     orders: orders.length > 0 ? orders : [seedOrder()],
+    loadName: str(o.loadName),
+    truckInfo: str(o.truckInfo),
   };
 }
 
@@ -158,6 +175,12 @@ const plugin: PluginModule = {
 
     const stored = await sketchor.storage.get(STORAGE_KEY).catch(() => undefined);
     let state = asState(stored);
+
+    // The last successful solve, kept so "Print load plan" and the dimension
+    // toggle don't need to re-run the solver (which would discard any pallet
+    // the user has since dragged by hand).
+    let lastResult: NestResult | null = null;
+    let lastFindings: ValidationFinding[] = [];
 
     const pushInit = () => void sketchor.ui.postMessage({ type: "init", state, unit, palette: PALETTE });
 
@@ -209,6 +232,8 @@ const plugin: PluginModule = {
             ...clearPreviousLayout(model),
             ...buildNestLayout(result, { dimensions, perMm: unit.perMm, unitLabel: unit.label, findings }),
           ]);
+          lastResult = result;
+          lastFindings = findings;
           void sketchor.ui.postMessage({ type: "result", result, findings });
           const errors = findings.filter((f) => f.level === "error").length;
           sketchor.ui.notify(
@@ -220,10 +245,142 @@ const plugin: PluginModule = {
         } catch (err) {
           void sketchor.ui.postMessage({ type: "error", message: err instanceof Error ? err.message : String(err) });
         }
+        return;
+      }
+      if (msg.type === "toggle-dimensions") {
+        // An overlay-only change — never re-runs the solver, so pallets the
+        // user has manually dragged since the last Auto-nest stay put.
+        const dimensions = msg.dimensions === true;
+        const model = await sketchor.document.read();
+        const commands = setDimensionsOnLayout(model, dimensions, { perMm: unit.perMm, unitLabel: unit.label });
+        if (commands.length > 0) await sketchor.document.apply(commands);
+        return;
+      }
+      if (msg.type === "print") {
+        if (!lastResult) {
+          void sketchor.ui.postMessage({ type: "error", message: "Auto-nest a plan before printing it." });
+          return;
+        }
+        const loadName = str(msg.loadName).trim() || lastResult.trailer.name;
+        const truckInfo = str(msg.truckInfo).trim();
+        const html = buildPrintHtml(lastResult, lastFindings, {
+          loadName,
+          truckInfo,
+          perMm: unit.perMm,
+          unitLabel: unit.label,
+        });
+        sketchor.ui.print(html);
       }
     });
   },
 };
+
+function escapeHtml(s: string): string {
+  return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c] as string);
+}
+
+function fmtMm(mm: number, perMm: number, unitLabel: string): string {
+  return `${Math.round(mm * perMm * 10) / 10} ${unitLabel}`;
+}
+
+/**
+ * A printable load-plan report: a top-down SVG of the nest, a legend mapping
+ * each unload stop's colour to its city, and a full pallet list — built from
+ * the last solved {@link NestResult}, not the live canvas, so it always
+ * matches what Auto-nest actually computed.
+ */
+function buildPrintHtml(
+  result: NestResult,
+  findings: ValidationFinding[],
+  info: { loadName: string; truckInfo: string; perMm: number; unitLabel: string },
+): string {
+  const { trailer } = result;
+  const pad = Math.max(trailer.length, trailer.width) * 0.03;
+  const vb = `${-pad} ${-pad} ${trailer.length + pad * 2} ${trailer.width + pad * 2}`;
+
+  const shapes = result.placed
+    .map((p, i) => {
+      const shape =
+        p.shape === "round"
+          ? `<circle cx="${p.x + p.width / 2}" cy="${p.y + p.width / 2}" r="${p.width / 2}" fill="${p.color}" stroke="#111" stroke-width="${pad * 0.05}" />`
+          : `<rect x="${p.x}" y="${p.y}" width="${p.length}" height="${p.width}" fill="${p.color}" stroke="#111" stroke-width="${pad * 0.05}" />`;
+      // The item number, big and bold — the same number as on the drawn plan
+      // and the pallet table below, since city/tag text is often too small
+      // to read once the trailer is zoomed to fit the page.
+      const fontSize = Math.min(Math.min(p.length, p.width) * 0.4, 160);
+      const textEl = `<text x="${p.x + p.length / 2}" y="${p.y + p.width / 2}" font-size="${fontSize}" font-weight="700" text-anchor="middle" dominant-baseline="middle" fill="#111">${i + 1}</text>`;
+      return shape + textEl;
+    })
+    .join("");
+
+  const svg = `<svg viewBox="${vb}" xmlns="http://www.w3.org/2000/svg">
+    <rect x="0" y="0" width="${trailer.length}" height="${trailer.width}" fill="none" stroke="#111" stroke-width="${pad * 0.08}" />
+    ${shapes}
+  </svg>`;
+
+  const bySeq = new Map<number, { city: string; color: string; n: number }>();
+  for (const p of result.placed) {
+    const e = bySeq.get(p.orderIndex) ?? { city: p.city, color: p.color, n: 0 };
+    e.n += 1;
+    bySeq.set(p.orderIndex, e);
+  }
+  const legend = [...bySeq]
+    .sort((a, b) => a[0] - b[0])
+    .map(
+      ([idx, e]) =>
+        `<div class="legend-row"><span class="swatch" style="background:${escapeHtml(e.color)}"></span>#${idx + 1} ${escapeHtml(e.city || "—")} &middot; ${e.n} pallet${e.n === 1 ? "" : "s"}</div>`,
+    )
+    .join("");
+
+  const rows = result.placed
+    .map((p, i) => {
+      const dims = p.shape === "round" ? `Ø ${fmtMm(p.width, info.perMm, info.unitLabel)}` : `${fmtMm(p.width, info.perMm, info.unitLabel)} × ${fmtMm(p.length, info.perMm, info.unitLabel)}`;
+      return `<tr><td>${i + 1}</td><td><span class="swatch" style="background:${escapeHtml(p.color)}"></span>${escapeHtml(p.city || "—")}</td><td>${p.shape === "round" ? "Round" : "Rect"}</td><td>${dims}</td><td>${escapeHtml(p.tag || "")}</td></tr>`;
+    })
+    .join("");
+
+  const unplaced =
+    result.unplaced.length > 0
+      ? `<h2>Unplaced</h2><ul class="unplaced">${result.unplaced.map((u) => `<li>${escapeHtml(u.city || "—")}: ${u.count} — ${escapeHtml(u.reason)}</li>`).join("")}</ul>`
+      : "";
+  const problems = findings.filter((f) => f.level !== "info");
+  const findingsHtml =
+    problems.length > 0
+      ? `<ul class="findings">${problems.map((f) => `<li class="${f.level}">${escapeHtml(f.message)}</li>`).join("")}</ul>`
+      : "";
+
+  return `<style>
+    .load-plan, .load-plan * { -webkit-print-color-adjust: exact; print-color-adjust: exact; color-adjust: exact; }
+    .load-plan h1 { font-size: 16px; margin: 0 0 2px; }
+    .load-plan .sub { color: #444; font: 12px system-ui, sans-serif; margin-bottom: 10px; }
+    .load-plan .sub b { color: #111; }
+    .load-plan svg { width: 100%; height: auto; max-height: 55vh; margin: 8px 0; }
+    .load-plan h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; margin: 14px 0 6px; }
+    .load-plan .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font: 12px system-ui, sans-serif; }
+    .load-plan .legend-row { display: flex; align-items: center; gap: 6px; }
+    .load-plan .swatch { display: inline-block; width: 11px; height: 11px; border-radius: 2px; border: 1px solid #0002; }
+    .load-plan table { border-collapse: collapse; width: 100%; font: 12px system-ui, sans-serif; }
+    .load-plan th, .load-plan td { border-bottom: 1px solid #ddd; padding: 4px 8px; text-align: left; }
+    .load-plan th:first-child, .load-plan td:first-child { padding-left: 0; }
+    .load-plan .unplaced, .load-plan .findings { font: 12px system-ui, sans-serif; padding-left: 18px; margin: 0; }
+    .load-plan .findings .error { color: #b3261e; }
+    .load-plan .findings .warn { color: #8a5300; }
+  </style>
+  <div class="load-plan">
+    <h1>${escapeHtml(info.loadName)}</h1>
+    <div class="sub"><b>${escapeHtml(trailer.name)}</b> &middot; ${fmtMm(trailer.length, info.perMm, info.unitLabel)} × ${fmtMm(trailer.width, info.perMm, info.unitLabel)} &middot; ${result.placed.length} pallets, ${fmtMm(result.usedLength, info.perMm, info.unitLabel)} used${info.truckInfo ? ` &middot; ${escapeHtml(info.truckInfo)}` : ""}</div>
+    ${svg}
+    <h2>Legend — unload sequence</h2>
+    <div class="legend">${legend}</div>
+    <h2>Pallets</h2>
+    <table>
+      <thead><tr><th>#</th><th>Job Number</th><th>Shape</th><th>Size</th><th>Tag</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+    ${unplaced}
+    ${findingsHtml}
+  </div>`;
+}
 
 const PANEL_HTML = `<!doctype html>
 <html>
@@ -311,6 +468,13 @@ const PANEL_HTML = `<!doctype html>
     </div>
     <div id="results"></div>
 
+    <h4>Print</h4>
+    <label>Load name<input id="load-name" placeholder="e.g. Load 42" /></label>
+    <label>Truck / driver info<input id="truck-info" placeholder="Truck #, driver, plate…" /></label>
+    <div class="actions">
+      <button class="ghost" id="print-load" disabled>Print load plan</button>
+    </div>
+
     <script>
       const post = (m) => parent.postMessage({ pluginMessage: m }, "*");
       const $ = (id) => document.getElementById(id);
@@ -322,16 +486,12 @@ const PANEL_HTML = `<!doctype html>
       let palette = ["#4f86d6"];
       let state = { presets: [], palletPresets: [], lastPresetName: "", wallMargin: 0, palletMargin: 0, wallOn: false, palletOn: false, dimensions: false, orders: [] };
       let saveTimer = 0;
-      let liveTimer = 0;
-      let nested = false; // a plan is currently drawn — edits re-run it live
+      let nested = false; // a plan is currently drawn
 
       const toU = (mm) => Math.round(mm * unit.perMm * 100) / 100;
       const fromU = (v) => (Number(v) || 0) / unit.perMm;
       const rid = (p) => p + "-" + Math.random().toString(36).slice(2, 8);
       const persist = () => { clearTimeout(saveTimer); saveTimer = setTimeout(() => post({ type: "persist", state }), 400); };
-      // Persist, and if a plan is already drawn, redraw it (debounced) so trailer
-      // margins and the dimension toggle take effect without a manual re-nest.
-      const liveUpdate = () => { persist(); if (nested) { clearTimeout(liveTimer); liveTimer = setTimeout(runNest, 250); } };
 
       // ---- trailer ----
       const currentPreset = () => state.presets.find((p) => p.name === state.lastPresetName) || null;
@@ -339,7 +499,7 @@ const PANEL_HTML = `<!doctype html>
         document.querySelectorAll(".u").forEach((el) => (el.textContent = unit.label));
         const sel = $("preset");
         sel.innerHTML =
-          state.presets.map((p) => "<option value='" + esc(p.name) + "'>" + esc(p.name) + "</option>").join("") +
+          state.presets.map((p) => "<option value='" + esc(p.name) + "'>" + esc(p.name) + " — " + toU(p.length) + "×" + toU(p.width) + " " + esc(unit.label) + "</option>").join("") +
           "<option value='__custom'>Custom…</option>";
         const p = currentPreset();
         sel.value = p ? p.name : "__custom";
@@ -351,7 +511,14 @@ const PANEL_HTML = `<!doctype html>
         $("m-wall").disabled = !state.wallOn;
         $("m-pallet").disabled = !state.palletOn;
         $("dim-each").checked = !!state.dimensions;
+        $("load-name").value = state.loadName || "";
+        $("truck-info").value = state.truckInfo || "";
       }
+      $("load-name").addEventListener("input", () => { state.loadName = $("load-name").value; persist(); });
+      $("truck-info").addEventListener("input", () => { state.truckInfo = $("truck-info").value; persist(); });
+      $("print-load").addEventListener("click", () => {
+        post({ type: "print", loadName: state.loadName, truckInfo: state.truckInfo });
+      });
       $("preset").addEventListener("change", (e) => {
         if (e.target.value === "__custom") return;
         state.lastPresetName = e.target.value;
@@ -383,8 +550,13 @@ const PANEL_HTML = `<!doctype html>
       });
       $("m-wall-on").addEventListener("change", () => { state.wallOn = $("m-wall-on").checked; $("m-wall").disabled = !state.wallOn; persist(); });
       $("m-pallet-on").addEventListener("change", () => { state.palletOn = $("m-pallet-on").checked; $("m-pallet").disabled = !state.palletOn; persist(); });
-      // A dimension is an overlay — redrawing to add/remove it keeps every pallet put.
-      $("dim-each").addEventListener("change", () => { state.dimensions = $("dim-each").checked; liveUpdate(); });
+      // A dimension is an overlay, added/removed on the already-drawn plan —
+      // never a re-nest, so every pallet (including ones dragged by hand) stays put.
+      $("dim-each").addEventListener("change", () => {
+        state.dimensions = $("dim-each").checked;
+        persist();
+        if (nested) post({ type: "toggle-dimensions", dimensions: state.dimensions });
+      });
       const effWall = () => (state.wallOn ? Math.max(0, state.wallMargin) : 0);
       const effPallet = () => (state.palletOn ? Math.max(0, state.palletMargin) : 0);
       function readTrailer() {
@@ -404,7 +576,7 @@ const PANEL_HTML = `<!doctype html>
               "<div class='preset-row' data-i='" + i + "'>" +
               "<input class='" + cls + "-name' value='" + esc(p.name) + "'>" +
               "<input class='" + cls + "-a' type='number' min='0' step='any' value='" + toU(hasShape ? p.width : p.length) + "'>" +
-              "<input class='" + cls + "-b' type='number' min='0' step='any' value='" + toU(hasShape ? p.length : p.width) + "'" + (hasShape && p.shape === "round" ? " disabled" : "") + ">" +
+              "<input class='" + cls + "-b' type='number' min='0' step='any' value='" + toU(hasShape ? p.length : p.width) + "'" + (hasShape && p.shape === "round" ? " disabled style='visibility:hidden'" : "") + ">" +
               (hasShape ? "<span class='shape-btn " + cls + "-shape'>" + (p.shape === "round" ? ROUND_SVG : RECT_SVG) + "</span>" : "<span></span>") +
               "<button class='icon " + cls + "-del' title='Delete'>&#10005;</button>" +
               "</div>",
@@ -432,7 +604,7 @@ const PANEL_HTML = `<!doctype html>
           aEl.addEventListener("input", (e) => { if (isPallet) p.width = fromU(e.target.value); else p.length = fromU(e.target.value); persist(); });
           bEl.addEventListener("input", (e) => { if (isPallet) p.length = fromU(e.target.value); else p.width = fromU(e.target.value); persist(); });
           const shapeEl = row.querySelector(".pp-shape");
-          if (shapeEl) shapeEl.addEventListener("click", () => { p.shape = p.shape === "round" ? "rect" : "round"; renderPresets(); persist(); });
+          if (shapeEl) shapeEl.addEventListener("click", () => { p.shape = p.shape === "round" ? "rect" : "round"; if (p.shape === "round") p.length = p.width; renderPresets(); persist(); });
           row.querySelector(isPallet ? ".pp-del" : ".tp-del").addEventListener("click", () => {
             (isPallet ? state.palletPresets : state.presets).splice(i, 1);
             renderPresets();
@@ -458,7 +630,7 @@ const PANEL_HTML = `<!doctype html>
               const round = p.shape === "round";
               const known = state.palletPresets.some((x) => x.name === p.name);
               const opts =
-                state.palletPresets.map((x) => "<option value='" + esc(x.name) + "'" + (x.name === p.name ? " selected" : "") + ">" + esc(x.name) + "</option>").join("") +
+                state.palletPresets.map((x) => "<option value='" + esc(x.name) + "'" + (x.name === p.name ? " selected" : "") + ">" + esc(x.name) + " — " + (x.shape === "round" ? "&#8960;" + toU(x.width) : toU(x.width) + "&times;" + toU(x.length)) + " " + esc(unit.label) + "</option>").join("") +
                 "<option value='__custom'" + (known ? "" : " selected") + ">Custom size</option>";
               return (
                 "<div class='pallet' data-p='" + pi + "'>" +
@@ -484,7 +656,7 @@ const PANEL_HTML = `<!doctype html>
             "<span class='handle' title='Drag to reorder'>&#10303;</span>" +
             "<span class='move'><button class='up' title='Move up'>&#9650;</button><button class='down' title='Move down'>&#9660;</button></span>" +
             "<span class='dot' style='background:" + esc(order.color) + "'></span>" +
-            "<input class='city' placeholder='City / drop' value='" + esc(order.city) + "'>" +
+            "<input class='city' placeholder='Job Number' value='" + esc(order.city) + "'>" +
             "<span class='seq'>#" + (oi + 1) + "</span>" +
             "<button class='icon order-del' title='Remove order'>&#10005;</button>" +
             "</div>" +
@@ -591,19 +763,21 @@ const PANEL_HTML = `<!doctype html>
         persist();
       });
 
+      function setNested(v) { nested = v; $("print-load").disabled = !v; }
+
       function runNest() {
         post({ type: "nest", trailer: readTrailer(), orders: state.orders, palletMargin: effPallet(), dimensions: !!state.dimensions });
         $("results").innerHTML = "<div class='muted'>Nesting…</div>";
       }
       $("nest").addEventListener("click", runNest);
-      $("clear").addEventListener("click", () => { nested = false; post({ type: "clear" }); $("results").innerHTML = ""; });
+      $("clear").addEventListener("click", () => { setNested(false); post({ type: "clear" }); $("results").innerHTML = ""; });
 
       // ---- results ----
       function renderResult(m) {
         const box = $("results");
-        if (m.type === "cleared") { nested = false; box.innerHTML = "<div class='muted'>Layout cleared.</div>"; return; }
+        if (m.type === "cleared") { setNested(false); box.innerHTML = "<div class='muted'>Layout cleared.</div>"; return; }
         if (m.type === "error") { box.innerHTML = "<div class='f error'>" + esc(m.message) + "</div>"; return; }
-        nested = true;
+        setNested(true);
         const r = m.result;
         let html =
           "<h4>Result</h4><div class='muted'>" + r.placed.length + " placed, " + r.unplaced.length +
@@ -620,7 +794,7 @@ const PANEL_HTML = `<!doctype html>
         seq.forEach((o) => {
           html += "<div class='stop' style='border-left-color:" + esc(o.color) + "'>#" + (o.index + 1) + " " + esc(o.city || "—") + " · " + o.n + " pallet" + (o.n === 1 ? "" : "s") + "</div>";
         });
-        html += "<div class='muted' style='margin-top:8px'>Use the toolbar Print button for a PDF with the plan and this summary.</div>";
+        html += "<div class='muted' style='margin-top:8px'>Use “Print load plan” below for a PDF with the plan, legend and pallet list.</div>";
         box.innerHTML = html;
       }
 

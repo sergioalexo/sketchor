@@ -15,6 +15,9 @@ import { FillPanel } from "./fill/FillPanel";
 import { TextPanel } from "./text/TextPanel";
 import { printDrawing } from "./print/printDrawing";
 import { PluginCommandPalette } from "./plugins/PluginCommandPalette";
+import { ShortcutsPanel } from "./ShortcutsPanel";
+import { RebindPopover } from "./RebindPopover";
+import { bindingLabel, matchesBinding, useKeybindings } from "./keybindings";
 import { PluginPanels } from "./plugins/PluginPanels";
 import { PluginsPanel } from "./plugins/PluginsPanel";
 import { listActions, listExporters, onRegistriesChange, runCommand, runExporter, runGenerator } from "./plugins/host/registries";
@@ -64,6 +67,16 @@ const TOOLS: { id: ToolId; label: string; keyHint: string; icon: JSX.Element }[]
         <circle cx="8" cy="9" r="2" fill="currentColor" />
         <circle cx="13" cy="14" r="2" fill="currentColor" />
         <circle cx="21" cy="5" r="2" fill="currentColor" />
+      </svg>
+    ),
+  },
+  {
+    id: "rectangle",
+    label: "Rectangle",
+    keyHint: "R",
+    icon: (
+      <svg viewBox="0 0 24 24" width="20" height="20">
+        <rect x="4" y="6" width="16" height="12" stroke="currentColor" strokeWidth="2" fill="none" />
       </svg>
     ),
   },
@@ -224,6 +237,18 @@ export function App() {
   const [showUpdateMenu, setShowUpdateMenu] = useState(false);
   const [showPluginMenu, setShowPluginMenu] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
+  const [showShortcuts, setShowShortcuts] = useState(false);
+  const [rebindTarget, setRebindTarget] = useState<{ actionId: string; x: number; y: number } | null>(null);
+  const keyBindings = useKeybindings((s) => s.bindings);
+  // Right-click any bindable toolbar button to reassign its shortcut.
+  const rebind = (actionId: string) => (e: React.MouseEvent) => {
+    e.preventDefault();
+    setRebindTarget({ actionId, x: e.clientX, y: e.clientY });
+  };
+  const withKey = (label: string, actionId: string) => {
+    const key = bindingLabel(keyBindings[actionId]);
+    return key ? `${label} (${key})` : label;
+  };
   // Bumped when plugins load/unload, so the export menu re-reads its list.
   const [pluginVersion, setPluginVersion] = useState(0);
   const showFiles = useApp((s) => s.fileBrowserVisible);
@@ -235,12 +260,28 @@ export function App() {
   const displayUnit = useApp((s) => s.displayUnit);
   const setDisplayUnit = useApp((s) => s.setDisplayUnit);
 
-  // Ctrl/Cmd-K opens the plugin command palette.
+  // App-level shortcuts that don't belong to the canvas (Viewport.tsx owns
+  // those): the command palette and the toolbar toggles that have a
+  // rebindable — but by default unbound — shortcut (see keybindings.ts).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+      const target = e.target as HTMLElement;
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
+      if (matchesBinding(e, "app.commandPalette")) {
         e.preventDefault();
         setShowPalette((v) => !v);
+      } else if (matchesBinding(e, "app.toggleLayers")) {
+        e.preventDefault();
+        setShowLayers((v) => !v);
+      } else if (matchesBinding(e, "app.toggleCode")) {
+        e.preventDefault();
+        setShowCode((v) => !v);
+      } else if (matchesBinding(e, "app.truckNesting")) {
+        e.preventDefault();
+        void runCommand("truck-nesting.open");
+      } else if (matchesBinding(e, "app.shortcuts")) {
+        e.preventDefault();
+        setShowShortcuts(true);
       }
     };
     window.addEventListener("keydown", onKey);
@@ -327,9 +368,10 @@ export function App() {
         <div className="topbar-actions">
           <button
             className="action"
-            title="Open DXF / SVG / DWG drawing (Ctrl+O)"
+            title={withKey("Open DXF / SVG / DWG drawing — right-click to change shortcut", "file.open")}
             data-testid="open-file"
             onClick={() => void openDrawing()}
+            onContextMenu={rebind("file.open")}
           >
             <svg viewBox="0 0 24 24" width="18" height="18">
               <path
@@ -355,16 +397,18 @@ export function App() {
           <div className="action-menu-wrap">
             <button
               className="action"
-              title={
+              title={withKey(
                 saveTarget
-                  ? `Save to ${saveTarget.name} (Ctrl+S) — or Save As / Save a Copy`
-                  : "Save (Ctrl+S) — this drawing has no file yet, so Save will ask where to put it"
-              }
+                  ? `Save to ${saveTarget.name} — or Save As / Save a Copy (right-click to change shortcut)`
+                  : "Save — this drawing has no file yet, so Save will ask where to put it (right-click to change shortcut)",
+                "file.save",
+              )}
               data-testid="save-file"
               onClick={() => {
                 setShowUpdateMenu(false);
                 setShowSaveMenu((v) => !v);
               }}
+              onContextMenu={rebind("file.save")}
             >
               <svg viewBox="0 0 24 24" width="18" height="18">
                 <path
@@ -442,9 +486,10 @@ export function App() {
           </div>
           <button
             className="action"
-            title="Print / Save as PDF (Ctrl+P)"
+            title={withKey("Print / Save as PDF — right-click to change shortcut", "file.print")}
             data-testid="print"
             onClick={() => printDrawing()}
+            onContextMenu={rebind("file.print")}
           >
             <svg viewBox="0 0 24 24" width="18" height="18">
               <path
@@ -459,9 +504,10 @@ export function App() {
           <div className="action-sep" />
           <button
             className="action"
-            title="Undo (Ctrl+Z)"
+            title={withKey("Undo — right-click to change shortcut", "edit.undo")}
             disabled={!bus.canUndo}
             onClick={() => bus.undo()}
+            onContextMenu={rebind("edit.undo")}
           >
             <svg viewBox="0 0 24 24" width="18" height="18">
               <path
@@ -476,9 +522,10 @@ export function App() {
           </button>
           <button
             className="action"
-            title="Redo (Ctrl+Y)"
+            title={withKey("Redo — right-click to change shortcut", "edit.redo")}
             disabled={!bus.canRedo}
             onClick={() => bus.redo()}
+            onContextMenu={rebind("edit.redo")}
           >
             <svg viewBox="0 0 24 24" width="18" height="18">
               <path
@@ -501,9 +548,10 @@ export function App() {
           <div className="action-sep" />
           <button
             className={`action ${showLayers ? "toggled" : ""}`}
-            title="Toggle layers panel"
+            title={withKey("Toggle layers panel — right-click to add a shortcut", "app.toggleLayers")}
             data-testid="toggle-layers"
             onClick={() => setShowLayers((v) => !v)}
+            onContextMenu={rebind("app.toggleLayers")}
           >
             <svg viewBox="0 0 24 24" width="18" height="18">
               <path
@@ -517,9 +565,10 @@ export function App() {
           </button>
           <button
             className={`action ${showCode ? "toggled" : ""}`}
-            title="Toggle sketch code panel"
+            title={withKey("Toggle sketch code panel — right-click to add a shortcut", "app.toggleCode")}
             data-testid="toggle-code"
             onClick={() => setShowCode((v) => !v)}
+            onContextMenu={rebind("app.toggleCode")}
           >
             <svg viewBox="0 0 24 24" width="18" height="18">
               <path
@@ -690,6 +739,43 @@ export function App() {
               />
             </svg>
           </button>
+          <div className="action-sep" />
+          <button
+            className="action"
+            title={withKey("Truck Load Planner — right-click to add a shortcut", "app.truckNesting")}
+            data-testid="truck-nesting-open"
+            onClick={() => void runCommand("truck-nesting.open")}
+            onContextMenu={rebind("app.truckNesting")}
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18">
+              <path
+                d="M2 8h10v9H2zM12 11h5l4 4v2h-3M12 11v6h3M6 20a1.6 1.6 0 100-3.2 1.6 1.6 0 000 3.2zM17 20a1.6 1.6 0 100-3.2 1.6 1.6 0 000 3.2z"
+                stroke="currentColor"
+                strokeWidth="1.6"
+                fill="none"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+          <button
+            className="action"
+            title={withKey("Keyboard shortcuts — right-click to add a shortcut", "app.shortcuts")}
+            data-testid="toggle-shortcuts"
+            onClick={() => setShowShortcuts(true)}
+            onContextMenu={rebind("app.shortcuts")}
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18">
+              <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2" fill="none" />
+              <path
+                d="M9.5 9a2.5 2.5 0 114 2c-.6.6-1.5 1-1.5 2.2"
+                stroke="currentColor"
+                strokeWidth="2"
+                fill="none"
+                strokeLinecap="round"
+              />
+              <circle cx="12" cy="17" r="1.1" fill="currentColor" />
+            </svg>
+          </button>
         </div>
         <div className="hint">{TOOL_HINTS[tool]}</div>
       </header>
@@ -699,18 +785,22 @@ export function App() {
 
       <div className="body">
         <nav className="toolrail">
-          {TOOLS.map((t) => (
-            <button
-              key={t.id}
-              className={`tool ${tool === t.id ? "active" : ""}`}
-              title={`${t.label} (${t.keyHint})`}
-              data-testid={`tool-${t.id}`}
-              onClick={() => setTool(t.id)}
-            >
-              {t.icon}
-              <span className="keyhint">{t.keyHint}</span>
-            </button>
-          ))}
+          {TOOLS.map((t) => {
+            const bound = bindingLabel(keyBindings[`tool.${t.id}`]);
+            return (
+              <button
+                key={t.id}
+                className={`tool ${tool === t.id ? "active" : ""}`}
+                title={`${t.label}${bound ? ` (${bound})` : ""} — right-click to change shortcut`}
+                data-testid={`tool-${t.id}`}
+                onClick={() => setTool(t.id)}
+                onContextMenu={rebind(`tool.${t.id}`)}
+              >
+                {t.icon}
+                <span className="keyhint">{bound || t.keyHint}</span>
+              </button>
+            );
+          })}
         </nav>
         <FileExplorerPanel hidden={!showFiles} onClose={() => setShowFiles(false)} />
         {/* Plugin panels dock on the left, next to the file browser. */}
@@ -807,6 +897,15 @@ export function App() {
       </footer>
 
       <PluginCommandPalette open={showPalette} onClose={() => setShowPalette(false)} />
+      <ShortcutsPanel open={showShortcuts} onClose={() => setShowShortcuts(false)} />
+      {rebindTarget && (
+        <RebindPopover
+          actionId={rebindTarget.actionId}
+          x={rebindTarget.x}
+          y={rebindTarget.y}
+          onClose={() => setRebindTarget(null)}
+        />
+      )}
     </div>
   );
 }

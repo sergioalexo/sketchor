@@ -139,6 +139,13 @@ export interface UiApi {
   onMessage(listener: (message: unknown) => void): Promise<Unsubscribe>;
   /** Shows a transient host notification (toast). */
   notify(message: string, options?: NotifyOptions): void;
+  /**
+   * Prints `bodyHtml` via the host window's print dialog (the same mechanism
+   * as the toolbar Print button), in-page rather than a popup — reliable in
+   * both the browser and the desktop webview. `bodyHtml` is trusted markup
+   * the plugin builds itself; escape any user-entered strings it contains.
+   */
+  print(bodyHtml: string): void;
 }
 
 export interface UiShowOptions {
@@ -231,5 +238,6 @@ export interface ImporterContext {
  * `ui.show(html, options)` for the sandboxed-iframe panel — a breaking change to
  * the `ui` sub-API, hence the minor bump on a pre-1.0 line. 0.4.0 added the
  * ambient, permission-free {@link AppApi} (`app.displayUnit`) — additive.
+ * 0.5.0 added `ui.print(bodyHtml)` — additive.
  */
-export const HOST_API_VERSION = "0.4.0";
+export const HOST_API_VERSION = "0.5.0";

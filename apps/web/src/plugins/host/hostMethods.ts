@@ -2,6 +2,7 @@ import { projectDocument, type Command, type DisplayUnitInfo, type UiShowOptions
 import { bus, doc, useApp } from "../../state/store";
 import { factorFromMm, type DisplayUnit } from "../../units";
 import { hidePanel, postToPanel, showPanel, subscribeToPanel } from "./uiManager";
+import { printHtml } from "../../print/printHtml";
 
 /** The current display unit as the plugin-facing {@link DisplayUnitInfo}. */
 function currentDisplayUnit(): DisplayUnitInfo {
@@ -142,6 +143,9 @@ export function dispatchPost(ctx: HostContext, method: string, args: unknown[]):
     }
     case "ui.postMessage":
       postToPanel(ctx.pluginId, args[0]);
+      return;
+    case "ui.print":
+      printHtml(String(args[0]));
       return;
     default:
       throw new Error(`Unhandled post method "${method}"`);

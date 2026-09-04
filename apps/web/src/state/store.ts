@@ -23,6 +23,7 @@ import {
   parseCode,
   parseDxf,
   patternCommands,
+  polylineSegments,
   reduceToHalfTurn,
   scanForCrossings,
   scanForDuplicates,
@@ -238,6 +239,7 @@ export type ToolId =
   | "select"
   | "line"
   | "polyline"
+  | "rectangle"
   | "circle"
   | "point"
   | "measure"
@@ -247,13 +249,14 @@ export type ToolId =
   | "dim";
 
 export const TOOL_HINTS: Record<ToolId, string> = {
-  select: "Click to select (Shift adds) - drag left-to-right to window-select, right-to-left to crossing-select - drag to move - Del deletes - G groups - U ungroups",
+  select: "Click to select (Shift adds) - drag left-to-right to window-select, right-to-left to crossing-select - drag to move - Del deletes - G groups - U ungroups - Shift+C toggles the selection between construction (dashed) and normal lines",
   line: "Click start point, then click next points to chain - middle/right-drag pans and the wheel zooms without losing the line - Esc finishes and returns to the select tool",
   polyline: "Click each vertex - Enter or double-click to finish, C to close the shape, Backspace undoes the last vertex, middle/right-drag pans without losing it, Esc cancels and returns to the select tool",
+  rectangle: "Click one corner, then click the opposite corner",
   circle: "Click center, then click a point on the circle",
   point: "Click to place a point",
   measure: "Click two points to measure distance (snaps to endpoints, midpoints, centers, on-line points, intersections) - Ctrl-click a line to set it as the angle reference - Alt-click a line/circle/arc for its whole length/radius, Shift-Alt-click more lines/arcs to total - click inside a closed area for its area+perimeter - Ctrl+C copies the readout",
-  straighten: "Select the part with V, switch here, click the reference edge, then Enter to apply",
+  straighten: "Select the part with V, switch here, click the reference edge — a line or a straight polyline segment — then Enter to apply",
   fill: "Pick a colour, then click a closed shape to hatch-fill it - Alt-click removes a fill - use the panel to apply to a whole selection",
   text: "Click where the text goes and type - Enter places it, Esc cancels - double-click existing text to edit it",
   dim: "Click two points to place a linear dimension on the Dimensions layer, in the current display unit",
@@ -267,20 +270,34 @@ export type StraightenPivot = "center" | "edge-mid" | "edge-start";
  * matching the pivot-mode toggle from the spec (selection center by
  * default, or a point on the reference edge itself).
  */
-function straightenPivotPoint(
-  mode: StraightenPivot,
-  selectionEntities: Entity[],
-  ref: Extract<Entity, { type: "line" }>,
-): Point {
+function straightenPivotPoint(mode: StraightenPivot, selectionEntities: Entity[], edge: { a: Point; b: Point }): Point {
   switch (mode) {
     case "edge-mid":
-      return mid(ref.a, ref.b);
+      return mid(edge.a, edge.b);
     case "edge-start":
-      return ref.a;
+      return edge.a;
     case "center":
     default:
       return centroidOfEntities(selectionEntities);
   }
+}
+
+/**
+ * The straighten tool's reference edge as a plain `{a, b}` segment — either a
+ * whole line, or one straight (non-bulged) segment of a polyline, picked by
+ * {@link referenceEdgeSegment} when the user clicked it. Null for anything
+ * that isn't a valid straight edge (a curved polyline segment, an out-of-range
+ * segment index after the polyline was edited, or any other entity type).
+ */
+function referenceEdgeSegmentPoints(ref: Entity, segment: number | null): { a: Point; b: Point } | null {
+  if (ref.type === "line") return { a: ref.a, b: ref.b };
+  if (ref.type === "polyline") {
+    const segs = polylineSegments(ref);
+    const s = segs[segment ?? 0];
+    if (!s || s.bulge !== 0) return null;
+    return { a: s.a, b: s.b };
+  }
+  return null;
 }
 
 /**
@@ -290,18 +307,20 @@ function straightenPivotPoint(
  * edge picked yet. Shared by the live dashed preview and the commit below.
  */
 export function computeStraightenTransform(): { ids: EntityId[]; pivot: Point; rotation: number } | null {
-  const { referenceEdgeId, selection, straightenAxis, straightenPivot } = useApp.getState();
+  const { referenceEdgeId, referenceEdgeSegment, selection, straightenAxis, straightenPivot } = useApp.getState();
   if (!referenceEdgeId || !selection.includes(referenceEdgeId)) return null;
   const ref = doc.get(referenceEdgeId);
-  if (!ref || ref.type !== "line") return null;
+  if (!ref) return null;
+  const edge = referenceEdgeSegmentPoints(ref, referenceEdgeSegment);
+  if (!edge) return null;
 
   const selectionEntities = selection.map((id) => doc.get(id)).filter((e): e is Entity => !!e);
   if (selectionEntities.length === 0) return null;
 
-  const currentAngle = Math.atan2(ref.b.y - ref.a.y, ref.b.x - ref.a.x);
+  const currentAngle = Math.atan2(edge.b.y - edge.a.y, edge.b.x - edge.a.x);
   const target = straightenAxis === "horizontal" ? 0 : Math.PI / 2;
   const rotation = reduceToHalfTurn(target - currentAngle);
-  const pivot = straightenPivotPoint(straightenPivot, selectionEntities, ref);
+  const pivot = straightenPivotPoint(straightenPivot, selectionEntities, edge);
   return { ids: selection, pivot, rotation };
 }
 
@@ -475,11 +494,13 @@ interface AppState {
   /** Warnings from the most recent SVG/DWG import (e.g. curve approximation, unreadable file); [] once dismissed. */
   fileWarnings: string[];
   setFileWarnings: (warnings: string[]) => void;
-  /** The line entity picked as the straighten tool's reference edge (must be in `selection`). */
+  /** The line (or polyline) entity picked as the straighten tool's reference edge (must be in `selection`). */
   referenceEdgeId: EntityId | null;
+  /** Which segment of `referenceEdgeId` is the reference, when it's a polyline (unused for a plain line). */
+  referenceEdgeSegment: number | null;
   straightenAxis: StraightenAxis;
   straightenPivot: StraightenPivot;
-  setReferenceEdge: (id: EntityId | null) => void;
+  setReferenceEdge: (id: EntityId | null, segment?: number | null) => void;
   setStraightenAxis: (axis: StraightenAxis) => void;
   setStraightenPivot: (pivot: StraightenPivot) => void;
   /** The colour the Fill/Hatch tool applies on click and the Fill panel seeds from. */
@@ -584,9 +605,10 @@ export const useApp = create<AppState>((set, get) => ({
   fileWarnings: [],
   setFileWarnings: (warnings) => set({ fileWarnings: warnings }),
   referenceEdgeId: null,
+  referenceEdgeSegment: null,
   straightenAxis: "horizontal",
   straightenPivot: "center",
-  setReferenceEdge: (id) => set({ referenceEdgeId: id }),
+  setReferenceEdge: (id, segment = null) => set({ referenceEdgeId: id, referenceEdgeSegment: id ? segment : null }),
   setStraightenAxis: (axis) => set({ straightenAxis: axis }),
   setStraightenPivot: (pivot) => set({ straightenPivot: pivot }),
   fillColor: PALETTE[0],
@@ -624,7 +646,7 @@ export const useApp = create<AppState>((set, get) => ({
   fitRequestId: 0,
   requestFit: () => set((s) => ({ fitRequestId: s.fitRequestId + 1 })),
   // Switching tools invalidates any in-progress reference-edge pick or entered group.
-  setTool: (tool) => set({ tool, referenceEdgeId: null, enteredGroupId: null }),
+  setTool: (tool) => set({ tool, referenceEdgeId: null, referenceEdgeSegment: null, enteredGroupId: null }),
   setSelection: (selection) => set({ selection }),
   setCursor: (cursor) => set({ cursor }),
   setZoom: (zoom) => set({ zoom }),
@@ -731,6 +753,9 @@ function syncFromBus(): void {
       referenceEdgeId: s.referenceEdgeId && doc.has(s.referenceEdgeId) && (s.tool === "measure" || selection.includes(s.referenceEdgeId))
         ? s.referenceEdgeId
         : null,
+      referenceEdgeSegment: s.referenceEdgeId && doc.has(s.referenceEdgeId) && (s.tool === "measure" || selection.includes(s.referenceEdgeId))
+        ? s.referenceEdgeSegment
+        : null,
       // Drop findings that no longer make sense (their entities were edited/removed elsewhere).
       healIssues: s.healIssues.filter((issue) => issueEntityIds(issue).every((id) => doc.has(id))),
       duplicateIssues: s.duplicateIssues.filter((issue) => issue.entityIds.every((id) => doc.has(id))),
@@ -803,6 +828,7 @@ export function switchToSession(id: string): void {
     revision: incoming.doc.revision,
     // Tool-scoped state doesn't carry meaning across a document switch.
     referenceEdgeId: null,
+    referenceEdgeSegment: null,
     enteredGroupId: null,
     healIssues: [],
     duplicateIssues: [],

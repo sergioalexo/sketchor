@@ -39,6 +39,7 @@ import {
   useApp,
 } from "../state/store";
 import { openDrawing, saveCurrent } from "../io/drawingFile";
+import { matchesBinding } from "../keybindings";
 import { printDrawing } from "../print/printDrawing";
 import { formatArea, formatLength } from "../units";
 import { render } from "./renderer";
@@ -55,8 +56,23 @@ type DrawInteraction =
   | { kind: "draw-line"; start: Point }
   | { kind: "draw-polyline"; points: Point[] }
   | { kind: "draw-circle"; center: Point }
+  | { kind: "draw-rectangle"; corner: Point }
   | { kind: "measure"; start: Point }
   | { kind: "dim"; start: Point };
+
+/** The four corners of the axis-aligned rectangle between two opposite corners, clockwise from the min corner. */
+function rectFromCorners(a: Point, b: Point): Point[] {
+  const x0 = Math.min(a.x, b.x);
+  const y0 = Math.min(a.y, b.y);
+  const x1 = Math.max(a.x, b.x);
+  const y1 = Math.max(a.y, b.y);
+  return [
+    { x: x0, y: y0 },
+    { x: x1, y: y0 },
+    { x: x1, y: y1 },
+    { x: x0, y: y1 },
+  ];
+}
 
 type Interaction =
   | { kind: "idle" }
@@ -66,15 +82,24 @@ type Interaction =
       kind: "move";
       ids: EntityId[];
       startWorld: Point;
+      startScreen: Point;
       dx: number;
       dy: number;
       /** Every vertex of the selection at grab time; a snapped move aligns whichever one lands closest to a target. */
       baseVertices: Point[];
+      /**
+       * If this pointerdown grabbed an already-multi-selected item, the ids to
+       * collapse the selection down to on pointerup *if it turns out to be a
+       * plain click* (no drag) — a drag instead moves every currently selected
+       * id together. `null` when no collapsing is needed (fresh click, or the
+       * click already matched the whole selection).
+       */
+      collapseTo: EntityId[] | null;
     }
   | { kind: "rotate-group"; ids: EntityId[]; pivot: Point; startAngle: number; rotation: number }
   | { kind: "box-select"; startScreen: Point; startWorld: Point; currentWorld: Point; additive: boolean };
 
-const DRAW_KINDS = ["draw-line", "draw-polyline", "draw-circle", "measure", "dim"] as const;
+const DRAW_KINDS = ["draw-line", "draw-polyline", "draw-circle", "draw-rectangle", "measure", "dim"] as const;
 
 /** Narrows to the states worth preserving across a pan (see DrawInteraction). */
 function resumable(i: Interaction): DrawInteraction | { kind: "idle" } {
@@ -106,6 +131,29 @@ function noSnap(e: { ctrlKey: boolean; metaKey: boolean; altKey: boolean }): boo
   return e.ctrlKey || e.metaKey || e.altKey;
 }
 
+/**
+ * Flips the current selection between construction (dashed) and normal
+ * (solid) lines — reusing the existing `dashed` entity flag, the same one
+ * the load-planner guides and other construction geometry already draw with.
+ * Text has no `dashed` concept and is skipped. If every eligible entity is
+ * already dashed, this turns them all solid; otherwise it dashes them all.
+ */
+function toggleConstruction(): void {
+  const { selection } = useApp.getState();
+  const targets = selection
+    .map((id) => doc.get(id))
+    .filter((e): e is Exclude<Entity, TextEntity> => !!e && e.type !== "text");
+  if (targets.length === 0) return;
+  const allDashed = targets.every((e) => e.dashed === true);
+  const commands: Command[] = targets.map((e) => {
+    const entity = { ...e };
+    if (allDashed) delete entity.dashed;
+    else entity.dashed = true;
+    return { type: "update-entity", entity };
+  });
+  bus.execute(commands.length === 1 ? commands[0] : { type: "batch", commands });
+}
+
 /** New geometry carries the active layer (omitted when it's the default). */
 function activeLayerProp(active: string): { layer?: string } {
   return active && active !== "0" ? { layer: active } : {};
@@ -122,7 +170,12 @@ function hitTest(view: View, world: Point): EntityId | null {
       e.type === "line"
         ? distToSegment(world, e.a, e.b)
         : e.type === "circle"
-          ? Math.abs(dist(world, e.center) - e.radius)
+          ? // A hatch-filled circle (e.g. a round pallet) is clickable anywhere
+            // inside it, not just on its rim — matching how a solid shape
+            // behaves in every other drawing app.
+            e.fill && dist(world, e.center) <= e.radius
+            ? 0
+            : Math.abs(dist(world, e.center) - e.radius)
           : e.type === "point"
             ? dist(world, e.p)
             : e.type === "text"
@@ -133,22 +186,29 @@ function hitTest(view: View, world: Point): EntityId | null {
                 : Infinity
               : e.type === "arc"
               ? distToArc(world, e.center, e.radius, e.startAngle, e.endAngle, e.ccw)
-              : // Polyline: whichever of its segments the cursor is nearest to.
-                Math.min(
-                  ...polylineSegments(e).map((seg) => {
-                    const bulgeArc = bulgeToArc(seg.a, seg.b, seg.bulge);
-                    return bulgeArc
-                      ? distToArc(
-                          world,
-                          bulgeArc.center,
-                          bulgeArc.radius,
-                          bulgeArc.startAngle,
-                          bulgeArc.endAngle,
-                          bulgeArc.ccw,
-                        )
-                      : distToSegment(world, seg.a, seg.b);
-                  }),
-                );
+              : e.type === "polyline"
+                ? // A closed, hatch-filled polyline (e.g. a pallet) is clickable
+                  // anywhere inside it, not just near its outline — otherwise
+                  // clicking the middle of a big filled shape selects nothing.
+                  e.closed && e.fill && pointInPolygon(world, e.points)
+                  ? 0
+                  : // Whichever of its segments the cursor is nearest to.
+                    Math.min(
+                      ...polylineSegments(e).map((seg) => {
+                        const bulgeArc = bulgeToArc(seg.a, seg.b, seg.bulge);
+                        return bulgeArc
+                          ? distToArc(
+                              world,
+                              bulgeArc.center,
+                              bulgeArc.radius,
+                              bulgeArc.startAngle,
+                              bulgeArc.endAngle,
+                              bulgeArc.ccw,
+                            )
+                          : distToSegment(world, seg.a, seg.b);
+                      }),
+                    )
+                : Infinity;
     if (d <= bestDist) {
       best = e.id;
       bestDist = d;
@@ -245,6 +305,8 @@ export function Viewport() {
       // Committed vertices plus a rubber-band leg to the cursor.
       const points = snap ? [...interaction.points, snap.point] : interaction.points;
       if (points.length >= 2) preview = { id: "preview", type: "polyline", points, closed: false };
+    } else if (snap && interaction.kind === "draw-rectangle") {
+      preview = { id: "preview", type: "polyline", points: rectFromCorners(interaction.corner, snap.point), closed: true };
     }
 
     const straightenPlan = state.tool === "straighten" ? computeStraightenTransform() : null;
@@ -443,7 +505,10 @@ export function Viewport() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fitRequestId]);
 
-  // Keyboard: tools, undo/redo, delete, escape
+  // Keyboard: tools, undo/redo, delete, escape. Most bindings are rebindable
+  // (see keybindings.ts) via matchesBinding(); a few stay hard-coded because
+  // they're mode-dependent rather than a single command — Escape, Delete/
+  // Backspace-to-delete-selection, and the in-progress-polyline keys.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
@@ -452,29 +517,29 @@ export function Viewport() {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c" && app.tool === "measure" && app.measurement) {
         e.preventDefault();
         void navigator.clipboard.writeText(measurementText(app.measurement, app.displayUnit, referenceEdgeAngleDeg()));
-      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+      } else if (matchesBinding(e, "file.save")) {
         e.preventDefault();
         void saveCurrent();
-      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "o") {
+      } else if (matchesBinding(e, "file.open")) {
         e.preventDefault();
         void openDrawing();
-      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "p") {
+      } else if (matchesBinding(e, "file.print")) {
         e.preventDefault();
         printDrawing();
-      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "w") {
+      } else if (matchesBinding(e, "file.closeTab")) {
         // Desktop only in practice: browsers reserve Ctrl+W to close their own
         // tab and won't let a page preventDefault it.
         e.preventDefault();
         closeTab(useApp.getState().activeSessionId);
-      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z" && !e.shiftKey) {
+      } else if (matchesBinding(e, "edit.undo")) {
         bus.undo();
         e.preventDefault();
-      } else if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "y" || (e.key.toLowerCase() === "z" && e.shiftKey))) {
+      } else if (matchesBinding(e, "edit.redo")) {
         bus.redo();
         e.preventDefault();
       } else if (e.key === "Enter" && interactionRef.current.kind === "draw-polyline") {
         finishPolyline(false);
-      } else if (e.key.toLowerCase() === "c" && interactionRef.current.kind === "draw-polyline") {
+      } else if (e.key.toLowerCase() === "c" && !e.shiftKey && interactionRef.current.kind === "draw-polyline") {
         // While drawing, C closes the shape rather than switching to the circle tool.
         finishPolyline(true);
       } else if (e.key === "Backspace" && interactionRef.current.kind === "draw-polyline") {
@@ -495,35 +560,40 @@ export function Viewport() {
         app.setEnteredGroup(null);
         app.setTool("select");
         redraw();
-      } else if (e.key.toLowerCase() === "v" || e.key.toLowerCase() === "s") {
+      } else if (matchesBinding(e, "edit.toggleConstruction") && interactionRef.current.kind === "idle") {
+        e.preventDefault();
+        toggleConstruction();
+      } else if (matchesBinding(e, "tool.select")) {
         app.setTool("select");
-      } else if (e.key.toLowerCase() === "l") {
+      } else if (matchesBinding(e, "tool.line")) {
         app.setTool("line");
-      } else if (e.key.toLowerCase() === "w") {
+      } else if (matchesBinding(e, "tool.polyline")) {
         app.setTool("polyline");
-      } else if (e.key.toLowerCase() === "c") {
+      } else if (matchesBinding(e, "tool.rectangle")) {
+        app.setTool("rectangle");
+      } else if (matchesBinding(e, "tool.circle")) {
         app.setTool("circle");
-      } else if (e.key.toLowerCase() === "p" && !e.ctrlKey && !e.metaKey) {
+      } else if (matchesBinding(e, "tool.point")) {
         app.setTool("point");
-      } else if (e.key.toLowerCase() === "m") {
+      } else if (matchesBinding(e, "tool.measure")) {
         app.setTool("measure");
-      } else if (e.key.toLowerCase() === "f") {
+      } else if (matchesBinding(e, "view.fit")) {
         fitView(app.selection.length ? app.selection : undefined);
-      } else if (e.key.toLowerCase() === "t") {
+      } else if (matchesBinding(e, "tool.straighten")) {
         app.setTool("straighten");
-      } else if (e.key.toLowerCase() === "h") {
+      } else if (matchesBinding(e, "tool.fill")) {
         app.setTool("fill");
-      } else if (e.key.toLowerCase() === "x") {
+      } else if (matchesBinding(e, "tool.text")) {
         app.setTool("text");
-      } else if (e.key.toLowerCase() === "d" && !e.ctrlKey && !e.metaKey) {
+      } else if (matchesBinding(e, "tool.dim")) {
         app.setTool("dim");
       } else if (e.key === "Enter" && app.tool === "straighten") {
         applyStraighten();
       } else if (e.key === "Enter" && app.tool === "measure" && app.measurement) {
         app.pinMeasurement();
-      } else if (e.key.toLowerCase() === "g" && !e.ctrlKey && !e.metaKey && app.tool === "select") {
+      } else if (matchesBinding(e, "edit.group") && app.tool === "select") {
         groupSelection();
-      } else if (e.key.toLowerCase() === "u" && !e.ctrlKey && !e.metaKey && app.tool === "select") {
+      } else if (matchesBinding(e, "edit.ungroup") && app.tool === "select") {
         ungroupSelection();
       }
     };
@@ -656,6 +726,28 @@ export function Viewport() {
         }
         break;
       }
+      case "rectangle": {
+        if (interaction.kind === "draw-rectangle") {
+          const points = rectFromCorners(interaction.corner, snapped);
+          if (dist(interaction.corner, snapped) > 0) {
+            bus.execute({
+              type: "add-entity",
+              entity: {
+                id: newEntityId(),
+                type: "polyline",
+                name: nextEntityName(doc, "polyline"),
+                ...activeLayerProp(app.activeLayer),
+                points,
+                closed: true,
+              },
+            });
+          }
+          interactionRef.current = { kind: "idle" };
+        } else {
+          interactionRef.current = { kind: "draw-rectangle", corner: snapped };
+        }
+        break;
+      }
       case "point": {
         bus.execute({
           type: "add-entity",
@@ -757,6 +849,7 @@ export function Viewport() {
           // Clicking any member of a group selects the whole group, unless it's currently "entered".
           const resolved = resolveSelection(doc, hit, app.enteredGroupId);
           let ids: EntityId[];
+          let collapseTo: EntityId[] | null = null;
           if (e.shiftKey) {
             const allSelected = resolved.every((id) => app.selection.includes(id));
             ids = allSelected
@@ -765,7 +858,17 @@ export function Viewport() {
           } else {
             const alreadyExact =
               app.selection.length === resolved.length && resolved.every((id) => app.selection.includes(id));
-            ids = alreadyExact ? app.selection : resolved;
+            const isSubsetOfBigger = app.selection.length > resolved.length && resolved.every((id) => app.selection.includes(id));
+            if (isSubsetOfBigger) {
+              // Grabbed one member of a bigger multi-selection: keep the whole
+              // selection so a drag moves everything together; only collapse
+              // to just this item on pointerup if it turns out to be a plain
+              // click with no drag.
+              ids = app.selection;
+              collapseTo = resolved;
+            } else {
+              ids = alreadyExact ? app.selection : resolved;
+            }
           }
           app.setSelection(ids);
           if (resolved.every((id) => ids.includes(id))) {
@@ -773,6 +876,8 @@ export function Viewport() {
               kind: "move",
               ids,
               startWorld: world,
+              startScreen: screen,
+              collapseTo,
               dx: 0,
               dy: 0,
               baseVertices: selectionVertices(ids),
@@ -793,11 +898,25 @@ export function Viewport() {
         break;
       }
       case "straighten": {
-        // Only a line already in the selection can become the reference edge.
+        // A line, or one straight (non-bulged) segment of a polyline, already
+        // in the selection can become the reference edge.
         const hit = hitTest(view, world);
         const entity = hit ? doc.get(hit) : null;
         if (hit && entity?.type === "line" && app.selection.includes(hit)) {
           app.setReferenceEdge(hit);
+        } else if (hit && entity?.type === "polyline" && app.selection.includes(hit)) {
+          const segs = polylineSegments(entity);
+          let best = -1;
+          let bestDist = Infinity;
+          segs.forEach((s, i) => {
+            if (s.bulge !== 0) return; // straighten needs a straight edge
+            const d = distToSegment(world, s.a, s.b);
+            if (d < bestDist) {
+              bestDist = d;
+              best = i;
+            }
+          });
+          if (best >= 0) app.setReferenceEdge(hit, best);
         }
         break;
       }
@@ -988,13 +1107,18 @@ export function Viewport() {
       interactionRef.current = interaction.resume;
       redraw();
     } else if (interaction.kind === "move") {
-      if (interaction.dx !== 0 || interaction.dy !== 0) {
+      const moved = dist(screenPos(e), interaction.startScreen) >= 4;
+      if (moved && (interaction.dx !== 0 || interaction.dy !== 0)) {
         bus.execute({
           type: "move-entities",
           ids: interaction.ids,
           dx: interaction.dx,
           dy: interaction.dy,
         });
+      } else if (!moved && interaction.collapseTo) {
+        // A plain click (no drag) on one member of a bigger selection: now
+        // collapse down to just that item, as a click normally would.
+        useApp.getState().setSelection(interaction.collapseTo);
       }
       interactionRef.current = { kind: "idle" };
       redraw();

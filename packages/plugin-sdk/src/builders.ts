@@ -93,10 +93,10 @@ export function text(
 export function linearDimensionCommands(
   a: Point,
   b: Point,
-  opts: LinearDimensionOptions & { layer?: string; color?: string },
+  opts: LinearDimensionOptions & { layer?: string; color?: string; name?: string },
 ): Command[] {
   const d = linearDimension(a, b, opts);
-  const common = { layer: opts.layer, color: opts.color };
+  const common = { layer: opts.layer, color: opts.color, name: opts.name };
   return [
     ...d.lines.map((pts) => add(polyline(pts, false, common))),
     add(text(d.text.at, d.text.text, { ...common, height: d.text.height, rotation: d.text.rotation })),
