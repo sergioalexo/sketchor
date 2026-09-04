@@ -102,6 +102,18 @@ const TOOLS: { id: ToolId; label: string; keyHint: string; icon: JSX.Element }[]
     ),
   },
   {
+    id: "image",
+    label: "Image",
+    keyHint: "I",
+    icon: (
+      <svg viewBox="0 0 24 24" width="20" height="20">
+        <rect x="3" y="4" width="18" height="16" rx="1.5" stroke="currentColor" strokeWidth="2" fill="none" />
+        <circle cx="8.5" cy="9.5" r="1.6" stroke="currentColor" strokeWidth="1.6" fill="none" />
+        <path d="M4 17l5.5-5.5 3 3L17 9.5l3.5 3.5" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    ),
+  },
+  {
     id: "measure",
     label: "Measure",
     keyHint: "M",

@@ -242,6 +242,7 @@ export type ToolId =
   | "rectangle"
   | "circle"
   | "point"
+  | "image"
   | "measure"
   | "straighten"
   | "fill"
@@ -255,6 +256,7 @@ export const TOOL_HINTS: Record<ToolId, string> = {
   rectangle: "Click one corner, then click the opposite corner",
   circle: "Click center, then click a point on the circle",
   point: "Click to place a point",
+  image: "Click where the image goes, then pick a picture file — drops back to the select tool once it's placed",
   measure: "Click two points to measure distance (snaps to endpoints, midpoints, centers, on-line points, intersections) - Ctrl-click a line to set it as the angle reference - Alt-click a line/circle/arc for its whole length/radius, Shift-Alt-click more lines/arcs to total - click inside a closed area for its area+perimeter - Ctrl+C copies the readout",
   straighten: "Select the part with V, switch here, click the reference edge — a line or a straight polyline segment — then Enter to apply",
   fill: "Pick a colour, then click a closed shape to hatch-fill it - Alt-click removes a fill - use the panel to apply to a whole selection",

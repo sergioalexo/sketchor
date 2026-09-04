@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { SketchDocument } from "./document";
 import { assignNames, diffToCommands, nextEntityName, parseCode, SKETCH_HEADER, toCode } from "./sketchtext";
 import type { Command } from "./commands";
-import type { ArcEntity, CircleEntity, Entity, LineEntity, PointEntity, PolylineEntity } from "./entities";
+import type { ArcEntity, CircleEntity, Entity, ImageEntity, LineEntity, PointEntity, PolylineEntity } from "./entities";
 
 /**
  * Sketch code is the AI-facing surface: `window.sketchor.toCode()` /
@@ -72,6 +72,21 @@ describe("toCode", () => {
       "polyline PL1 pts (0, 0) (5, 0) (5, 5) closed",
     ]);
     expect(bodyOf(toCode(docWith({ ...pl, closed: false })))).toEqual(["polyline PL1 pts (0, 0) (5, 0) (5, 5)"]);
+  });
+
+  it("writes an image's position, size and (when non-zero) rotation, never its pixel data", () => {
+    const img: ImageEntity = {
+      id: "i",
+      type: "image",
+      name: "IMG1",
+      insert: { x: 1, y: 2 },
+      width: 30,
+      height: 15,
+      rotation: 0,
+      dataUrl: "data:image/png;base64,AAAA",
+    };
+    expect(bodyOf(toCode(docWith(img)))).toEqual(["image IMG1 at (1, 2) 30x15"]);
+    expect(bodyOf(toCode(docWith({ ...img, rotation: HALF_PI })))).toEqual(["image IMG1 at (1, 2) 30x15 rot 90"]);
   });
 
   it("rounds to four decimals and never writes negative zero", () => {
@@ -277,6 +292,30 @@ describe("diffToCommands", () => {
       type: "update-entity",
       entity: { id: "e1", bulges: [0, 0.5, 0], points: [{ x: 0, y: 0 }, { x: 20, y: 0 }, { x: 20, y: 20 }] },
     });
+  });
+
+  it("preserves an image's pixel data across a position/size edit", () => {
+    const img: ImageEntity = {
+      id: "e1",
+      name: "IMG1",
+      type: "image",
+      insert: { x: 0, y: 0 },
+      width: 10,
+      height: 10,
+      rotation: 0,
+      dataUrl: "data:image/png;base64,AAAA",
+    };
+    const cmds = diffToCommands(docWith(img), parseCode("image IMG1 at (5, 5) 20x20").entities);
+    expect(cmds[0]).toMatchObject({
+      type: "update-entity",
+      entity: { id: "e1", insert: { x: 5, y: 5 }, width: 20, height: 20, dataUrl: "data:image/png;base64,AAAA" },
+    });
+  });
+
+  it("ignores a new `image` line — sketch code has no way to author pixel data, so nothing is created", () => {
+    const doc = docWith(line("e1", "L1"));
+    const cmds = diffToCommands(doc, parseCode("line L1 from (0, 0) to (100, 0)\nimage IMG1 at (0, 0) 10x10").entities);
+    expect(cmds).toEqual([]);
   });
 
   it("straightens a bulged polyline that arrives as a new entity (the documented lossiness)", () => {

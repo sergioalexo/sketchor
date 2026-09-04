@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ACTIONS, bindingLabel, comboFromEvent, useKeybindings } from "./keybindings";
+import { ACTIONS, bindingLabel, comboFromEvent, modifierComboFor, useKeybindings } from "./keybindings";
 
 /**
  * A small popover for assigning/changing one action's keyboard shortcut,
@@ -32,6 +32,14 @@ export function RebindPopover({
       e.stopPropagation();
       if (e.key === "Escape") {
         setCapturing(false);
+        return;
+      }
+      if (actionId.startsWith("mouse.")) {
+        const combo = modifierComboFor(e.key);
+        if (!combo) return;
+        setBinding(actionId, combo);
+        setCapturing(false);
+        onClose();
         return;
       }
       if (["Control", "Meta", "Alt", "Shift"].includes(e.key)) return;

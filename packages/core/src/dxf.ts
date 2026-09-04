@@ -1,5 +1,5 @@
 import type { Entity } from "./entities";
-import { newEntityId, polylineSegments, textCorners, transformed } from "./entities";
+import { imageCorners, newEntityId, polylineSegments, textCorners, transformed } from "./entities";
 import type { Point } from "./geometry";
 import { arcExtentPoints, arcPointAt, arcSweep, bulgeToArc, dist } from "./geometry";
 
@@ -467,6 +467,15 @@ function placeEntity(
     }
     case "text":
       return { ...entity, id, at: map(entity.at), height: entity.height * radiusScale, rotation: entity.rotation + rotation };
+    case "image":
+      return {
+        ...entity,
+        id,
+        insert: map(entity.insert),
+        width: entity.width * Math.abs(sx),
+        height: entity.height * Math.abs(sy),
+        rotation: entity.rotation + rotation,
+      };
   }
 }
 
@@ -758,6 +767,8 @@ export function boundsOf(entities: Entity[]): Bounds | null {
       }
     } else if (e.type === "text") {
       for (const p of textCorners(e)) acc(p.x, p.y);
+    } else if (e.type === "image") {
+      for (const p of imageCorners(e)) acc(p.x, p.y);
     } else {
       for (const seg of polylineSegments(e)) {
         acc(seg.a.x, seg.a.y);
@@ -822,6 +833,13 @@ export function entitiesToSvg(entities: Entity[], opts: ThumbnailOptions = {}): 
       } else if (e.type === "text") {
         body.push(
           `<text x="${f(sx(e.at.x))}" y="${f(sy(e.at.y))}" font-size="${f(e.height * scale)}" fill="${stroke}">${escapeXml(e.text)}</text>`,
+        );
+      } else if (e.type === "image") {
+        // A placeholder box, not the embedded pixels — this is a small,
+        // fast preview thumbnail, not worth inflating with a base64 blob.
+        const c = imageCorners(e).map((p) => ({ x: f(sx(p.x)), y: f(sy(p.y)) }));
+        body.push(
+          `<path d="M${c[0].x} ${c[0].y} L${c[1].x} ${c[1].y} L${c[2].x} ${c[2].y} L${c[3].x} ${c[3].y} Z M${c[0].x} ${c[0].y} L${c[2].x} ${c[2].y} M${c[1].x} ${c[1].y} L${c[3].x} ${c[3].y}" fill="none"/>`,
         );
       } else if (e.type === "arc") {
         // Tessellated for display only — the document keeps the arc as one entity.

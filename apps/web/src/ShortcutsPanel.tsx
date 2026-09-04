@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ACTIONS, bindingLabel, comboFromEvent, useKeybindings, type ActionDef } from "./keybindings";
+import { ACTIONS, FIXED_SHORTCUTS, bindingLabel, comboFromEvent, modifierComboFor, useKeybindings, type ActionDef } from "./keybindings";
 
 /**
  * The keyboard-shortcuts reference and settings surface: every rebindable
@@ -25,6 +25,15 @@ export function ShortcutsPanel({ open, onClose }: { open: boolean; onClose: () =
       e.preventDefault();
       e.stopPropagation();
       if (e.key === "Escape") {
+        setCapturing(null);
+        return;
+      }
+      if (capturing.startsWith("mouse.")) {
+        // A mouse action's binding is a bare modifier held while clicking —
+        // capture that directly rather than waiting for a following key.
+        const combo = modifierComboFor(e.key);
+        if (!combo) return;
+        setBinding(capturing, combo);
         setCapturing(null);
         return;
       }
@@ -72,7 +81,7 @@ export function ShortcutsPanel({ open, onClose }: { open: boolean; onClose: () =
                       onClick={() => setCapturing(a.id)}
                     >
                       {capturing === a.id ? (
-                        <kbd className="shortcut-key">Press a key…</kbd>
+                        <kbd className="shortcut-key">{a.id.startsWith("mouse.") ? "Press Shift/Ctrl/Alt…" : "Press a key…"}</kbd>
                       ) : bindings[a.id] ? (
                         <kbd className="shortcut-key">{bindingLabel(bindings[a.id])}</kbd>
                       ) : (
@@ -94,15 +103,15 @@ export function ShortcutsPanel({ open, onClose }: { open: boolean; onClose: () =
             </div>
           ))}
           <div className="shortcuts-group">
-            <h3>Mouse &amp; other keys</h3>
-            <div className="shortcuts-row">
-              <span className="shortcuts-desc">
-                Shift-click adds to the selection; drag left-to-right window-selects, right-to-left crossing-selects;
-                drag a selection to move it. Middle- or right-drag pans, the wheel zooms. Delete/Backspace deletes the
-                selection. Escape always returns to the select tool. Ctrl (or Alt) held during a drag turns off
-                snapping. These aren't rebindable.
-              </span>
-            </div>
+            <h3>Fixed (not editable)</h3>
+            {FIXED_SHORTCUTS.map((s) => (
+              <div className="shortcuts-row" key={s.label}>
+                <span className="shortcuts-keys">
+                  <kbd className="shortcut-key shortcut-key-fixed">{s.label}</kbd>
+                </span>
+                <span className="shortcuts-desc">{s.description}</span>
+              </div>
+            ))}
           </div>
         </div>
       </div>

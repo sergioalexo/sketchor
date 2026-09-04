@@ -49,6 +49,13 @@ const POINT_PAIR_CAPTURE = new RegExp(String.raw`\(\s*(${NUM})\s*,\s*(${NUM})\s*
 const TEXT_RE = new RegExp(
   String.raw`^text\s+([A-Za-z_]\w*)\s+at\s*\(\s*(${NUM})\s*,\s*(${NUM})\s*\)\s+("(?:[^"\\]|\\.)*")\s+h\s+(${NUM})(?:\s+rot\s+(${NUM}))?$`,
 );
+// Note: sketch code carries an image's position/size/rotation only — it has
+// no way to author the actual pixel data, so a new `image` line (one that
+// doesn't match an existing image by name) is a no-op rather than creating a
+// broken, imageless entity. See diffToCommands.
+const IMAGE_RE = new RegExp(
+  String.raw`^image\s+([A-Za-z_]\w*)\s+at\s*\(\s*(${NUM})\s*,\s*(${NUM})\s*\)\s+(${NUM})x(${NUM})(?:\s+rot\s+(${NUM}))?$`,
+);
 
 function fmt(n: number): string {
   const rounded = Math.round(n * 10000) / 10000;
@@ -68,7 +75,7 @@ export function assignNames(doc: SketchDocument): Map<EntityId, string> {
       used.add(e.name);
     }
   }
-  const counters: Record<Entity["type"], number> = { line: 1, circle: 1, arc: 1, point: 1, polyline: 1, text: 1 };
+  const counters: Record<Entity["type"], number> = { line: 1, circle: 1, arc: 1, point: 1, polyline: 1, text: 1, image: 1 };
   for (const e of doc.all()) {
     if (names.has(e.id)) continue;
     const prefix = NAME_PREFIX[e.type];
@@ -81,7 +88,7 @@ export function assignNames(doc: SketchDocument): Map<EntityId, string> {
   return names;
 }
 
-const NAME_PREFIX: Record<Entity["type"], string> = { line: "L", circle: "C", arc: "A", point: "P", polyline: "PL", text: "T" };
+const NAME_PREFIX: Record<Entity["type"], string> = { line: "L", circle: "C", arc: "A", point: "P", polyline: "PL", text: "T", image: "IMG" };
 
 /** Next free name for a newly drawn entity (used by the tools). */
 export function nextEntityName(doc: SketchDocument, type: Entity["type"]): string {
@@ -119,6 +126,11 @@ export function toCode(doc: SketchDocument): string {
         `text ${name} at (${fmt(e.at.x)}, ${fmt(e.at.y)}) ${JSON.stringify(e.text)} h ${fmt(e.height)}` +
           (e.rotation ? ` rot ${fmt(toDeg(e.rotation))}` : ""),
       );
+    } else if (e.type === "image") {
+      out.push(
+        `image ${name} at (${fmt(e.insert.x)}, ${fmt(e.insert.y)}) ${fmt(e.width)}x${fmt(e.height)}` +
+          (e.rotation ? ` rot ${fmt(toDeg(e.rotation))}` : ""),
+      );
     } else {
       const pts = e.points.map((p) => `(${fmt(p.x)}, ${fmt(p.y)})`).join(" ");
       out.push(`polyline ${name} pts ${pts}${e.closed ? " closed" : ""}`);
@@ -142,7 +154,8 @@ export type ParsedEntity =
     }
   | { type: "point"; name: string; p: { x: number; y: number } }
   | { type: "polyline"; name: string; points: { x: number; y: number }[]; closed: boolean }
-  | { type: "text"; name: string; at: { x: number; y: number }; text: string; height: number; rotation: number };
+  | { type: "text"; name: string; at: { x: number; y: number }; text: string; height: number; rotation: number }
+  | { type: "image"; name: string; insert: { x: number; y: number }; width: number; height: number; rotation: number };
 
 export interface ParseIssue {
   line: number;
@@ -228,6 +241,21 @@ export function parseCode(text: string): { entities: ParsedEntity[]; errors: Par
         height,
         rotation: match[6] ? (Number(match[6]) * Math.PI) / 180 : 0,
       };
+    } else if ((match = row.match(IMAGE_RE))) {
+      const width = Number(match[4]);
+      const height = Number(match[5]);
+      if (width <= 0 || height <= 0) {
+        errors.push({ line: lineNo, message: "image width/height must be positive" });
+        continue;
+      }
+      parsed = {
+        type: "image",
+        name: match[1],
+        insert: { x: Number(match[2]), y: Number(match[3]) },
+        width,
+        height,
+        rotation: match[6] ? (Number(match[6]) * Math.PI) / 180 : 0,
+      };
     } else if ((match = row.match(POLYLINE_RE))) {
       const points: { x: number; y: number }[] = [];
       POINT_PAIR_CAPTURE.lastIndex = 0;
@@ -243,7 +271,7 @@ export function parseCode(text: string): { entities: ParsedEntity[]; errors: Par
     }
 
     if (!parsed) {
-      const known = ["line", "circle", "arc", "point", "polyline", "text"];
+      const known = ["line", "circle", "arc", "point", "polyline", "text", "image"];
       errors.push({
         line: lineNo,
         message: known.includes(keyword)
@@ -258,7 +286,9 @@ export function parseCode(text: string): { entities: ParsedEntity[]; errors: Par
                     ? "point NAME at (x, y)"
                     : keyword === "text"
                       ? 'text NAME at (x, y) "content" h HEIGHT [rot DEG]'
-                      : "polyline NAME pts (x, y) (x, y) ... [closed]")
+                      : keyword === "image"
+                        ? "image NAME at (x, y) WIDTHxHEIGHT [rot DEG]"
+                        : "polyline NAME pts (x, y) (x, y) ... [closed]")
           : `unknown statement '${keyword}'`,
       });
       continue;
@@ -324,11 +354,27 @@ function sameGeometry(existing: Entity, parsed: ParsedEntity): boolean {
       Math.abs(existing.rotation - parsed.rotation) < EPS
     );
   }
+  if (existing.type === "image" && parsed.type === "image") {
+    return (
+      Math.abs(existing.insert.x - parsed.insert.x) < EPS &&
+      Math.abs(existing.insert.y - parsed.insert.y) < EPS &&
+      Math.abs(existing.width - parsed.width) < EPS &&
+      Math.abs(existing.height - parsed.height) < EPS &&
+      Math.abs(existing.rotation - parsed.rotation) < EPS
+    );
+  }
   return false;
 }
 
-/** `bulges` only applies when re-emitting an existing polyline whose points came back unchanged apart from being re-typed in code — sketch code itself never specifies bulge. */
-function toEntity(parsed: ParsedEntity, id: EntityId, layer?: string, bulges?: number[]): Entity {
+/**
+ * `bulges` only applies when re-emitting an existing polyline whose points
+ * came back unchanged apart from being re-typed in code — sketch code itself
+ * never specifies bulge. `imageDataUrl` is the same idea for an image's pixel
+ * data: sketch code carries only its position/size/rotation, so updating an
+ * existing image must carry its `dataUrl` forward from the entity being
+ * replaced. Never called to *create* a new image (see diffToCommands).
+ */
+function toEntity(parsed: ParsedEntity, id: EntityId, layer?: string, bulges?: number[], imageDataUrl?: string): Entity {
   const layerProp = layer ? { layer } : {};
   switch (parsed.type) {
     case "line":
@@ -377,6 +423,18 @@ function toEntity(parsed: ParsedEntity, id: EntityId, layer?: string, bulges?: n
         closed: parsed.closed,
         ...(bulges ? { bulges } : {}),
       };
+    case "image":
+      return {
+        id,
+        type: "image",
+        name: parsed.name,
+        ...layerProp,
+        insert: parsed.insert,
+        width: parsed.width,
+        height: parsed.height,
+        rotation: parsed.rotation,
+        dataUrl: imageDataUrl ?? "",
+      };
   }
 }
 
@@ -398,13 +456,24 @@ export function diffToCommands(doc: SketchDocument, parsed: ParsedEntity[]): Com
     if (existing) {
       keep.add(p.name);
       if (!sameGeometry(existing, p) || existing.name !== p.name) {
-        // Preserve the entity's layer (and a polyline's bulges) — sketch code doesn't express either.
+        // Preserve the entity's layer (and a polyline's bulges, or an image's
+        // pixel data) — sketch code doesn't express any of those.
         commands.push({
           type: "update-entity",
-          entity: toEntity(p, existing.id, existing.layer, existing.type === "polyline" ? existing.bulges : undefined),
+          entity: toEntity(
+            p,
+            existing.id,
+            existing.layer,
+            existing.type === "polyline" ? existing.bulges : undefined,
+            existing.type === "image" ? existing.dataUrl : undefined,
+          ),
         });
       }
-    } else {
+    } else if (p.type !== "image") {
+      // An image can't be created from sketch code — it has no way to author
+      // pixel data — so a new `image` line that doesn't match an existing
+      // image by name is silently ignored rather than adding a broken,
+      // imageless entity. Placing an image is the Image tool's job.
       commands.push({ type: "add-entity", entity: toEntity(p, newEntityId()) });
     }
   }

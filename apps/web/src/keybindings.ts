@@ -26,6 +26,7 @@ export const ACTIONS: ActionDef[] = [
   { id: "tool.rectangle", label: "Rectangle tool", group: "Tools" },
   { id: "tool.circle", label: "Circle tool", group: "Tools" },
   { id: "tool.point", label: "Point tool", group: "Tools" },
+  { id: "tool.image", label: "Image tool", group: "Tools" },
   { id: "tool.measure", label: "Measure tool", group: "Tools" },
   { id: "tool.straighten", label: "Straighten tool", group: "Tools" },
   { id: "tool.fill", label: "Fill tool", group: "Tools" },
@@ -46,6 +47,25 @@ export const ACTIONS: ActionDef[] = [
   { id: "app.shortcuts", label: "Keyboard shortcuts", group: "App" },
   { id: "app.toggleLayers", label: "Toggle layers panel", group: "App" },
   { id: "app.toggleCode", label: "Toggle sketch code panel", group: "App" },
+  { id: "mouse.addToSelection", label: "Add to selection on click", group: "Mouse" },
+  { id: "mouse.freeMove", label: "Disable snapping while dragging", group: "Mouse" },
+];
+
+/**
+ * Fixed mouse/keyboard behavior that isn't exposed as a rebindable action —
+ * either because it's mode-dependent (Escape, Delete) rather than a single
+ * command, or because it's a raw mouse gesture (which button, which wheel)
+ * rather than a modifier this app's capture UI can record. Listed in the
+ * Shortcuts panel for reference alongside the rebindable ones above.
+ */
+export const FIXED_SHORTCUTS: { label: string; description: string }[] = [
+  { label: "Middle- or right-drag", description: "Pan the view, from any tool, without losing an in-progress line/polyline" },
+  { label: "Mouse wheel", description: "Zoom in/out, centered on the cursor" },
+  { label: "Drag left → right on empty canvas", description: "Window-select — picks only what's fully inside the box" },
+  { label: "Drag right → left on empty canvas", description: "Crossing-select — also picks anything the box merely touches" },
+  { label: "Escape", description: "Cancel whatever's half-drawn, clear the selection, and return to the select tool" },
+  { label: "Delete / Backspace", description: "Delete the current selection (not while a polyline is mid-draw)" },
+  { label: "Enter", description: "Finish a polyline, apply the straighten tool, or pin a measurement — whichever is active" },
 ];
 
 export const DEFAULT_BINDINGS: Record<string, string> = {
@@ -55,6 +75,7 @@ export const DEFAULT_BINDINGS: Record<string, string> = {
   "tool.rectangle": "r",
   "tool.circle": "c",
   "tool.point": "p",
+  "tool.image": "i",
   "tool.measure": "m",
   "tool.straighten": "t",
   "tool.fill": "h",
@@ -75,7 +96,17 @@ export const DEFAULT_BINDINGS: Record<string, string> = {
   "app.shortcuts": "",
   "app.toggleLayers": "",
   "app.toggleCode": "",
+  "mouse.addToSelection": "shift",
+  "mouse.freeMove": "ctrl",
 };
+
+/** The bare modifier names a "mouse.*" action's combo can hold. */
+const MODIFIER_COMBOS: Record<string, string> = { Shift: "shift", Control: "ctrl", Alt: "alt" };
+
+/** True while `e` is one of the modifier keydowns a "mouse.*" binding can capture (Shift/Control/Alt). */
+export function modifierComboFor(key: string): string | null {
+  return MODIFIER_COMBOS[key] ?? null;
+}
 
 const STORAGE_KEY = "sketchor.keybindings.v1";
 
@@ -151,6 +182,27 @@ export function matchesBinding(e: { ctrlKey: boolean; metaKey: boolean; altKey: 
   const combo = useKeybindings.getState().bindings[actionId];
   if (!combo) return false;
   return comboFromEvent(e) === combo;
+}
+
+/**
+ * True if the modifier state on `e` (a mouse/pointer event, not a keydown)
+ * matches the bound modifier for a "mouse.*" action — e.g. is the
+ * "add to selection" modifier currently held during this click. Unlike
+ * {@link matchesBinding}, this reads live modifier flags rather than a key
+ * that was just pressed, since a mouse action is "held while clicking", not
+ * "this key fired".
+ */
+export function matchesModifier(
+  e: { ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean },
+  actionId: string,
+): boolean {
+  const combo = useKeybindings.getState().bindings[actionId];
+  if (!combo) return false;
+  if (combo === "shift") return e.shiftKey;
+  if (combo === "ctrl") return e.ctrlKey || e.metaKey;
+  if (combo === "alt") return e.altKey;
+  if (combo === "meta") return e.metaKey;
+  return false;
 }
 
 /** Human-readable form of a combo string for display ("ctrl+shift+z" -> "Ctrl+Shift+Z"). */

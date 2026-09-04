@@ -117,5 +117,7 @@ function centerOf(entity: Entity): Point {
     }
     case "text":
       return entity.at;
+    case "image":
+      return entity.insert;
   }
 }

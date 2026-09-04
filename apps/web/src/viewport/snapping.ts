@@ -1,5 +1,5 @@
 import type { Point, SketchDocument } from "@sketchor/core";
-import { arcPointAt, arcSweep, bulgeToArc, closestPointOnSegment, dist, mid, polylineSegments } from "@sketchor/core";
+import { arcPointAt, arcSweep, bulgeToArc, closestPointOnSegment, dist, imageCorners, mid, polylineSegments } from "@sketchor/core";
 import { gridStep, type View } from "./view";
 
 export type SnapKind = "origin" | "endpoint" | "midpoint" | "center" | "quadrant" | "intersection" | "on-line" | "grid";
@@ -87,6 +87,8 @@ export function findSnap(doc: SketchDocument, view: View, cursor: Point, exclude
       const sweep = arcSweep(e.startAngle, e.endAngle, e.ccw);
       const midAngle = e.ccw ? e.startAngle + sweep / 2 : e.startAngle - sweep / 2;
       midpoints.push({ point: arcPointAt(e.center, e.radius, midAngle), kind: "midpoint" });
+    } else if (e.type === "image") {
+      for (const p of imageCorners(e)) featurePoints.push({ point: p, kind: "endpoint" });
     } else {
       // Every vertex is an endpoint snap; every segment additionally offers a
       // midpoint and a nearest-point-along snap, exactly like a loose line.
@@ -185,6 +187,8 @@ function featureAnchors(doc: SketchDocument, excludeIds: readonly string[]): Poi
         arcPointAt(e.center, e.radius, e.startAngle),
         arcPointAt(e.center, e.radius, e.endAngle),
       );
+    } else if (e.type === "image") {
+      out.push(...imageCorners(e));
     } else {
       for (const p of e.points) out.push(p);
     }

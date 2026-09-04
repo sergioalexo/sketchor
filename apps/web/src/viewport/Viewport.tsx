@@ -12,6 +12,7 @@ import {
   entityPoints,
   findClosedRegions,
   freeEndpointEntityIds,
+  imageCorners,
   regionContainingPoint,
   resolveSelection,
   layerOf,
@@ -39,10 +40,11 @@ import {
   useApp,
 } from "../state/store";
 import { openDrawing, saveCurrent } from "../io/drawingFile";
-import { matchesBinding } from "../keybindings";
+import { matchesBinding, matchesModifier } from "../keybindings";
 import { printDrawing } from "../print/printDrawing";
 import { formatArea, formatLength } from "../units";
 import { render } from "./renderer";
+import { setImageDecodeCallback } from "./imageCache";
 import { findSnap, snapMovingSelection, snapRotation, type Snap } from "./snapping";
 import { fitToBounds, screenToWorld, worldToScreen, zoomAt, type View } from "./view";
 
@@ -126,9 +128,9 @@ function selectionVertices(ids: EntityId[]): Point[] {
   return out;
 }
 
-/** Ctrl (or ⌘, or Alt) held during a drag turns off position and angle snapping. */
-function noSnap(e: { ctrlKey: boolean; metaKey: boolean; altKey: boolean }): boolean {
-  return e.ctrlKey || e.metaKey || e.altKey;
+/** The "mouse.freeMove" modifier (Ctrl/⌘ by default, rebindable) held during a drag turns off position and angle snapping. */
+function noSnap(e: { ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftKey: boolean }): boolean {
+  return matchesModifier(e, "mouse.freeMove");
 }
 
 /**
@@ -208,7 +210,11 @@ function hitTest(view: View, world: Point): EntityId | null {
                           : distToSegment(world, seg.a, seg.b);
                       }),
                     )
-                : Infinity;
+                : e.type === "image"
+                  ? pointInPolygon(world, imageCorners(e))
+                    ? 0
+                    : Infinity
+                  : Infinity;
     if (d <= bestDist) {
       best = e.id;
       bestDist = d;
@@ -368,6 +374,14 @@ export function Viewport() {
     observer.observe(canvas);
     redraw();
     return () => observer.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Image entities decode asynchronously (drawEntity can't await); redraw
+  // once a decode finishes so the placeholder box is replaced by the picture.
+  useEffect(() => {
+    setImageDecodeCallback(redraw);
+    return () => setImageDecodeCallback(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -575,6 +589,8 @@ export function Viewport() {
         app.setTool("circle");
       } else if (matchesBinding(e, "tool.point")) {
         app.setTool("point");
+      } else if (matchesBinding(e, "tool.image")) {
+        app.setTool("image");
       } else if (matchesBinding(e, "tool.measure")) {
         app.setTool("measure");
       } else if (matchesBinding(e, "view.fit")) {
@@ -761,6 +777,50 @@ export function Viewport() {
         });
         break;
       }
+      case "image": {
+        // A file picker, not a two-click draw — insert at the point clicked
+        // once a file is actually chosen, then drop back to the select tool
+        // so the new image can be moved/resized right away.
+        const insertAt = snapped;
+        const input = document.createElement("input");
+        input.type = "file";
+        input.accept = "image/*";
+        input.onchange = () => {
+          const file = input.files?.[0];
+          if (!file) return;
+          const reader = new FileReader();
+          reader.onload = () => {
+            const dataUrl = String(reader.result);
+            const probe = new Image();
+            probe.onload = () => {
+              const maxDim = 200; // mm — a sensible default footprint, independent of source pixel size
+              const naturalW = probe.naturalWidth || 100;
+              const naturalH = probe.naturalHeight || 100;
+              const fit = Math.min(1, maxDim / Math.max(naturalW, naturalH));
+              bus.execute({
+                type: "add-entity",
+                entity: {
+                  id: newEntityId(),
+                  type: "image",
+                  name: nextEntityName(doc, "image"),
+                  ...activeLayerProp(app.activeLayer),
+                  insert: insertAt,
+                  width: naturalW * fit,
+                  height: naturalH * fit,
+                  rotation: 0,
+                  dataUrl,
+                },
+              });
+              useApp.getState().setTool("select");
+              redraw();
+            };
+            probe.src = dataUrl;
+          };
+          reader.readAsDataURL(file);
+        };
+        input.click();
+        break;
+      }
       case "measure": {
         const hit = hitTest(view, world);
         const hitEntity = hit ? doc.get(hit) : null;
@@ -850,7 +910,7 @@ export function Viewport() {
           const resolved = resolveSelection(doc, hit, app.enteredGroupId);
           let ids: EntityId[];
           let collapseTo: EntityId[] | null = null;
-          if (e.shiftKey) {
+          if (matchesModifier(e, "mouse.addToSelection")) {
             const allSelected = resolved.every((id) => app.selection.includes(id));
             ids = allSelected
               ? app.selection.filter((id) => !resolved.includes(id))
@@ -892,7 +952,7 @@ export function Viewport() {
             startScreen: screen,
             startWorld: world,
             currentWorld: world,
-            additive: e.shiftKey,
+            additive: matchesModifier(e, "mouse.addToSelection"),
           };
         }
         break;

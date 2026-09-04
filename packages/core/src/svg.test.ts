@@ -29,6 +29,7 @@ const pointsOf = (e: Entity): Point[] => {
   if (e.type === "point") return [e.p];
   if (e.type === "circle") return [e.center];
   if (e.type === "text") return [e.at];
+  if (e.type === "image") return [e.insert];
   return [e.center];
 };
 
@@ -359,6 +360,35 @@ describe("export then import", () => {
   it("preserves layers", () => {
     const before: Entity[] = [{ ...line(), layer: "walls" }, { ...circle(), layer: "holes" }];
     expect(parseSvgText(entitiesToSvgDocument(before)).entities.map((e) => e.layer)).toEqual(["walls", "holes"]);
+  });
+
+  it("preserves an image's size, rotation and embedded pixel data", () => {
+    const img: Entity = {
+      id: "i",
+      type: "image",
+      insert: { x: 0, y: 0 },
+      width: 40,
+      height: 25,
+      rotation: 0,
+      dataUrl: "data:image/png;base64,AAAA",
+    };
+    const rotated: Entity = { ...img, id: "i2", rotation: Math.PI / 6 };
+    const after = parseSvgText(entitiesToSvgDocument([img, rotated])).entities;
+    expect(after.every((e) => e.type === "image")).toBe(true);
+    const [back, backRotated] = after as { width: number; height: number; rotation: number; dataUrl: string }[];
+    expect(back.width).toBeCloseTo(40, 6);
+    expect(back.height).toBeCloseTo(25, 6);
+    expect(back.rotation).toBeCloseTo(0, 6);
+    expect(back.dataUrl).toBe("data:image/png;base64,AAAA");
+    expect(backRotated.rotation).toBeCloseTo(Math.PI / 6, 6);
+    expectRigidTranslation([img, rotated], after);
+  });
+
+  it("skips an <image> that references an external file instead of an embedded data: URI", () => {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg"><image x="0" y="0" width="10" height="10" href="photo.png"/></svg>`;
+    const { entities, warnings } = parseSvgText(svg);
+    expect(entities).toHaveLength(0);
+    expect(warnings.some((w) => w.includes("external file"))).toBe(true);
   });
 
   it("degrades an arc to a tessellated polyline", () => {

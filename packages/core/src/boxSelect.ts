@@ -1,7 +1,7 @@
 import type { Bounds } from "./dxf";
 import { boundsOf } from "./dxf";
 import type { Entity, EntityId } from "./entities";
-import { polylineSegments, textCorners } from "./entities";
+import { imageCorners, polylineSegments, textCorners } from "./entities";
 import type { Point } from "./geometry";
 import { dist } from "./geometry";
 
@@ -88,6 +88,10 @@ export function entityInBox(entity: Entity, box: Bounds, mode: BoxSelectMode): b
     case "text": {
       // The label's bounding rectangle, edge by edge.
       const c = textCorners(entity);
+      return c.some((p, i) => segmentCrossesBox(p, c[(i + 1) % c.length], box));
+    }
+    case "image": {
+      const c = imageCorners(entity);
       return c.some((p, i) => segmentCrossesBox(p, c[(i + 1) % c.length], box));
     }
   }

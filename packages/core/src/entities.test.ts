@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   centroidOfEntities,
   entityPoints,
+  imageCorners,
   layerOf,
   newEntityId,
   polylineLength,
@@ -10,7 +11,7 @@ import {
   transformed,
   translated,
 } from "./entities";
-import type { ArcEntity, CircleEntity, LineEntity, PointEntity, PolylineEntity } from "./entities";
+import type { ArcEntity, CircleEntity, ImageEntity, LineEntity, PointEntity, PolylineEntity } from "./entities";
 
 /**
  * The geometric primitives every tool and command builds on. Two invariants
@@ -58,7 +59,21 @@ const polyline = (): PolylineEntity => ({
   closed: true,
 });
 
-const all = () => [line(), circle(), arc(), point(), polyline()];
+const image = (): ImageEntity => ({
+  id: "IMG",
+  type: "image",
+  name: "IMG1",
+  layer: "photos",
+  color: "#ff0000",
+  fill: "#00ff00",
+  insert: { x: 1, y: 0 },
+  width: 20,
+  height: 10,
+  rotation: 0,
+  dataUrl: "data:image/png;base64,AAA=",
+});
+
+const all = () => [line(), circle(), arc(), point(), polyline(), image()];
 
 const closeTo = (p: { x: number; y: number }, x: number, y: number) => {
   expect(p.x).toBeCloseTo(x, 10);
@@ -80,6 +95,7 @@ describe("translated", () => {
     closeTo(translated(arc(), 5, -1).center, 5, -1);
     closeTo(translated(point(), 5, -1).p, 12, -3);
     closeTo(translated(polyline(), 5, -1).points[1], 15, -1);
+    closeTo(translated(image(), 5, -1).insert, 6, -1);
   });
 
   it("leaves size and angles alone", () => {
@@ -120,6 +136,14 @@ describe("rotated", () => {
 
   it("rotates about a non-origin pivot", () => {
     closeTo(rotated(point(), { x: 7, y: 0 }, Math.PI).p, 7, 2);
+  });
+
+  it("rotates an image's insertion point and adds to its rotation", () => {
+    const spun = rotated(image(), { x: 0, y: 0 }, HALF_PI);
+    closeTo(spun.insert, 0, 1);
+    expect(spun.rotation).toBeCloseTo(HALF_PI, 10);
+    expect(spun.width).toBe(20);
+    expect(spun.height).toBe(10);
   });
 
   it("leaves a polyline's bulges untouched (bulge is an angle, not a position)", () => {
@@ -163,6 +187,13 @@ describe("transformed", () => {
     closeTo(transformed(p, { x: 2, y: 0 }, 0, 0, 0, 3).p, 8, 0);
   });
 
+  it("scales an image's width and height along with its insertion point", () => {
+    const scaled = transformed(image(), origin, 0, 0, 0, 3);
+    expect(scaled.width).toBe(60);
+    expect(scaled.height).toBe(30);
+    closeTo(scaled.insert, 3, 0);
+  });
+
   it("is the identity for scale 1, rotation 0 and no offset", () => {
     for (const e of all()) {
       expect(transformed(e, { x: 3, y: -2 }, 0, 0, 0, 1)).toEqual(e);
@@ -171,6 +202,24 @@ describe("transformed", () => {
 
   it("leaves a polyline's bulges untouched under uniform scale", () => {
     expect(transformed(polyline(), origin, 1, 1, 0.4, 2.5).bulges).toEqual([0, 0.5, -0.25]);
+  });
+});
+
+describe("imageCorners", () => {
+  it("returns the four corners of the un-rotated rectangle", () => {
+    const c = imageCorners({ ...image(), rotation: 0 });
+    expect(c).toEqual([
+      { x: 1, y: 0 },
+      { x: 21, y: 0 },
+      { x: 21, y: 10 },
+      { x: 1, y: 10 },
+    ]);
+  });
+
+  it("rotates the corners about the insertion point", () => {
+    const c = imageCorners({ ...image(), insert: { x: 0, y: 0 }, rotation: HALF_PI });
+    closeTo(c[0], 0, 0); // insert itself is the pivot — stays put
+    closeTo(c[1], 0, 20); // (width, 0) rotates 90° CCW to (0, width)
   });
 });
 

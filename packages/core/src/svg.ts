@@ -1,4 +1,4 @@
-import type { ArcEntity, CircleEntity, Entity, LineEntity, PolylineEntity } from "./entities";
+import type { ArcEntity, CircleEntity, Entity, ImageEntity, LineEntity, PolylineEntity } from "./entities";
 import { layerOf, newEntityId, polylineSegments } from "./entities";
 import type { Point } from "./geometry";
 import { arcPointAt, arcSweep, bulgeToArc, dist } from "./geometry";
@@ -128,6 +128,17 @@ export function entitiesToSvgDocument(entities: Entity[], opts: SvgExportOptions
         const col = e.color ? escapeXml(e.color) : stroke;
         body.push(
           `<text x="${fmt(p.x)}" y="${fmt(p.y)}" font-size="${fmt(e.height)}" fill="${col}" stroke="none"${rot}>${escapeXml(e.text)}</text>`,
+        );
+      } else if (e.type === "image") {
+        // The un-rotated top-left corner (insert + (0, height) in world,
+        // Y-up), mapped to SVG's Y-down space, plus a rotation transform
+        // about the mapped insertion point — same recipe as the text case.
+        const topLeft = toSvg({ x: e.insert.x, y: e.insert.y + e.height });
+        const pivot = toSvg(e.insert);
+        const rot = e.rotation ? ` transform="rotate(${fmt((-e.rotation * 180) / Math.PI)} ${fmt(pivot.x)} ${fmt(pivot.y)})"` : "";
+        body.push(
+          `<image x="${fmt(topLeft.x)}" y="${fmt(topLeft.y)}" width="${fmt(e.width)}" height="${fmt(e.height)}" ` +
+            `href="${escapeXml(e.dataUrl)}" preserveAspectRatio="none"${rot}/>`,
         );
       } else {
         body.push(`<path d="${polylinePathD(e, toSvg)}"${paint(e)}/>`);
@@ -489,6 +500,41 @@ export function parseSvgText(text: string): SvgImportResult {
             points: corners,
             closed: true,
           });
+          break;
+        }
+        case "image": {
+          const x = numAttr(child, "x");
+          const y = numAttr(child, "y");
+          const w = numAttr(child, "width");
+          const h = numAttr(child, "height");
+          const href = child.getAttribute("href") ?? child.getAttributeNS("http://www.w3.org/1999/xlink", "href");
+          if (w > 0 && h > 0 && href) {
+            if (!href.startsWith("data:")) {
+              warnings.push("an <image> referencing an external file (not an embedded data: URI) was skipped");
+              break;
+            }
+            const [ma, mb, mc, md] = m;
+            const colScaleA = Math.hypot(ma, mb);
+            const colScaleC = Math.hypot(mc, md);
+            const orthogonalAndUniform =
+              Math.abs(ma * mc + mb * md) < 1e-6 * (colScaleA * colScaleC || 1) &&
+              Math.abs(colScaleA - colScaleC) < 1e-6 * (colScaleA || 1);
+            if (!orthogonalAndUniform) {
+              warnings.push("an <image> had a skewed or non-uniform transform — imported as a plain rotated rectangle");
+            }
+            entities.push({
+              id: newEntityId(),
+              type: "image",
+              ...(layer ? { layer } : {}),
+              // The un-rotated bottom-left corner in world (Y-up) is (x, y + h)
+              // in SVG (Y-down) space — same recipe as export, run backwards.
+              insert: fromSvgPoint(applyMat(m, x, y + h)),
+              width: w * matScale(m),
+              height: h * matScale(m),
+              rotation: -Math.atan2(mb, ma),
+              dataUrl: href,
+            } as ImageEntity);
+          }
           break;
         }
         case "polyline":

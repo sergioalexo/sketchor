@@ -101,6 +101,8 @@ function anchorOf(entity: Entity): Point {
       return centroidOfPoints(entity.points);
     case "text":
       return entity.at;
+    case "image":
+      return entity.insert;
   }
 }
 

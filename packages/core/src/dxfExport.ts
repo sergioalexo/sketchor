@@ -1,5 +1,5 @@
-import type { ArcEntity, CircleEntity, Entity, LineEntity, PointEntity, PolylineEntity, TextEntity } from "./entities";
-import { layerOf, transformed } from "./entities";
+import type { ArcEntity, CircleEntity, Entity, ImageEntity, LineEntity, PointEntity, PolylineEntity, TextEntity } from "./entities";
+import { imageCorners, layerOf, transformed } from "./entities";
 import { boundsOf } from "./dxf";
 
 const ORIGIN = { x: 0, y: 0 };
@@ -103,6 +103,30 @@ function textEntity(e: TextEntity): string {
   );
 }
 
+/**
+ * DXF has no way to embed raster bytes inline — its real IMAGE entity
+ * references an external file through a separate IMAGEDEF object (and needs
+ * an AC1015+ header; this exporter writes AC1009/R12). Rather than write a
+ * spec-inconsistent, likely-broken IMAGE entity, an image exports as a
+ * labelled placeholder box so its position/size/rotation survive round-trip
+ * even though the picture itself doesn't travel into the DXF.
+ */
+function imageEntity(e: ImageEntity): string {
+  const corners = imageCorners(e);
+  const verts = corners.map((p) => pair(10, p.x) + pair(20, p.y) + pair(30, 0) + pair(42, 0)).join("");
+  const box = `0\nLWPOLYLINE\n` + pair(8, layerOf(e)) + `90\n${corners.length}\n` + `70\n1\n` + verts;
+  const labelHeight = Math.min(e.width, e.height) * 0.08 || 1;
+  const label =
+    `0\nTEXT\n` +
+    pair(8, layerOf(e)) +
+    pair(10, e.insert.x) +
+    pair(20, e.insert.y) +
+    pair(30, 0) +
+    pair(40, labelHeight) +
+    pair(1, `[image${e.name ? " " + e.name : ""}]`);
+  return box + label;
+}
+
 function entityDxf(e: Entity): string {
   switch (e.type) {
     case "line":
@@ -117,6 +141,8 @@ function entityDxf(e: Entity): string {
       return polylineEntity(e);
     case "text":
       return textEntity(e);
+    case "image":
+      return imageEntity(e);
   }
 }
 

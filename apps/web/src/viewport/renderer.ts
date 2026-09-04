@@ -13,6 +13,7 @@ import {
 import type { MeasureResult } from "../state/store";
 import { gridStep, worldToScreen, type View } from "./view";
 import type { Snap } from "./snapping";
+import { getCachedImage } from "./imageCache";
 
 /** A pending rigid transform (rotate about a pivot) previewed dashed over the real geometry. */
 export interface TransformPreview {
@@ -640,6 +641,28 @@ function drawEntity(
     ctx.textBaseline = "alphabetic";
     ctx.font = `${Math.max(1, entity.height * view.scale)}px ui-sans-serif, system-ui, sans-serif`;
     ctx.fillText(entity.text, 0, 0);
+    ctx.restore();
+    return;
+  }
+
+  if (entity.type === "image") {
+    const p = worldToScreen(view, entity.insert);
+    const w = entity.width * view.scale;
+    const h = entity.height * view.scale;
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate(-entity.rotation); // world CCW → screen CW
+    const img = getCachedImage(entity.dataUrl);
+    if (img) {
+      // `insert` is the bottom-left corner; canvas Y grows down, so the image
+      // spans upward (negative local y) from the origin.
+      ctx.drawImage(img, 0, -h, w, h);
+    } else {
+      ctx.strokeStyle = color;
+      ctx.setLineDash([4, 3]);
+      ctx.strokeRect(0, -h, w, h);
+      ctx.setLineDash([]);
+    }
     ctx.restore();
     return;
   }

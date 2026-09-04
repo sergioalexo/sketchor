@@ -145,6 +145,36 @@ export interface TextEntity {
   rotation: number;
 }
 
+/**
+ * A raster image placed in the drawing (a photo, a logo, a scanned trace
+ * reference). `insert` is the bottom-left corner before rotation (DXF IMAGE
+ * convention), `width`/`height` are the *displayed* size in world units
+ * (mm) — independent of the source pixel dimensions — and `rotation` is
+ * radians CCW about `insert`. The pixel data is embedded as a `data:` URI
+ * rather than referencing an external file, so a `.sketchor` document (or an
+ * SVG export) stays self-contained; DXF has no way to embed raster bytes
+ * inline (its IMAGE entity references an external file via a separate
+ * IMAGEDEF object), so that direction is necessarily lossy — see dxfExport.ts.
+ */
+export interface ImageEntity {
+  id: EntityId;
+  type: "image";
+  name?: string;
+  layer?: string;
+  /** Ignored for image — present only so every entity shares one shape. */
+  color?: string;
+  /** Ignored for image — present only so every entity shares one shape. */
+  fill?: string;
+  /** Ignored for image — present only so every entity shares one shape. */
+  dashed?: boolean;
+  insert: Point;
+  width: number;
+  height: number;
+  rotation: number;
+  /** The image itself, as a `data:image/...;base64,...` URI. */
+  dataUrl: string;
+}
+
 /** The layer an entity is drawn on, defaulting to "0" (DXF convention). */
 export function layerOf(entity: Entity): string {
   return entity.layer ?? DEFAULT_LAYER;
@@ -152,7 +182,7 @@ export function layerOf(entity: Entity): string {
 
 export const DEFAULT_LAYER = "0";
 
-export type Entity = LineEntity | CircleEntity | ArcEntity | PointEntity | PolylineEntity | TextEntity;
+export type Entity = LineEntity | CircleEntity | ArcEntity | PointEntity | PolylineEntity | TextEntity | ImageEntity;
 
 /** Rough width of a {@link TextEntity} string in world units — one built-in font, ~0.55 em per glyph. */
 export function textWidth(text: string, height: number): number {
@@ -169,6 +199,17 @@ export function textCorners(entity: TextEntity): Point[] {
     { x: entity.at.x + w, y: entity.at.y + h },
     { x: entity.at.x, y: entity.at.y + h },
   ].map((p) => rotatePoint(p, entity.at, entity.rotation));
+}
+
+/** The four corners of an image's displayed rectangle, in world space (rotated about `insert`). */
+export function imageCorners(entity: ImageEntity): Point[] {
+  const { insert, width, height, rotation } = entity;
+  return [
+    { x: insert.x, y: insert.y },
+    { x: insert.x + width, y: insert.y },
+    { x: insert.x + width, y: insert.y + height },
+    { x: insert.x, y: insert.y + height },
+  ].map((p) => rotatePoint(p, insert, rotation));
 }
 
 /** `entity.points[i]` to `entity.points[i+1]` for every segment, wrapping once more if `closed`. Bulge defaults to 0 (straight). */
@@ -217,6 +258,8 @@ export function translated<T extends Entity>(entity: T, dx: number, dy: number):
       return { ...entity, points: entity.points.map((p) => ({ x: p.x + dx, y: p.y + dy })) };
     case "text":
       return { ...entity, at: { x: entity.at.x + dx, y: entity.at.y + dy } };
+    case "image":
+      return { ...entity, insert: { x: entity.insert.x + dx, y: entity.insert.y + dy } };
   }
 }
 
@@ -245,6 +288,8 @@ export function rotated<T extends Entity>(entity: T, pivot: Point, angle: number
       return { ...entity, points: entity.points.map((p) => rotatePoint(p, pivot, angle)) };
     case "text":
       return { ...entity, at: rotatePoint(entity.at, pivot, angle), rotation: entity.rotation + angle };
+    case "image":
+      return { ...entity, insert: rotatePoint(entity.insert, pivot, angle), rotation: entity.rotation + angle };
   }
 }
 
@@ -286,6 +331,14 @@ export function transformed<T extends Entity>(
       return { ...entity, points: entity.points.map(movePoint) };
     case "text":
       return { ...entity, at: movePoint(entity.at), rotation: entity.rotation + rotation, height: entity.height * scale };
+    case "image":
+      return {
+        ...entity,
+        insert: movePoint(entity.insert),
+        rotation: entity.rotation + rotation,
+        width: entity.width * scale,
+        height: entity.height * scale,
+      };
   }
 }
 
@@ -312,6 +365,8 @@ export function entityPoints(entity: Entity): Point[] {
       return entity.points;
     case "text":
       return [entity.at, ...textCorners(entity)];
+    case "image":
+      return [entity.insert, ...imageCorners(entity)];
   }
 }
 

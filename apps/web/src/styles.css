@@ -1737,7 +1737,7 @@ body.sketchor-printing #sketchor-print-root {
 .shortcuts-panel {
   display: flex;
   flex-direction: column;
-  width: min(640px, 92vw);
+  width: min(720px, 92vw);
   max-height: 76vh;
   border-radius: 10px;
   border: 1px solid var(--border);
@@ -1796,7 +1796,7 @@ body.sketchor-printing #sketchor-print-root {
 
 .shortcuts-keys {
   flex: none;
-  width: 130px;
+  width: 190px;
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
@@ -1816,6 +1816,13 @@ kbd.shortcut-key {
   background: rgba(255, 255, 255, 0.04);
   color: var(--text);
   font: 11px ui-monospace, monospace;
+}
+
+kbd.shortcut-key-fixed {
+  opacity: 0.6;
+  font-style: italic;
+  white-space: normal;
+  text-align: left;
 }
 
 .shortcuts-rebind {

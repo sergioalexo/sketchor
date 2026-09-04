@@ -55,6 +55,18 @@ function svgFor(e: Entity): string {
     }
     case "text":
       return `<text x="${num(e.at.x)}" y="${num(e.at.y)}" font-size="${num(e.height)}" fill="#000" stroke="none">${e.text.replace(/[&<>]/g, "")}</text>`;
+    case "image": {
+      // The document-level group already flips Y for everything else; a
+      // raster image's own pixel content needs an extra local counter-flip
+      // (and its rotation kept un-negated, like arcPath's sweep flag above)
+      // so the picture renders right-side-up instead of mirrored.
+      const deg = (e.rotation * 180) / Math.PI;
+      return (
+        `<g transform="translate(${num(e.insert.x)} ${num(e.insert.y)}) rotate(${num(deg)}) translate(0 ${num(e.height)}) scale(1 -1)">` +
+        `<image width="${num(e.width)}" height="${num(e.height)}" href="${e.dataUrl.replace(/"/g, "&quot;")}" preserveAspectRatio="none" />` +
+        `</g>`
+      );
+    }
   }
 }
 
