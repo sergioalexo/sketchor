@@ -1,6 +1,7 @@
 {
   "name": "@sketchor/plugin-truck-nesting",
   "version": "1.0.0",
+  "license": "AGPL-3.0-or-later",
   "description": "First-party Sketchor plugin: nest pallets into a trailer by unload order and draw the load plan.",
   "type": "module",
   "main": "src/index.ts",

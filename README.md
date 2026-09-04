@@ -255,3 +255,7 @@ desktop app uses if `latest.json` can't be reached.
    rejects. The command log doubles as conversation context.
 4. **Rendering scale-up** — swap the Canvas2D renderer for WebGPU behind the
    same `render()` interface once drawings get large.
+
+## License
+
+[GNU AGPL v3.0](LICENSE) or later.

@@ -1,6 +1,7 @@
 {
   "name": "@sketchor/plugin-nest",
   "version": "1.0.0",
+  "license": "AGPL-3.0-or-later",
   "description": "First-party Sketchor plugin: nest flat parts onto stock sheets to minimise offcut.",
   "type": "module",
   "main": "src/index.ts",

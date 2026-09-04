@@ -1,6 +1,7 @@
 {
   "name": "@sketchor/plugin-gcode",
   "version": "1.0.0",
+  "license": "AGPL-3.0-or-later",
   "description": "First-party Sketchor plugin: decode G-code toolpaths into drawing geometry.",
   "type": "module",
   "main": "src/index.ts",
