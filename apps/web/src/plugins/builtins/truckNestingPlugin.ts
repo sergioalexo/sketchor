@@ -35,6 +35,9 @@ interface PersistedState {
   presets: TrailerProfile[];
   palletPresets: PalletPreset[];
   lastPresetName: string;
+  /** Which trailer/pallet preset a fresh session or a new order/pallet starts from. */
+  defaultTrailerName: string;
+  defaultPalletName: string;
   wallMargin: number;
   palletMargin: number;
   /** Whether the wall / pallet clearance is applied — the value is kept when off so it can be toggled back. */
@@ -72,14 +75,12 @@ const SEED_PALLET_PRESETS: PalletPreset[] = [
   { name: "Drum Ø600", width: 600, length: 600, shape: "round" },
 ];
 
-function seedOrder(): Order {
+function seedOrder(pallet: PalletPreset): Order {
   return {
     id: `o-${Date.now().toString(36)}`,
     city: "",
     color: PALETTE[0],
-    pallets: [
-      { id: `p-${Date.now().toString(36)}`, name: STANDARD_PALLET_NAME, width: 48 * IN, length: 42 * IN, shape: "rect", qty: 1 },
-    ],
+    pallets: [{ id: `p-${Date.now().toString(36)}`, name: pallet.name, width: pallet.width, length: pallet.length, shape: pallet.shape, qty: 1 }],
   };
 }
 
@@ -145,20 +146,30 @@ function asState(v: unknown): PersistedState {
   const palletPresets = Array.isArray(o.palletPresets)
     ? o.palletPresets.map(asPalletPreset).filter((p): p is PalletPreset => p !== null)
     : [];
-  const orders = Array.isArray(o.orders) ? o.orders.map(asOrder).filter((x): x is Order => x !== null) : [];
   const wallMargin = Math.max(0, num(o.wallMargin));
   const palletMargin = Math.max(0, num(o.palletMargin));
+  const finalPresets = presets.length > 0 ? presets : [...SEED_PRESETS];
+  const finalPalletPresets = palletPresets.length > 0 ? palletPresets : [...SEED_PALLET_PRESETS];
+  const defaultTrailerName = str(o.defaultTrailerName);
+  const defaultPalletName = str(o.defaultPalletName);
+  const resolvedDefaultTrailer =
+    (defaultTrailerName && finalPresets.find((p) => p.name === defaultTrailerName)?.name) || finalPresets[0].name;
+  const resolvedDefaultPallet =
+    (defaultPalletName && finalPalletPresets.find((p) => p.name === defaultPalletName)) || finalPalletPresets[0];
+  const orders = Array.isArray(o.orders) ? o.orders.map(asOrder).filter((x): x is Order => x !== null) : [];
   return {
-    presets: presets.length > 0 ? presets : [...SEED_PRESETS],
-    palletPresets: palletPresets.length > 0 ? palletPresets : [...SEED_PALLET_PRESETS],
-    lastPresetName: str(o.lastPresetName) || presets[0]?.name || SEED_PRESETS[0].name,
+    presets: finalPresets,
+    palletPresets: finalPalletPresets,
+    lastPresetName: str(o.lastPresetName) || resolvedDefaultTrailer,
+    defaultTrailerName: resolvedDefaultTrailer,
+    defaultPalletName: resolvedDefaultPallet.name,
     wallMargin,
     palletMargin,
     // Older stored state has no flag — treat a non-zero margin as "on".
     wallOn: typeof o.wallOn === "boolean" ? o.wallOn : wallMargin > 0,
     palletOn: typeof o.palletOn === "boolean" ? o.palletOn : palletMargin > 0,
     dimensions: o.dimensions === true,
-    orders: orders.length > 0 ? orders : [seedOrder()],
+    orders: orders.length > 0 ? orders : [seedOrder(resolvedDefaultPallet)],
     loadName: str(o.loadName),
     truckInfo: str(o.truckInfo),
   };
@@ -431,7 +442,9 @@ const PANEL_HTML = `<!doctype html>
       .shape-btn svg { display: block; }
 
       .presets { border: 1px solid #3a3d42; border-radius: 6px; padding: 8px; margin-top: 4px; background: #232529; }
-      .preset-row { display: grid; grid-template-columns: 1fr 50px 50px 24px 20px; gap: 4px; align-items: center; margin-bottom: 4px; }
+      .preset-row { display: grid; grid-template-columns: 20px 1fr 50px 50px 24px 20px; gap: 4px; align-items: center; margin-bottom: 4px; }
+      .preset-default { background: none; border: none; cursor: pointer; color: #6b6e76; font-size: 14px; padding: 0; line-height: 1; }
+      .preset-default.is-default { color: #e3b341; }
       .preset-row input { margin-top: 0; padding: 4px; }
 
       .findings { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
@@ -484,7 +497,7 @@ const PANEL_HTML = `<!doctype html>
 
       let unit = { unit: "mm", perMm: 1, label: "mm" };
       let palette = ["#4f86d6"];
-      let state = { presets: [], palletPresets: [], lastPresetName: "", wallMargin: 0, palletMargin: 0, wallOn: false, palletOn: false, dimensions: false, orders: [] };
+      let state = { presets: [], palletPresets: [], lastPresetName: "", defaultTrailerName: "", defaultPalletName: "", wallMargin: 0, palletMargin: 0, wallOn: false, palletOn: false, dimensions: false, orders: [] };
       let saveTimer = 0;
       let nested = false; // a plan is currently drawn
 
@@ -492,6 +505,8 @@ const PANEL_HTML = `<!doctype html>
       const fromU = (v) => (Number(v) || 0) / unit.perMm;
       const rid = (p) => p + "-" + Math.random().toString(36).slice(2, 8);
       const persist = () => { clearTimeout(saveTimer); saveTimer = setTimeout(() => post({ type: "persist", state }), 400); };
+      const defaultPallet = () => state.palletPresets.find((p) => p.name === state.defaultPalletName) || state.palletPresets[0];
+      const newPallet = () => { const d = defaultPallet(); return { id: rid("p"), name: d.name, width: d.width, length: d.length, shape: d.shape, qty: 1 }; };
 
       // ---- trailer ----
       const currentPreset = () => state.presets.find((p) => p.name === state.lastPresetName) || null;
@@ -569,11 +584,12 @@ const PANEL_HTML = `<!doctype html>
         $("presets").hidden = !$("presets").hidden;
         if (!$("presets").hidden) renderPresets();
       });
-      function presetRows(list, cls, hasShape) {
+      function presetRows(list, cls, hasShape, defaultName) {
         return list
           .map(
             (p, i) =>
               "<div class='preset-row' data-i='" + i + "'>" +
+              "<button class='preset-default " + cls + "-setdefault" + (p.name === defaultName ? " is-default" : "") + "' title='" + (p.name === defaultName ? "Default" : "Set as default") + "'>" + (p.name === defaultName ? "&#9733;" : "&#9734;") + "</button>" +
               "<input class='" + cls + "-name' value='" + esc(p.name) + "'>" +
               "<input class='" + cls + "-a' type='number' min='0' step='any' value='" + toU(hasShape ? p.width : p.length) + "'>" +
               "<input class='" + cls + "-b' type='number' min='0' step='any' value='" + toU(hasShape ? p.length : p.width) + "'" + (hasShape && p.shape === "round" ? " disabled style='visibility:hidden'" : "") + ">" +
@@ -586,27 +602,42 @@ const PANEL_HTML = `<!doctype html>
       function renderPresets() {
         const box = $("presets");
         box.innerHTML =
-          "<div class='muted'>Trailer sizes (L&times;W, " + esc(unit.label) + ")</div>" +
-          presetRows(state.presets, "tp", false) +
+          "<div class='muted'>Trailer sizes (L&times;W, " + esc(unit.label) + ") — &#9733; sets the default</div>" +
+          presetRows(state.presets, "tp", false, state.defaultTrailerName) +
           "<button class='ghost sm' id='tp-add' style='margin:2px 0 8px'>+ New trailer</button>" +
-          "<div class='muted'>Pallet sizes (W&times;L, " + esc(unit.label) + ")</div>" +
-          presetRows(state.palletPresets, "pp", true) +
+          "<div class='muted'>Pallet sizes (W&times;L, " + esc(unit.label) + ") — &#9733; sets the default</div>" +
+          presetRows(state.palletPresets, "pp", true, state.defaultPalletName) +
           "<button class='ghost sm' id='pp-add' style='margin-top:2px'>+ New pallet</button>";
 
         box.querySelectorAll(".preset-row").forEach((row) => {
           const i = Number(row.dataset.i);
           const isPallet = !!row.querySelector(".pp-name");
-          const p = (isPallet ? state.palletPresets : state.presets)[i];
+          const list = isPallet ? state.palletPresets : state.presets;
+          const p = list[i];
           const nameEl = row.querySelector(isPallet ? ".pp-name" : ".tp-name");
           const aEl = row.querySelector(isPallet ? ".pp-a" : ".tp-a");
           const bEl = row.querySelector(isPallet ? ".pp-b" : ".tp-b");
-          nameEl.addEventListener("input", (e) => { p.name = e.target.value; persist(); });
+          nameEl.addEventListener("input", (e) => {
+            // Keep the default pointer in sync if the preset it names gets renamed.
+            const key = isPallet ? "defaultPalletName" : "defaultTrailerName";
+            if (state[key] === p.name) state[key] = e.target.value;
+            p.name = e.target.value;
+            persist();
+          });
           aEl.addEventListener("input", (e) => { if (isPallet) p.width = fromU(e.target.value); else p.length = fromU(e.target.value); persist(); });
           bEl.addEventListener("input", (e) => { if (isPallet) p.length = fromU(e.target.value); else p.width = fromU(e.target.value); persist(); });
           const shapeEl = row.querySelector(".pp-shape");
           if (shapeEl) shapeEl.addEventListener("click", () => { p.shape = p.shape === "round" ? "rect" : "round"; if (p.shape === "round") p.length = p.width; renderPresets(); persist(); });
+          row.querySelector(isPallet ? ".pp-setdefault" : ".tp-setdefault").addEventListener("click", () => {
+            state[isPallet ? "defaultPalletName" : "defaultTrailerName"] = p.name;
+            renderPresets();
+            persist();
+          });
           row.querySelector(isPallet ? ".pp-del" : ".tp-del").addEventListener("click", () => {
-            (isPallet ? state.palletPresets : state.presets).splice(i, 1);
+            if (list.length <= 1) return; // always keep at least one preset to default to
+            list.splice(i, 1);
+            const key = isPallet ? "defaultPalletName" : "defaultTrailerName";
+            if (state[key] === p.name) state[key] = list[0].name;
             renderPresets();
             renderTrailer();
             persist();
@@ -687,7 +718,7 @@ const PANEL_HTML = `<!doctype html>
           card.querySelector(".city").addEventListener("input", (e) => { order.city = e.target.value; persist(); });
           card.querySelector(".order-del").addEventListener("click", () => { state.orders.splice(oi, 1); renderOrders(); persist(); });
           card.querySelector(".p-add").addEventListener("click", () => {
-            order.pallets.push({ id: rid("p"), name: "EUR pallet", width: 1200, length: 800, shape: "rect", qty: 1 });
+            order.pallets.push(newPallet());
             renderOrders();
             persist();
           });
@@ -758,7 +789,7 @@ const PANEL_HTML = `<!doctype html>
       }
 
       $("order-add").addEventListener("click", () => {
-        state.orders.push({ id: rid("o"), city: "", color: palette[state.orders.length % palette.length], pallets: [{ id: rid("p"), name: "EUR pallet", width: 1200, length: 800, shape: "rect", qty: 1 }] });
+        state.orders.push({ id: rid("o"), city: "", color: palette[state.orders.length % palette.length], pallets: [newPallet()] });
         renderOrders();
         persist();
       });

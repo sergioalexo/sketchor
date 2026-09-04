@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { freeEndpointEntityIds } from "@sketchor/core";
-import { bus, doc, measurementText, TOOL_HINTS, useApp, type ToolId } from "./state/store";
+import { bus, doc, getSessions, measurementText, TOOL_HINTS, useApp, type ToolId } from "./state/store";
 import { activeSaveTarget, openDrawing, overlayDrawing, saveCurrent, saveDrawing } from "./io/drawingFile";
 import { DISPLAY_UNITS, formatLength, type DisplayUnit } from "./units";
 import { Viewport } from "./viewport/Viewport";
@@ -298,6 +298,19 @@ export function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Warn before closing the browser tab/window (or the desktop window, which
+  // is the same underlying page-unload event) if any tab has unsaved
+  // changes — in-app tab close already prompts via closeTab()'s own confirm.
+  useEffect(() => {
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!getSessions().some((s) => s.dirty)) return;
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, []);
 
   // Refresh plugin-derived menus (export list) as plugins load/unload.
