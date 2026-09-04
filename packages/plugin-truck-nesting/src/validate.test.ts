@@ -7,6 +7,8 @@ const trailer = { name: "T", length: 13600, width: 2480 };
 function placed(over: Partial<PlacedItem> & Pick<PlacedItem, "instanceId" | "orderIndex" | "x" | "city">): PlacedItem {
   const base = {
     orderId: `o${over.orderIndex}`,
+    jobNumber: "",
+    state: "",
     color: "#000",
     shape: "rect" as const,
     y: 0,

@@ -1,7 +1,6 @@
 import {
   add,
   circle,
-  linearDimensionCommands,
   polyline,
   text,
   type Command,
@@ -126,7 +125,14 @@ function fmt(mm: number, opts: LayoutOptions): string {
 const NAME_SHAPE = "pallet-shape";
 const NAME_DIM = "pallet-dim";
 const NAME_LABEL = "pallet-label";
+/** The big item-number label specifically — kept apart from NAME_LABEL (city/tag) so it can be found unambiguously by {@link readLivePlacements}, even if a city or tag happens to look numeric. */
+const NAME_NUMBER = "pallet-number";
 const NAME_GUIDE = "pallet-guide";
+
+/** "City, ST" (or whichever half is present) — the destination shown on a pallet and in print. */
+function cityState(p: { city: string; state: string }): string {
+  return [p.city?.trim(), p.state?.trim()].filter(Boolean).join(", ");
+}
 
 interface PalletGeometry {
   x: number;
@@ -149,7 +155,11 @@ function geometryFromShapeEntity(e: Entity): PalletGeometry | null {
   return null;
 }
 
-/** The dimension line(s) + label for one pallet footprint, named so they can be found and stripped later. */
+/**
+ * A pallet's dimensions as plain small numbers beside each edge — no
+ * extension lines, no arrowheads, just the value, so it doesn't compete with
+ * the item number for attention or clutter a tightly-packed plan.
+ */
 function dimensionEntitiesFor(geo: PalletGeometry, opts: LayoutOptions): { commands: Command[]; ids: string[] } {
   const commands: Command[] = [];
   const ids: string[] = [];
@@ -157,39 +167,21 @@ function dimensionEntitiesFor(geo: PalletGeometry, opts: LayoutOptions): { comma
     commands.push(c);
     ids.push(id);
   };
-  const th = Math.min(Math.max(Math.min(geo.length, geo.width) * 0.08, 18), 45);
-  const sets =
-    geo.shape === "round"
-      ? [
-          linearDimensionCommands({ x: geo.x, y: geo.y + geo.width / 2 }, { x: geo.x + geo.width, y: geo.y + geo.width / 2 }, {
-            offset: -th * 2,
-            textHeight: th,
-            label: `Ø ${fmt(geo.width, opts)}`,
-            layer: LOAD_PLAN_LAYER,
-            name: NAME_DIM,
-          }),
-        ]
-      : [
-          linearDimensionCommands({ x: geo.x, y: geo.y }, { x: geo.x + geo.length, y: geo.y }, {
-            offset: -th * 2,
-            textHeight: th,
-            label: fmt(geo.length, opts),
-            layer: LOAD_PLAN_LAYER,
-            name: NAME_DIM,
-          }),
-          linearDimensionCommands({ x: geo.x, y: geo.y + geo.width }, { x: geo.x, y: geo.y }, {
-            offset: -th * 2,
-            textHeight: th,
-            label: fmt(geo.width, opts),
-            layer: LOAD_PLAN_LAYER,
-            name: NAME_DIM,
-          }),
-        ];
-  for (const set of sets)
-    for (const c of set) {
-      const id = (c as { entity?: { id: string } }).entity?.id;
-      if (id) push(c, id);
-    }
+  const h = Math.min(Math.max(Math.min(geo.length, geo.width) * 0.07, 12), 30);
+  const gap = h * 0.4;
+  const label = (at: { x: number; y: number }, str: string) => {
+    const t = text(at, str, { layer: LOAD_PLAN_LAYER, color: "#111111", height: h, name: NAME_DIM });
+    push(add(t), t.id);
+  };
+
+  if (geo.shape === "round") {
+    label({ x: geo.x + geo.width + gap, y: geo.y + geo.width / 2 - h / 2 }, `Ø${fmt(geo.width, opts)}`);
+  } else {
+    const lengthStr = fmt(geo.length, opts);
+    const lengthW = lengthStr.length * h * 0.55;
+    label({ x: geo.x + geo.length / 2 - lengthW / 2, y: geo.y - h - gap }, lengthStr); // below the bottom edge
+    label({ x: geo.x + geo.length + gap, y: geo.y + geo.width / 2 - h / 2 }, fmt(geo.width, opts)); // beside the right edge
+  }
   return { commands, ids };
 }
 
@@ -246,9 +238,12 @@ function palletCommands(p: PlacedItem, itemNumber: number, opts: LayoutOptions):
   // directly. City (where it goes) and tag stack below it, smaller.
   const numH = Math.min(Math.min(p.length, p.width) * 0.35, 160);
   const smallH = Math.min(Math.min(p.length, p.width) * 0.13, 70);
-  const lines: { text: string; height: number }[] = [{ text: String(itemNumber), height: numH }];
-  if (p.city?.trim()) lines.push({ text: p.city.trim(), height: smallH });
-  if (p.tag?.trim()) lines.push({ text: p.tag.trim(), height: smallH });
+  const dest = cityState(p);
+  const lines: { text: string; height: number; name: string }[] = [
+    { text: String(itemNumber), height: numH, name: NAME_NUMBER },
+  ];
+  if (dest) lines.push({ text: dest, height: smallH, name: NAME_LABEL });
+  if (p.tag?.trim()) lines.push({ text: p.tag.trim(), height: smallH, name: NAME_LABEL });
 
   const lineGaps = lines.map((l) => l.height * 1.25);
   const blockH = lineGaps.reduce((a, b) => a + b, 0);
@@ -258,7 +253,7 @@ function palletCommands(p: PlacedItem, itemNumber: number, opts: LayoutOptions):
     const t = text(
       { x: p.x + Math.max(p.length / 2 - w / 2, p.length * 0.06), y: cursorY + lineGaps[i] / 2 - l.height / 2 },
       l.text,
-      { layer: LOAD_PLAN_LAYER, color: "#111111", height: l.height, name: NAME_LABEL },
+      { layer: LOAD_PLAN_LAYER, color: "#111111", height: l.height, name: l.name },
     );
     push(add(t), t.id);
     cursorY += lineGaps[i];
@@ -321,6 +316,24 @@ export function buildNestLayout(
 ): Command[] {
   const commands: Command[] = [...trailerOutlineCommands(result.trailer).commands];
 
+  // DOOR (x = 0, where the load unloads from) and NOSE (x = length, against
+  // the cab) — orientation is otherwise implicit in the plan.
+  const endLabelH = Math.min(result.trailer.width * 0.05, 90);
+  const endLabel = (atX: number, str: string, alignRight: boolean) => {
+    const w = str.length * endLabelH * 0.6;
+    commands.push(
+      add(
+        text({ x: alignRight ? atX - w : atX, y: result.trailer.width + endLabelH * 0.4 }, str, {
+          layer: LOAD_PLAN_LAYER,
+          color: "#111111",
+          height: endLabelH,
+        }),
+      ),
+    );
+  };
+  endLabel(0, "DOOR", false);
+  endLabel(result.trailer.length, "NOSE", true);
+
   // One group per pallet — shape + guide + tag + dimensions. A single group
   // (not nested per order) so a click selects one pallet and dragging it snaps
   // to its neighbours; the guide and label come along because they're in the
@@ -328,7 +341,8 @@ export function buildNestLayout(
   result.placed.forEach((p, i) => {
     const { commands: pc, ids } = palletCommands(p, i + 1, opts);
     commands.push(...pc);
-    commands.push({ type: "group-entities", groupId: newGroupId(), ids, name: `#${i + 1}${p.city ? ` — ${p.city}` : ""}` });
+    const dest = cityState(p);
+    commands.push({ type: "group-entities", groupId: newGroupId(), ids, name: `#${i + 1}${dest ? ` — ${dest}` : ""}` });
   });
 
   // A printable summary block, just past the nose of the trailer.
@@ -368,4 +382,37 @@ function summaryLines(result: NestResult, findings: ValidationFinding[]): string
   }
   for (const f of findings) if (f.level !== "info") lines.push(`! ${f.message}`);
   return lines;
+}
+
+/**
+ * Reconciles a solved {@link NestResult} against the *current* drawing —
+ * picking up any manual drag the user made on the canvas after Auto-nest ran,
+ * so a print (or any other consumer) reflects what's actually on screen
+ * rather than the stale solver output. Pairs each placed item with its drawn
+ * group by the rendered item number ({@link NAME_NUMBER}), not array order,
+ * because {@link setDimensionsOnLayout}'s ungroup+regroup can reorder
+ * `model.groups` without touching any pallet's position.
+ */
+export function readLivePlacements(model: DocumentReadModel, result: NestResult): PlacedItem[] {
+  const entityById = new Map(model.entities.map((e) => [e.id, e]));
+  const byNumber = new Map<number, PalletGeometry>();
+
+  for (const g of model.groups) {
+    const members = g.members.map((m) => entityById.get(m)).filter((e): e is Entity => e !== undefined);
+    if (members.length === 0 || !members.every((e) => e.layer !== undefined && PLAN_LAYERS.has(e.layer))) continue;
+
+    const shapeEntity = members.find((e) => e.name === NAME_SHAPE);
+    const numberEntity = members.find((e) => e.name === NAME_NUMBER);
+    if (!shapeEntity || !numberEntity || numberEntity.type !== "text") continue;
+
+    const n = Number(numberEntity.text);
+    if (!Number.isFinite(n)) continue;
+    const geo = geometryFromShapeEntity(shapeEntity);
+    if (geo) byNumber.set(n, geo);
+  }
+
+  return result.placed.map((p, i) => {
+    const geo = byNumber.get(i + 1);
+    return geo ? { ...p, x: geo.x, y: geo.y, length: geo.length, width: geo.width } : p;
+  });
 }

@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { Command, DocumentReadModel } from "@sketchor/plugin-sdk";
-import { buildNestLayout, clearPreviousLayout, LOAD_PLAN_GUIDE_LAYER, LOAD_PLAN_LAYER, setDimensionsOnLayout } from "./layout";
+import {
+  buildNestLayout,
+  clearPreviousLayout,
+  LOAD_PLAN_GUIDE_LAYER,
+  LOAD_PLAN_LAYER,
+  readLivePlacements,
+  setDimensionsOnLayout,
+} from "./layout";
 import { nestByOrders } from "./nest";
 import type { Order, TrailerProfile } from "./types";
 
@@ -21,7 +28,9 @@ const trailer: TrailerProfile = { name: "T", length: 13600, width: 2480 };
 const orders: Order[] = [
   {
     id: "leeds",
+    jobNumber: "PO-1",
     city: "Leeds",
+    state: "",
     color: "#e2554e",
     pallets: [
       { id: "a", width: 1200, length: 800, shape: "rect" },
@@ -30,7 +39,9 @@ const orders: Order[] = [
   },
   {
     id: "hull",
+    jobNumber: "PO-2",
     city: "Hull",
+    state: "",
     color: "#4f86d6",
     pallets: [{ id: "c", width: 1200, length: 800, shape: "rect", tag: "FRAGILE" }],
   },
@@ -69,6 +80,22 @@ describe("buildNestLayout", () => {
     const without = buildNestLayout(nestByOrders(trailer, orders));
     const withDims = buildNestLayout(nestByOrders(trailer, orders), { dimensions: true });
     expect(added(withDims).length).toBeGreaterThan(added(without).length);
+  });
+
+  it("draws dimensions as plain small text, never lines", () => {
+    const cmds = buildNestLayout(nestByOrders(trailer, orders), { dimensions: true });
+    const dimEntities = added(cmds)
+      .filter((c) => c.type === "add-entity" && c.entity.name === "pallet-dim")
+      .map((c) => c.type === "add-entity" && c.entity);
+    expect(dimEntities.length).toBeGreaterThan(0);
+    for (const e of dimEntities) expect(e && e.type).toBe("text");
+  });
+
+  it("labels the door and nose ends of the trailer", () => {
+    const cmds = buildNestLayout(nestByOrders(trailer, orders));
+    const texts = added(cmds).filter((c) => c.type === "add-entity" && c.entity.type === "text");
+    expect(texts.some((c) => c.type === "add-entity" && c.entity.type === "text" && c.entity.text === "DOOR")).toBe(true);
+    expect(texts.some((c) => c.type === "add-entity" && c.entity.type === "text" && c.entity.text === "NOSE")).toBe(true);
   });
 
   it("writes a printable summary block beside the trailer", () => {
@@ -180,5 +207,42 @@ describe("setDimensionsOnLayout", () => {
     expect(group).toBeTruthy();
     const dimIdsInGroup = (group?.members ?? []).filter((id) => m.entities.find((e) => e.id === id)?.name === "pallet-dim");
     expect(dimIdsInGroup.length).toBeGreaterThan(0);
+  });
+});
+
+describe("readLivePlacements", () => {
+  it("returns the solved placements unchanged when nothing was dragged", () => {
+    const result = nestByOrders(trailer, orders);
+    const m = applyCommands(model(), buildNestLayout(result));
+    const live = readLivePlacements(m, result);
+    expect(live.map((p) => ({ x: p.x, y: p.y }))).toEqual(result.placed.map((p) => ({ x: p.x, y: p.y })));
+  });
+
+  it("picks up a manual drag instead of the stale solver position — the print-desync fix", () => {
+    const result = nestByOrders(trailer, orders);
+    let m = applyCommands(model(), buildNestLayout(result));
+
+    // Simulate the user dragging pallet #1's rect shape 2000mm down the trailer.
+    const shape = m.entities.find((e) => e.name === "pallet-shape" && e.type === "polyline");
+    if (!shape || shape.type !== "polyline") throw new Error("expected a rect pallet in the fixture");
+    const dragged = { ...shape, points: shape.points.map((p) => ({ x: p.x + 2000, y: p.y })) };
+    m = { ...m, entities: m.entities.map((e) => (e.id === dragged.id ? dragged : e)) };
+
+    const live = readLivePlacements(m, result);
+    const original = result.placed.find((p) => p.shape === "rect");
+    const movedIndex = result.placed.findIndex((p) => p.shape === "rect");
+    expect(original).toBeTruthy();
+    expect(live[movedIndex].x).toBeCloseTo((original?.x ?? 0) + 2000);
+    // Everything else about the item (job/city/color) is preserved from the solved result.
+    expect(live[movedIndex].jobNumber).toBe(original?.jobNumber);
+  });
+
+  it("survives a dimension toggle regrouping — pairs by item number, not group array order", () => {
+    const result = nestByOrders(trailer, orders);
+    let m = applyCommands(model(), buildNestLayout(result));
+    m = applyCommands(m, setDimensionsOnLayout(m, true, {}));
+    m = applyCommands(m, setDimensionsOnLayout(m, false, {}));
+    const live = readLivePlacements(m, result);
+    expect(live.map((p) => ({ x: p.x, y: p.y }))).toEqual(result.placed.map((p) => ({ x: p.x, y: p.y })));
   });
 });

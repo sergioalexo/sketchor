@@ -33,8 +33,12 @@ export interface Pallet {
 
 export interface Order {
   id: string;
-  /** The drop's destination — shown on the plan and in the unload list. */
+  /** Job / PO number or other free-text order identifier. */
+  jobNumber: string;
+  /** The drop's destination city — shown on the plan and in the unload list. */
   city: string;
+  /** The drop's destination state (US two-letter abbreviation, or free text). */
+  state: string;
   /** Auto-assigned hatch colour (any CSS colour). */
   color: string;
   pallets: Pallet[];
@@ -74,7 +78,9 @@ export interface PlacedItem {
   orderId: string;
   /** Position of this pallet's order in the unload sequence (0 = first off, at the door). */
   orderIndex: number;
+  jobNumber: string;
   city: string;
+  state: string;
   color: string;
   shape: PalletShape;
   /** The pallet's tag, carried through so layout can label it. */

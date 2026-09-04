@@ -11,7 +11,7 @@ function pallet(over: Partial<Pallet> = {}): Pallet {
 }
 function order(city: string, pallets: Pallet[], color = "#000"): Order {
   seq += 1;
-  return { id: `o${seq}`, city, color, pallets };
+  return { id: `o${seq}`, jobNumber: "", city, state: "", color, pallets };
 }
 
 describe("nestByOrders", () => {

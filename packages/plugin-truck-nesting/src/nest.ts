@@ -12,7 +12,9 @@ interface FlatItem {
   palletId: string;
   orderId: string;
   orderIndex: number;
+  jobNumber: string;
   city: string;
+  state: string;
   color: string;
   shape: PalletShape;
   tag?: string;
@@ -52,7 +54,9 @@ function flattenOrders(orders: Order[]): FlatItem[] {
           palletId: qty > 1 ? `${pallet.id}#${n}` : pallet.id,
           orderId: order.id,
           orderIndex,
+          jobNumber: order.jobNumber,
           city: order.city,
+          state: order.state,
           color: order.color,
           shape: pallet.shape,
           tag: pallet.tag,
@@ -220,7 +224,9 @@ export function nestByOrders(trailer: TrailerProfile, orders: Order[], opts: Nes
     instanceId: p.palletId,
     orderId: p.orderId,
     orderIndex: p.orderIndex,
+    jobNumber: p.jobNumber,
     city: p.city,
+    state: p.state,
     color: p.color,
     shape: p.shape,
     tag: p.tag,

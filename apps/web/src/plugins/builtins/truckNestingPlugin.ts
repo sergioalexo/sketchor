@@ -4,6 +4,7 @@ import {
   LOAD_PLAN_GUIDE_LAYER,
   LOAD_PLAN_LAYER,
   nestByOrders,
+  readLivePlacements,
   setDimensionsOnLayout,
   validateNest,
   type NestResult,
@@ -50,6 +51,8 @@ interface PersistedState {
   loadName: string;
   /** Free-text truck/driver info shown on the printed load plan. */
   truckInfo: string;
+  /** ISO date (yyyy-mm-dd) shown on the printed load plan — defaults to today. */
+  loadDate: string;
 }
 
 const STORAGE_KEY = "state";
@@ -78,10 +81,16 @@ const SEED_PALLET_PRESETS: PalletPreset[] = [
 function seedOrder(pallet: PalletPreset): Order {
   return {
     id: `o-${Date.now().toString(36)}`,
+    jobNumber: "",
     city: "",
+    state: "",
     color: PALETTE[0],
     pallets: [{ id: `p-${Date.now().toString(36)}`, name: pallet.name, width: pallet.width, length: pallet.length, shape: pallet.shape, qty: 1 }],
   };
+}
+
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
 }
 
 // --- untrusted panel input ---
@@ -125,7 +134,9 @@ function asOrder(v: unknown): Order | null {
   const pallets = Array.isArray(o.pallets) ? o.pallets.map(asPallet).filter((p): p is Pallet => p !== null) : [];
   return {
     id: typeof o.id === "string" ? o.id : `o-${Math.random().toString(36).slice(2)}`,
+    jobNumber: str(o.jobNumber),
     city: str(o.city),
+    state: str(o.state),
     color: str(o.color) || PALETTE[0],
     pallets,
   };
@@ -172,6 +183,7 @@ function asState(v: unknown): PersistedState {
     orders: orders.length > 0 ? orders : [seedOrder(resolvedDefaultPallet)],
     loadName: str(o.loadName),
     truckInfo: str(o.truckInfo),
+    loadDate: str(o.loadDate) || todayIso(),
   };
 }
 
@@ -272,11 +284,18 @@ const plugin: PluginModule = {
           void sketchor.ui.postMessage({ type: "error", message: "Auto-nest a plan before printing it." });
           return;
         }
-        const loadName = str(msg.loadName).trim() || lastResult.trailer.name;
+        // Read the live canvas so a pallet the user dragged by hand after
+        // Auto-nest shows up in its actual spot on the print, not the stale
+        // solved position.
+        const model = await sketchor.document.read();
+        const liveResult: NestResult = { ...lastResult, placed: readLivePlacements(model, lastResult) };
+        const loadName = str(msg.loadName).trim() || liveResult.trailer.name;
         const truckInfo = str(msg.truckInfo).trim();
-        const html = buildPrintHtml(lastResult, lastFindings, {
+        const loadDate = str(msg.loadDate).trim();
+        const html = buildPrintHtml(liveResult, lastFindings, {
           loadName,
           truckInfo,
+          loadDate,
           perMm: unit.perMm,
           unitLabel: unit.label,
         });
@@ -294,20 +313,33 @@ function fmtMm(mm: number, perMm: number, unitLabel: string): string {
   return `${Math.round(mm * perMm * 10) / 10} ${unitLabel}`;
 }
 
+/** Renders an ISO yyyy-mm-dd as a locale date without a UTC/local timezone shift. */
+function fmtIsoDate(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso.trim());
+  if (!m) return "";
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" });
+}
+
 /**
  * A printable load-plan report: a top-down SVG of the nest, a legend mapping
  * each unload stop's colour to its city, and a full pallet list — built from
  * the last solved {@link NestResult}, not the live canvas, so it always
  * matches what Auto-nest actually computed.
  */
+function jobDestination(p: { jobNumber?: string; city: string; state?: string }): string {
+  const cityState = [p.city?.trim(), p.state?.trim()].filter(Boolean).join(", ");
+  return [p.jobNumber?.trim(), cityState].filter(Boolean).join(" — ") || "—";
+}
+
 function buildPrintHtml(
   result: NestResult,
   findings: ValidationFinding[],
-  info: { loadName: string; truckInfo: string; perMm: number; unitLabel: string },
+  info: { loadName: string; truckInfo: string; loadDate: string; perMm: number; unitLabel: string },
 ): string {
   const { trailer } = result;
   const pad = Math.max(trailer.length, trailer.width) * 0.03;
-  const vb = `${-pad} ${-pad} ${trailer.length + pad * 2} ${trailer.width + pad * 2}`;
+  const vb = `${-pad} ${-pad} ${trailer.length + pad * 2} ${trailer.width + pad * 3}`;
 
   const shapes = result.placed
     .map((p, i) => {
@@ -324,14 +356,20 @@ function buildPrintHtml(
     })
     .join("");
 
+  // DOOR (x = 0, where the load unloads from) and NOSE (x = length, against the cab).
+  const endFontSize = Math.min(trailer.width * 0.06, 90);
+  const endLabels = `<text x="${endFontSize * 0.2}" y="${trailer.width + endFontSize * 1.1}" font-size="${endFontSize}" font-weight="700" fill="#111">DOOR</text>
+    <text x="${trailer.length - endFontSize * 0.2}" y="${trailer.width + endFontSize * 1.1}" font-size="${endFontSize}" font-weight="700" text-anchor="end" fill="#111">NOSE</text>`;
+
   const svg = `<svg viewBox="${vb}" xmlns="http://www.w3.org/2000/svg">
     <rect x="0" y="0" width="${trailer.length}" height="${trailer.width}" fill="none" stroke="#111" stroke-width="${pad * 0.08}" />
     ${shapes}
+    ${endLabels}
   </svg>`;
 
-  const bySeq = new Map<number, { city: string; color: string; n: number }>();
+  const bySeq = new Map<number, { dest: string; color: string; n: number }>();
   for (const p of result.placed) {
-    const e = bySeq.get(p.orderIndex) ?? { city: p.city, color: p.color, n: 0 };
+    const e = bySeq.get(p.orderIndex) ?? { dest: jobDestination(p), color: p.color, n: 0 };
     e.n += 1;
     bySeq.set(p.orderIndex, e);
   }
@@ -339,14 +377,14 @@ function buildPrintHtml(
     .sort((a, b) => a[0] - b[0])
     .map(
       ([idx, e]) =>
-        `<div class="legend-row"><span class="swatch" style="background:${escapeHtml(e.color)}"></span>#${idx + 1} ${escapeHtml(e.city || "—")} &middot; ${e.n} pallet${e.n === 1 ? "" : "s"}</div>`,
+        `<div class="legend-row"><span class="swatch" style="background:${escapeHtml(e.color)}"></span>#${idx + 1} ${escapeHtml(e.dest)} &middot; ${e.n} pallet${e.n === 1 ? "" : "s"}</div>`,
     )
     .join("");
 
   const rows = result.placed
     .map((p, i) => {
       const dims = p.shape === "round" ? `Ø ${fmtMm(p.width, info.perMm, info.unitLabel)}` : `${fmtMm(p.width, info.perMm, info.unitLabel)} × ${fmtMm(p.length, info.perMm, info.unitLabel)}`;
-      return `<tr><td>${i + 1}</td><td><span class="swatch" style="background:${escapeHtml(p.color)}"></span>${escapeHtml(p.city || "—")}</td><td>${p.shape === "round" ? "Round" : "Rect"}</td><td>${dims}</td><td>${escapeHtml(p.tag || "")}</td></tr>`;
+      return `<tr><td>${i + 1}</td><td><span class="swatch" style="background:${escapeHtml(p.color)}"></span>${escapeHtml(p.jobNumber || "—")}</td><td>${escapeHtml([p.city, p.state].filter(Boolean).join(", ") || "—")}</td><td>${p.shape === "round" ? "Round" : "Rect"}</td><td>${dims}</td><td>${escapeHtml(p.tag || "")}</td></tr>`;
     })
     .join("");
 
@@ -379,13 +417,13 @@ function buildPrintHtml(
   </style>
   <div class="load-plan">
     <h1>${escapeHtml(info.loadName)}</h1>
-    <div class="sub"><b>${escapeHtml(trailer.name)}</b> &middot; ${fmtMm(trailer.length, info.perMm, info.unitLabel)} × ${fmtMm(trailer.width, info.perMm, info.unitLabel)} &middot; ${result.placed.length} pallets, ${fmtMm(result.usedLength, info.perMm, info.unitLabel)} used${info.truckInfo ? ` &middot; ${escapeHtml(info.truckInfo)}` : ""}</div>
+    <div class="sub"><b>${escapeHtml(trailer.name)}</b> &middot; ${fmtMm(trailer.length, info.perMm, info.unitLabel)} × ${fmtMm(trailer.width, info.perMm, info.unitLabel)} &middot; ${result.placed.length} pallets, ${fmtMm(result.usedLength, info.perMm, info.unitLabel)} used${info.truckInfo ? ` &middot; ${escapeHtml(info.truckInfo)}` : ""}${fmtIsoDate(info.loadDate) ? ` &middot; ${escapeHtml(fmtIsoDate(info.loadDate))}` : ""}</div>
     ${svg}
     <h2>Legend — unload sequence</h2>
     <div class="legend">${legend}</div>
     <h2>Pallets</h2>
     <table>
-      <thead><tr><th>#</th><th>Job Number</th><th>Shape</th><th>Size</th><th>Tag</th></tr></thead>
+      <thead><tr><th>#</th><th>Job Number</th><th>City / State</th><th>Shape</th><th>Size</th><th>Tag</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
     ${unplaced}
@@ -426,8 +464,17 @@ const PANEL_HTML = `<!doctype html>
       .move { display: flex; flex-direction: column; }
       .move button { padding: 0 3px; line-height: 10px; font-size: 9px; background: none; border: none; color: #9aa0a6; cursor: pointer; }
       .dot { width: 12px; height: 12px; border-radius: 3px; flex: none; }
-      .order-head input.city { flex: 1; margin: 0; min-width: 0; }
+      .order-head input.job { flex: 1; margin: 0; min-width: 0; }
       .seq { font-size: 10px; opacity: 0.5; flex: none; }
+      .dest-line { display: flex; gap: 4px; margin: 0 0 6px; }
+      .city-wrap { position: relative; flex: 2; min-width: 0; }
+      .dest-line input.city { width: 100%; margin: 0; }
+      .dest-line input.state { flex: 1; margin: 0; min-width: 0; text-transform: uppercase; }
+      .city-suggest { position: absolute; top: 100%; left: 0; right: 0; margin-top: 2px; background: #2b2d31; border: 1px solid #3a3d42; border-radius: 4px; max-height: 150px; overflow-y: auto; z-index: 20; }
+      .city-suggest .opt { display: flex; justify-content: space-between; gap: 8px; padding: 5px 7px; cursor: pointer; }
+      .city-suggest .opt.active { background: #4f7cff; color: #fff; }
+      .city-suggest .opt .st { opacity: 0.6; }
+      .city-suggest .opt.active .st { opacity: 0.85; }
 
       .pallet { border-top: 1px solid #33353a; padding-top: 6px; margin-top: 6px; }
       .pallet:first-child { border-top: 0; margin-top: 0; padding-top: 0; }
@@ -482,7 +529,10 @@ const PANEL_HTML = `<!doctype html>
     <div id="results"></div>
 
     <h4>Print</h4>
-    <label>Load name<input id="load-name" placeholder="e.g. Load 42" /></label>
+    <div class="grid2">
+      <label>Load name<input id="load-name" placeholder="e.g. Load 42" /></label>
+      <label>Load date<input id="load-date" type="date" /></label>
+    </div>
     <label>Truck / driver info<input id="truck-info" placeholder="Truck #, driver, plate…" /></label>
     <div class="actions">
       <button class="ghost" id="print-load" disabled>Print load plan</button>
@@ -495,9 +545,43 @@ const PANEL_HTML = `<!doctype html>
       const RECT_SVG = '<svg width="14" height="14" viewBox="0 0 14 14"><rect x="2" y="3.5" width="10" height="7" rx="1" fill="none" stroke="#dfe1e5" stroke-width="1.4"/></svg>';
       const ROUND_SVG = '<svg width="14" height="14" viewBox="0 0 14 14"><circle cx="7" cy="7" r="4.6" fill="none" stroke="#dfe1e5" stroke-width="1.4"/></svg>';
 
+      // A hint for the common case, not a full postal database — any city/state can still be typed freely.
+      const CITY_STATE_HINTS = {
+        dallas: "TX", houston: "TX", austin: "TX", "san antonio": "TX", "fort worth": "TX", "el paso": "TX",
+        "los angeles": "CA", "san francisco": "CA", "san diego": "CA", sacramento: "CA", oakland: "CA", "san jose": "CA", fresno: "CA",
+        "new york": "NY", buffalo: "NY", rochester: "NY", albany: "NY", syracuse: "NY",
+        chicago: "IL", springfield: "IL",
+        phoenix: "AZ", tucson: "AZ", mesa: "AZ",
+        philadelphia: "PA", pittsburgh: "PA", allentown: "PA",
+        columbus: "OH", cleveland: "OH", cincinnati: "OH", toledo: "OH",
+        atlanta: "GA", savannah: "GA", augusta: "GA",
+        charlotte: "NC", raleigh: "NC", greensboro: "NC", durham: "NC",
+        miami: "FL", orlando: "FL", tampa: "FL", jacksonville: "FL",
+        seattle: "WA", spokane: "WA", tacoma: "WA",
+        denver: "CO", "colorado springs": "CO", aurora: "CO",
+        boston: "MA", worcester: "MA",
+        detroit: "MI", "grand rapids": "MI", lansing: "MI",
+        portland: "OR", salem: "OR", eugene: "OR",
+        memphis: "TN", nashville: "TN", knoxville: "TN", chattanooga: "TN",
+        louisville: "KY", lexington: "KY",
+        "las vegas": "NV", reno: "NV",
+        indianapolis: "IN", "fort wayne": "IN",
+        milwaukee: "WI", madison: "WI",
+        "kansas city": "MO", "st louis": "MO", "saint louis": "MO",
+        minneapolis: "MN", "saint paul": "MN", "st paul": "MN",
+        "oklahoma city": "OK", tulsa: "OK",
+        "salt lake city": "UT",
+        albuquerque: "NM",
+        baltimore: "MD",
+        richmond: "VA", "virginia beach": "VA", norfolk: "VA",
+        toronto: "ON", vancouver: "BC", montreal: "QC", calgary: "AB", edmonton: "AB", ottawa: "ON", winnipeg: "MB",
+      };
+      const CITY_NAMES = Object.keys(CITY_STATE_HINTS);
+      const titleCase = (s) => s.replace(/\b\w/g, (c) => c.toUpperCase());
+
       let unit = { unit: "mm", perMm: 1, label: "mm" };
       let palette = ["#4f86d6"];
-      let state = { presets: [], palletPresets: [], lastPresetName: "", defaultTrailerName: "", defaultPalletName: "", wallMargin: 0, palletMargin: 0, wallOn: false, palletOn: false, dimensions: false, orders: [] };
+      let state = { presets: [], palletPresets: [], lastPresetName: "", defaultTrailerName: "", defaultPalletName: "", wallMargin: 0, palletMargin: 0, wallOn: false, palletOn: false, dimensions: false, orders: [], loadDate: "" };
       let saveTimer = 0;
       let nested = false; // a plan is currently drawn
 
@@ -528,11 +612,13 @@ const PANEL_HTML = `<!doctype html>
         $("dim-each").checked = !!state.dimensions;
         $("load-name").value = state.loadName || "";
         $("truck-info").value = state.truckInfo || "";
+        $("load-date").value = state.loadDate || new Date().toISOString().slice(0, 10);
       }
       $("load-name").addEventListener("input", () => { state.loadName = $("load-name").value; persist(); });
       $("truck-info").addEventListener("input", () => { state.truckInfo = $("truck-info").value; persist(); });
+      $("load-date").addEventListener("input", () => { state.loadDate = $("load-date").value; persist(); });
       $("print-load").addEventListener("click", () => {
-        post({ type: "print", loadName: state.loadName, truckInfo: state.truckInfo });
+        post({ type: "print", loadName: state.loadName, truckInfo: state.truckInfo, loadDate: state.loadDate });
       });
       $("preset").addEventListener("change", (e) => {
         if (e.target.value === "__custom") return;
@@ -687,9 +773,16 @@ const PANEL_HTML = `<!doctype html>
             "<span class='handle' title='Drag to reorder'>&#10303;</span>" +
             "<span class='move'><button class='up' title='Move up'>&#9650;</button><button class='down' title='Move down'>&#9660;</button></span>" +
             "<span class='dot' style='background:" + esc(order.color) + "'></span>" +
-            "<input class='city' placeholder='Job Number' value='" + esc(order.city) + "'>" +
+            "<input class='job' placeholder='Job Number' value='" + esc(order.jobNumber || "") + "'>" +
             "<span class='seq'>#" + (oi + 1) + "</span>" +
             "<button class='icon order-del' title='Remove order'>&#10005;</button>" +
+            "</div>" +
+            "<div class='dest-line'>" +
+            "<div class='city-wrap'>" +
+            "<input class='city' placeholder='City' value='" + esc(order.city) + "' autocomplete='off'>" +
+            "<div class='city-suggest' hidden></div>" +
+            "</div>" +
+            "<input class='state' placeholder='State' maxlength='2' value='" + esc(order.state || "") + "'>" +
             "</div>" +
             pallets +
             "<button class='ghost sm p-add' style='margin-top:6px'>+ Pallet</button>";
@@ -715,7 +808,70 @@ const PANEL_HTML = `<!doctype html>
           card.querySelector(".down").disabled = oi === state.orders.length - 1;
           card.querySelector(".up").addEventListener("click", () => move(oi, oi - 1));
           card.querySelector(".down").addEventListener("click", () => move(oi, oi + 1));
-          card.querySelector(".city").addEventListener("input", (e) => { order.city = e.target.value; persist(); });
+          card.querySelector(".job").addEventListener("input", (e) => { order.jobNumber = e.target.value; persist(); });
+          const cityEl = card.querySelector(".city");
+          const stateEl = card.querySelector(".state");
+          const suggestEl = card.querySelector(".city-suggest");
+          let matches = [];
+          let activeIdx = -1;
+
+          function renderSuggestions() {
+            if (matches.length === 0) { suggestEl.hidden = true; suggestEl.innerHTML = ""; return; }
+            suggestEl.innerHTML = matches
+              .map(
+                (c, i) =>
+                  "<div class='opt" + (i === activeIdx ? " active" : "") + "' data-city='" + esc(c) + "'>" +
+                  "<span>" + esc(titleCase(c)) + "</span><span class='st'>" + esc(CITY_STATE_HINTS[c]) + "</span></div>",
+              )
+              .join("");
+            suggestEl.hidden = false;
+          }
+          function updateMatches(q) {
+            const query = q.trim().toLowerCase();
+            matches = query ? CITY_NAMES.filter((c) => c.startsWith(query)).slice(0, 6) : [];
+            activeIdx = matches.length ? 0 : -1;
+            renderSuggestions();
+          }
+          function acceptSuggestion(city) {
+            const st = CITY_STATE_HINTS[city];
+            order.city = titleCase(city);
+            cityEl.value = order.city;
+            if (st) { order.state = st; stateEl.value = st; }
+            matches = [];
+            activeIdx = -1;
+            renderSuggestions();
+            persist();
+          }
+
+          cityEl.addEventListener("input", (e) => {
+            order.city = e.target.value;
+            updateMatches(e.target.value);
+            persist();
+          });
+          cityEl.addEventListener("keydown", (e) => {
+            if (matches.length === 0) return;
+            if (e.key === "ArrowDown") { e.preventDefault(); activeIdx = (activeIdx + 1) % matches.length; renderSuggestions(); }
+            else if (e.key === "ArrowUp") { e.preventDefault(); activeIdx = (activeIdx - 1 + matches.length) % matches.length; renderSuggestions(); }
+            else if (e.key === "Enter") { e.preventDefault(); acceptSuggestion(matches[activeIdx >= 0 ? activeIdx : 0]); }
+            else if (e.key === "Escape") { matches = []; activeIdx = -1; renderSuggestions(); }
+          });
+          cityEl.addEventListener("blur", () => {
+            // A short delay lets a suggestion's mousedown (below) register before the list is torn down.
+            setTimeout(() => {
+              const exact = CITY_STATE_HINTS[cityEl.value.trim().toLowerCase()];
+              if (exact && !order.state) { order.state = exact; stateEl.value = exact; persist(); }
+              matches = [];
+              activeIdx = -1;
+              renderSuggestions();
+            }, 150);
+          });
+          suggestEl.addEventListener("mousedown", (e) => {
+            const opt = e.target.closest(".opt");
+            if (!opt) return;
+            e.preventDefault();
+            acceptSuggestion(opt.dataset.city);
+          });
+          stateEl.addEventListener("input", (e) => { order.state = e.target.value.toUpperCase(); persist(); });
           card.querySelector(".order-del").addEventListener("click", () => { state.orders.splice(oi, 1); renderOrders(); persist(); });
           card.querySelector(".p-add").addEventListener("click", () => {
             order.pallets.push(newPallet());
@@ -789,7 +945,7 @@ const PANEL_HTML = `<!doctype html>
       }
 
       $("order-add").addEventListener("click", () => {
-        state.orders.push({ id: rid("o"), city: "", color: palette[state.orders.length % palette.length], pallets: [newPallet()] });
+        state.orders.push({ id: rid("o"), jobNumber: "", city: "", state: "", color: palette[state.orders.length % palette.length], pallets: [newPallet()] });
         renderOrders();
         persist();
       });
@@ -814,16 +970,20 @@ const PANEL_HTML = `<!doctype html>
           "<h4>Result</h4><div class='muted'>" + r.placed.length + " placed, " + r.unplaced.length +
           " unplaced &middot; " + Math.round(toU(r.usedLength)) + " / " + Math.round(toU(r.trailer.length)) + " " + esc(unit.label) + " used</div>";
         html += "<div class='findings'>" + m.findings.map((f) => "<div class='f " + f.level + "'>" + esc(f.message) + "</div>").join("") + "</div>";
+        const dest = (p) => {
+          const cs = [p.city, p.state].filter(Boolean).join(", ");
+          return [p.jobNumber, cs].filter(Boolean).join(" — ") || "—";
+        };
         const byOrder = new Map();
         r.placed.forEach((p) => {
-          const e = byOrder.get(p.orderId) || { city: p.city, color: p.color, index: p.orderIndex, n: 0 };
+          const e = byOrder.get(p.orderId) || { dest: dest(p), color: p.color, index: p.orderIndex, n: 0 };
           e.n += 1;
           byOrder.set(p.orderId, e);
         });
         const seq = [...byOrder.values()].sort((a, b) => a.index - b.index);
         if (seq.length) html += "<h4>Unload sequence</h4>";
         seq.forEach((o) => {
-          html += "<div class='stop' style='border-left-color:" + esc(o.color) + "'>#" + (o.index + 1) + " " + esc(o.city || "—") + " · " + o.n + " pallet" + (o.n === 1 ? "" : "s") + "</div>";
+          html += "<div class='stop' style='border-left-color:" + esc(o.color) + "'>#" + (o.index + 1) + " " + esc(o.dest) + " · " + o.n + " pallet" + (o.n === 1 ? "" : "s") + "</div>";
         });
         html += "<div class='muted' style='margin-top:8px'>Use “Print load plan” below for a PDF with the plan, legend and pallet list.</div>";
         box.innerHTML = html;
