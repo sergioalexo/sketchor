@@ -1503,6 +1503,25 @@ body {
   font-size: 11px;
 }
 
+/* Sits under whatever the popover is showing, separated so it reads as a
+   setting rather than as part of the current update's controls. */
+.update-auto {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.update-auto input {
+  margin: 0;
+  cursor: pointer;
+}
+
 .action-menu button.update-primary,
 .update-banner button.update-primary {
   padding: 6px 12px;

@@ -220,10 +220,17 @@ so a DWG tab stays unbound and Save falls through to a prompt.
 
 ## Updates
 
-The desktop app updates itself. It checks a few seconds after launch, and any
-time you press the download button in the toolbar; when there's something
-newer, a banner offers **Update now**, which downloads the installer with a
-progress bar, verifies its signature, installs it and relaunches Sketchor.
+The desktop app updates itself, without being asked. It checks a few seconds
+after launch, and any time you press the download button in the toolbar; when
+there's something newer it downloads the installer with a progress bar in the
+banner, verifies its signature, installs it and relaunches into the new
+version. Uncheck **Update automatically** in the toolbar's update popover to go
+back to being asked first.
+
+Installing closes Sketchor, so the automatic install only goes ahead while
+every tab is saved. With unsaved work open the download finishes and then
+waits, and the banner offers **Restart now** once you've saved — the update is
+already on disk, so that restart is immediate.
 
 Releases are signed with a minisign keypair. The public half is baked into
 `tauri.conf.json`; the private half lives only in this machine's

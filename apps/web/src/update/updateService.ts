@@ -12,6 +12,14 @@
  * GitHub Releases API, which can still tell the user a newer version exists
  * and open its download page. The fallback keeps the pre-0.7 keyless
  * behaviour alive rather than reporting a hard failure.
+ *
+ * On the desktop this runs itself: the start-up check downloads a new version
+ * as soon as it finds one and installs it without being asked. Download and
+ * install are deliberately separate steps, because installing hands the app to
+ * the NSIS installer, which closes Sketchor to swap the files — so the install
+ * only goes ahead while every tab is saved. With unsaved work open the download
+ * waits on disk and the banner offers the restart, which is the user's call.
+ * `autoUpdate` turns the whole thing off.
  */
 
 import { create } from "zustand";
@@ -35,6 +43,8 @@ export type UpdatePhase =
   | "up-to-date"
   | "available"
   | "downloading"
+  /** On disk and verified, waiting for a safe moment to close the app and install. */
+  | "downloaded"
   | "installing"
   | "ready"
   | "error";
@@ -55,6 +65,30 @@ export interface UpdateState {
   /** Dismissed by the user — hides the banner until the next explicit check. */
   dismissed: boolean;
   lastCheckedAt: number | null;
+  /** Install new versions on launch without being asked. Desktop only. */
+  autoUpdate: boolean;
+  /** True when the update in flight was started by the app, not by a click. */
+  unattended: boolean;
+}
+
+const AUTO_UPDATE_KEY = "sketchor.autoUpdate";
+
+/** Opt-out, not opt-in: the point is that most users never think about updating. */
+function loadAutoUpdate(): boolean {
+  try {
+    return localStorage.getItem(AUTO_UPDATE_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+
+export function setAutoUpdate(on: boolean): void {
+  try {
+    localStorage.setItem(AUTO_UPDATE_KEY, on ? "on" : "off");
+  } catch {
+    /* private mode / storage disabled — the choice just won't persist */
+  }
+  set({ autoUpdate: on });
 }
 
 const INITIAL: UpdateState = {
@@ -68,6 +102,8 @@ const INITIAL: UpdateState = {
   silent: false,
   dismissed: false,
   lastCheckedAt: null,
+  autoUpdate: loadAutoUpdate(),
+  unattended: false,
 };
 
 export const useUpdate = create<UpdateState>(() => INITIAL);
@@ -142,6 +178,8 @@ let pendingDownloadUrl = RELEASES_PAGE;
 interface TauriUpdate {
   version: string;
   body?: string;
+  download(onEvent: (e: DownloadEvent) => void): Promise<void>;
+  install(): Promise<void>;
   downloadAndInstall(onEvent: (e: DownloadEvent) => void): Promise<void>;
 }
 type DownloadEvent =
@@ -231,6 +269,40 @@ export async function checkForUpdates({ silent = false } = {}): Promise<void> {
   }
 }
 
+/** Fetches the pending update to disk. Returns true once it's there. */
+async function downloadPending(): Promise<boolean> {
+  if (!pendingUpdate) return false;
+  set({ phase: "downloading", received: 0, total: null, message: null });
+  try {
+    await pendingUpdate.download((e) => {
+      if (e.event === "Started") set({ received: 0, total: e.data.contentLength ?? null });
+      else if (e.event === "Progress") set({ received: useUpdate.getState().received + e.data.chunkLength });
+    });
+    set({ phase: "downloaded" });
+    return true;
+  } catch (err) {
+    set({ phase: "error", message: err instanceof Error ? err.message : "Download failed" });
+    return false;
+  }
+}
+
+/**
+ * Runs the installer for an already-downloaded update and relaunches into it.
+ * This closes Sketchor, so callers own the decision that now is a safe moment.
+ */
+export async function installPending(): Promise<void> {
+  if (!pendingUpdate) return;
+  set({ phase: "installing", message: null });
+  try {
+    await pendingUpdate.install();
+    set({ phase: "ready" });
+    const { relaunch } = await import("@tauri-apps/plugin-process");
+    await relaunch();
+  } catch (err) {
+    set({ phase: "error", message: err instanceof Error ? err.message : "Install failed" });
+  }
+}
+
 /**
  * Applies the update found by the last check: installs it in place on the
  * desktop, or opens the download page when only the Releases API knew about
@@ -238,6 +310,11 @@ export async function checkForUpdates({ silent = false } = {}): Promise<void> {
  */
 export async function applyUpdate(): Promise<void> {
   const state = useUpdate.getState();
+  if (state.phase === "downloaded") {
+    // Already on disk — an unattended download the user is now approving.
+    await installPending();
+    return;
+  }
   if (state.phase !== "available" && state.phase !== "error") return;
 
   if (state.channel === "download" || !pendingUpdate) {
@@ -245,27 +322,44 @@ export async function applyUpdate(): Promise<void> {
     return;
   }
 
-  set({ phase: "downloading", received: 0, total: null, message: null });
+  set({ unattended: false });
+  if (await downloadPending()) await installPending();
+}
+
+/** Tabs with unsaved changes. Counted, not just flagged, so the UI can say how many. */
+async function unsavedTabCount(): Promise<number> {
   try {
-    await pendingUpdate.downloadAndInstall((e) => {
-      if (e.event === "Started") {
-        set({ received: 0, total: e.data.contentLength ?? null });
-      } else if (e.event === "Progress") {
-        set({ received: useUpdate.getState().received + e.data.chunkLength });
-      } else {
-        // Handed to the NSIS installer; it closes Sketchor to swap the files.
-        set({ phase: "installing" });
-      }
-    });
-    set({ phase: "ready" });
-    const { relaunch } = await import("@tauri-apps/plugin-process");
-    await relaunch();
-  } catch (err) {
-    set({
-      phase: "error",
-      message: err instanceof Error ? err.message : "Update failed",
-    });
+    const { getSessions } = await import("../state/store");
+    return getSessions().filter((s) => s.dirty).length;
+  } catch {
+    // Can't tell — treat it as unsaved rather than closing over the user's work.
+    return 1;
   }
+}
+
+/** Whether the launch check's result should start an unattended download. */
+export function shouldAutoDownload(s: Pick<UpdateState, "autoUpdate" | "phase" | "channel">): boolean {
+  return s.autoUpdate && s.phase === "available" && s.channel === "install";
+}
+
+/**
+ * Whether a downloaded update may install itself with nobody watching.
+ * Installing closes the app, so anything unsaved would go with it — one dirty
+ * tab is enough to make the restart the user's decision instead.
+ */
+export function canInstallUnattended(unsavedTabs: number): boolean {
+  return unsavedTabs === 0;
+}
+
+/**
+ * The hands-off path: download the update the start-up check found, then
+ * install it if nothing would be lost. Otherwise it stays in "downloaded" and
+ * the banner offers the restart.
+ */
+async function updateUnattended(): Promise<void> {
+  set({ unattended: true });
+  if (!(await downloadPending())) return;
+  if (canInstallUnattended(await unsavedTabCount())) await installPending();
 }
 
 /** Hides the update banner until the next explicit check. */
@@ -279,7 +373,14 @@ export function resetUpdateState(): void {
   if (phase === "up-to-date" || phase === "error") set({ phase: "idle", message: null });
 }
 
-/** Fire-and-forget check a moment after launch; never blocks or throws. */
+/**
+ * Fire-and-forget check a moment after launch; never blocks or throws. When a
+ * signed update turns up and auto-update is on, it goes straight into
+ * downloading and installing it — see {@link updateUnattended}.
+ */
 export function initUpdateCheck(): void {
-  window.setTimeout(() => void checkForUpdates({ silent: true }), 2500);
+  window.setTimeout(async () => {
+    await checkForUpdates({ silent: true });
+    if (shouldAutoDownload(useUpdate.getState())) await updateUnattended();
+  }, 2500);
 }

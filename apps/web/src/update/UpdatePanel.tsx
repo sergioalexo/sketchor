@@ -3,7 +3,9 @@ import {
   checkForUpdates,
   currentVersion,
   dismissUpdate,
+  isTauri,
   resetUpdateState,
+  setAutoUpdate,
   useUpdate,
 } from "./updateService";
 
@@ -18,6 +20,11 @@ import {
  *
  * Both drive the same {@link useUpdate} state, so starting a download from
  * one is reflected in the other.
+ *
+ * On the desktop the start-up check normally does all of this by itself, so
+ * most of what's here is progress reporting for something already in motion.
+ * The one state that needs the user is "downloaded": the update is on disk but
+ * a tab is unsaved, so the restart is offered rather than taken.
  */
 
 function formatMb(bytes: number): string {
@@ -31,17 +38,20 @@ function progressText(received: number, total: number | null): string {
 }
 
 export function UpdateButton({ open, onToggle }: { open: boolean; onToggle: () => void }) {
-  const { phase, version, notes, channel, received, total, message } = useUpdate();
+  const { phase, version, notes, channel, received, total, message, autoUpdate } = useUpdate();
   const busy = phase === "checking" || phase === "downloading" || phase === "installing";
+  const downloaded = phase === "downloaded";
 
   return (
     <div className="action-menu-wrap">
       <button
-        className={`action action-labeled ${phase === "available" ? "update-ready" : ""}`}
+        className={`action action-labeled ${phase === "available" || downloaded ? "update-ready" : ""}`}
         title={
-          phase === "available"
-            ? `Sketchor ${version} is available — click to update`
-            : `Check for updates (you have ${currentVersion()})`
+          downloaded
+            ? `Sketchor ${version} is downloaded — click to restart into it`
+            : phase === "available"
+              ? `Sketchor ${version} is available — click to update`
+              : `Check for updates (you have ${currentVersion()})`
         }
         data-testid="check-updates"
         onClick={() => {
@@ -67,11 +77,13 @@ export function UpdateButton({ open, onToggle }: { open: boolean; onToggle: () =
             ? phase === "checking"
               ? "Checking..."
               : "Updating..."
-            : phase === "available"
-              ? `Update to ${version}`
-              : "Check for updates"}
+            : downloaded
+              ? `Restart for ${version}`
+              : phase === "available"
+                ? `Update to ${version}`
+                : "Check for updates"}
         </span>
-        {phase === "available" && <span className="update-dot" />}
+        {(phase === "available" || downloaded) && <span className="update-dot" />}
       </button>
 
       {open && (
@@ -104,6 +116,18 @@ export function UpdateButton({ open, onToggle }: { open: boolean; onToggle: () =
               </div>
               <div className="update-sub">{progressText(received, total)}</div>
             </>
+          ) : downloaded ? (
+            <>
+              <div className="update-headline">Version {version} is ready to install</div>
+              <button className="update-primary" data-testid="update-restart" onClick={() => void applyUpdate()}>
+                Restart now
+              </button>
+              {/* It got this far unattended and then stopped, which only happens
+                  when a tab is unsaved — say why rather than looking stalled. */}
+              <div className="update-sub">
+                Waiting because you have unsaved work. Save your tabs, then restart to finish.
+              </div>
+            </>
           ) : phase === "installing" || phase === "ready" ? (
             <>
               <div className="update-headline">Installing {version}...</div>
@@ -133,6 +157,19 @@ export function UpdateButton({ open, onToggle }: { open: boolean; onToggle: () =
               Check for updates
             </button>
           )}
+
+          {/* Only the desktop build can install anything by itself. */}
+          {isTauri() && (
+            <label className="update-auto" title="Download and install new versions on start-up">
+              <input
+                type="checkbox"
+                data-testid="update-auto"
+                checked={autoUpdate}
+                onChange={(e) => setAutoUpdate(e.target.checked)}
+              />
+              Update automatically
+            </label>
+          )}
         </div>
       )}
     </div>
@@ -141,12 +178,31 @@ export function UpdateButton({ open, onToggle }: { open: boolean; onToggle: () =
 
 export function UpdateBanner() {
   const { phase, version, channel, received, total, dismissed } = useUpdate();
-  const downloading = phase === "downloading" || phase === "installing" || phase === "ready";
-  if (dismissed || (phase !== "available" && !downloading)) return null;
+  const busy = phase === "downloading" || phase === "installing" || phase === "ready";
+  const downloaded = phase === "downloaded";
+  if (dismissed || (phase !== "available" && !busy && !downloaded)) return null;
+
+  // An update that downloaded itself and then stopped is waiting on unsaved
+  // work — the banner is where the user gets told, and gets the restart.
+  if (downloaded) {
+    return (
+      <div className="update-banner" data-testid="update-banner">
+        <span className="update-banner-text">
+          Sketchor {version} is downloaded — restart to finish. Save your tabs first.
+        </span>
+        <button className="update-primary" data-testid="banner-restart" onClick={() => void applyUpdate()}>
+          Restart now
+        </button>
+        <button className="update-later" onClick={dismissUpdate}>
+          Later
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="update-banner" data-testid="update-banner">
-      {downloading ? (
+      {busy ? (
         <span className="update-banner-text">
           {phase === "downloading"
             ? `Downloading Sketchor ${version} — ${progressText(received, total)}`
