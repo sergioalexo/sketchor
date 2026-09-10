@@ -14,20 +14,44 @@ import { add, polyline, type Command, type Point } from "@sketchor/plugin-sdk";
  *
  * Everything else (feed words, spindle/coolant M-codes, canned cycles, tool
  * comp) is ignored; unknown motion just carries the modal state forward.
+ *
+ * Document coordinates are always millimetres, so every program is converted on
+ * the way in. A program that never declares G20/G21 is a real hazard — an inch
+ * program read as mm comes out 25.4x too small — so the unit is caller-
+ * controllable ({@link GcodeOptions.unit} / {@link GcodeOptions.assume}) and the
+ * result always reports which unit was used and where that reading came from.
  */
+
+/** The unit a program's coordinates are in. */
+export type GcodeUnit = "mm" | "in";
+
+/** How to decide that unit: follow the program's own G20/G21, or override it. */
+export type GcodeUnitMode = "auto" | GcodeUnit;
 
 export interface GcodeOptions {
   /** Also draw G0 rapids, on a separate "<layer> rapids" layer. Default false. */
   includeRapids?: boolean;
   /** Layer for cutting moves. Default "G-code". */
   layer?: string;
+  /**
+   * How to read coordinates. "auto" (default) follows G20/G21; "mm"/"in" force
+   * the unit and ignore what the program declares.
+   */
+  unit?: GcodeUnitMode;
+  /** Unit to assume under "auto" when the program never declares one. Default "mm". */
+  assume?: GcodeUnit;
 }
 
 export interface GcodeStats {
   paths: number;
   segments: number;
   rapids: number;
-  unit: "mm" | "in";
+  /** The unit the program's numbers were read as. */
+  unit: GcodeUnit;
+  /** Where that unit came from — "assumed" means the program never said. */
+  unitSource: "declared" | "forced" | "assumed";
+  /** Millimetres per program unit actually applied (1 or 25.4). */
+  scale: number;
 }
 
 export interface GcodeResult {
@@ -101,13 +125,22 @@ export function gcodeToEntities(text: string, opts: GcodeOptions = {}): GcodeRes
   const rapidLayer = `${layer} rapids`;
   const warnings: string[] = [];
 
-  const st: Modal = { motion: 0, abs: true, inch: false, x: 0, y: 0, z: 0 };
+  // "auto" follows the program's own G20/G21; a forced unit ignores them. Under
+  // "auto" the file may say nothing at all, in which case `assume` decides —
+  // that is the case worth telling the user about, so it's tracked separately.
+  const forced: GcodeUnit | null = opts.unit === "mm" || opts.unit === "in" ? opts.unit : null;
+  const assumed: GcodeUnit = opts.assume === "in" ? "in" : "mm";
+  const startUnit = forced ?? assumed;
+  /** The first unit the program declares for itself, if it ever does. */
+  let declared: GcodeUnit | null = null;
+
+  const st: Modal = { motion: 0, abs: true, inch: startUnit === "in", x: 0, y: 0, z: 0 };
 
   // Open cut path: points in mm + per-segment bulges (0 = straight).
   let path: Point[] = [];
   let bulges: number[] = [];
   const commands: Command[] = [];
-  const stats: GcodeStats = { paths: 0, segments: 0, rapids: 0, unit: "mm" };
+  const stats: GcodeStats = { paths: 0, segments: 0, rapids: 0, unit: startUnit, unitSource: forced ? "forced" : "assumed", scale: startUnit === "in" ? IN_TO_MM : 1 };
   let warnedPlane = false;
 
   const scale = () => (st.inch ? IN_TO_MM : 1);
@@ -136,8 +169,18 @@ export function gcodeToEntities(text: string, opts: GcodeOptions = {}): GcodeRes
       switch (letter) {
         case "G":
           if (value === 0 || value === 1 || value === 2 || value === 3) st.motion = value;
-          else if (value === 20) st.inch = true;
-          else if (value === 21) st.inch = false;
+          else if (value === 20 || value === 21) {
+            const u: GcodeUnit = value === 20 ? "in" : "mm";
+            declared ??= u;
+            // A forced unit wins, but only silently the first time: if the
+            // program disagrees, say so rather than quietly resizing the part.
+            if (!forced) st.inch = u === "in";
+            else if (u !== forced && warnings.length === 0) {
+              warnings.push(
+                `The program declares G${value} (${u === "in" ? "inches" : "millimetres"}), but it was read as ${forced === "in" ? "inches" : "millimetres"} because you set the unit by hand.`,
+              );
+            }
+          }
           else if (value === 90) st.abs = true;
           else if (value === 91) st.abs = false;
           else if ((value === 18 || value === 19) && !warnedPlane) {
@@ -239,6 +282,17 @@ export function gcodeToEntities(text: string, opts: GcodeOptions = {}): GcodeRes
   }
 
   flush();
-  stats.unit = st.inch ? "in" : "mm";
+
+  // Report the unit the geometry was actually built with — not `st.inch`, which
+  // is only wherever the program's modal state happened to end up.
+  const used: GcodeUnit = forced ?? declared ?? assumed;
+  stats.unit = used;
+  stats.unitSource = forced ? "forced" : declared ? "declared" : "assumed";
+  stats.scale = used === "in" ? IN_TO_MM : 1;
+  if (stats.unitSource === "assumed" && (stats.segments > 0 || stats.paths > 0)) {
+    warnings.push(
+      `This program never says G20 or G21, so it was read as ${used === "in" ? "inches" : "millimetres"}. If the geometry came in ${used === "in" ? "25.4x too big" : "25.4x too small"}, set the unit by hand and import again.`,
+    );
+  }
   return { commands, stats, warnings };
 }
