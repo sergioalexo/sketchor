@@ -1,6 +1,8 @@
 //! GDI rasteriser: fits the DXF shapes into a `size`x`size` 32-bpp bitmap
 //! with a dark background and light strokes, returning an HBITMAP that
-//! Explorer takes ownership of.
+//! Explorer takes ownership of. Also turns an already-rendered RGBA image
+//! (a sidecar model preview, see model.rs) into an HBITMAP at the requested
+//! size.
 
 use dxf_parse::{bounds, Shape};
 use windows::Win32::Foundation::{COLORREF, HANDLE, HWND, RECT};
@@ -84,6 +86,69 @@ pub fn render_thumbnail(shapes: &[Shape], size: u32) -> Result<HBITMAP, ()> {
         SelectObject(dc, old);
         let _ = DeleteDC(dc);
         Ok(hbmp)
+    }
+}
+
+/// Wraps an RGBA image (square, `src_size` px) in an HBITMAP of `size` px,
+/// resampling with GDI's HALFTONE filter when the sizes differ — Explorer
+/// asks for whatever its view needs (96, 256, …) and a nearest-neighbour
+/// shrink of a wireframe looks broken.
+pub fn bitmap_from_rgba(rgba: &[u8], src_size: u32, size: u32) -> Result<HBITMAP, ()> {
+    let src = src_size as i32;
+    let dst = size.max(1) as i32;
+    if rgba.len() < (src_size * src_size * 4) as usize || src <= 0 {
+        return Err(());
+    }
+    unsafe {
+        let screen_dc = GetDC(HWND::default());
+        let src_dc = CreateCompatibleDC(screen_dc);
+        let dst_dc = CreateCompatibleDC(screen_dc);
+        ReleaseDC(HWND::default(), screen_dc);
+        if src_dc.is_invalid() || dst_dc.is_invalid() {
+            return Err(());
+        }
+        let mut src_bits: *mut core::ffi::c_void = std::ptr::null_mut();
+        let src_bmi = dib_header(src);
+        let src_bmp = CreateDIBSection(src_dc, &src_bmi, DIB_RGB_COLORS, &mut src_bits, HANDLE::default(), 0)
+            .map_err(|_| ())?;
+        {
+            // RGBA -> BGRA, top-down (the header's negative height).
+            let n = (src_size * src_size) as usize;
+            let out = std::slice::from_raw_parts_mut(src_bits as *mut u8, n * 4);
+            for i in 0..n {
+                out[i * 4] = rgba[i * 4 + 2];
+                out[i * 4 + 1] = rgba[i * 4 + 1];
+                out[i * 4 + 2] = rgba[i * 4];
+                out[i * 4 + 3] = 255;
+            }
+        }
+        if src == dst {
+            let _ = DeleteDC(src_dc);
+            let _ = DeleteDC(dst_dc);
+            return Ok(src_bmp);
+        }
+        let mut dst_bits: *mut core::ffi::c_void = std::ptr::null_mut();
+        let dst_bmi = dib_header(dst);
+        let dst_bmp = match CreateDIBSection(dst_dc, &dst_bmi, DIB_RGB_COLORS, &mut dst_bits, HANDLE::default(), 0) {
+            Ok(b) => b,
+            Err(_) => {
+                let _ = DeleteObject(src_bmp);
+                let _ = DeleteDC(src_dc);
+                let _ = DeleteDC(dst_dc);
+                return Err(());
+            }
+        };
+        let old_src = SelectObject(src_dc, src_bmp);
+        let old_dst = SelectObject(dst_dc, dst_bmp);
+        SetStretchBltMode(dst_dc, HALFTONE);
+        let _ = SetBrushOrgEx(dst_dc, 0, 0, None);
+        let _ = StretchBlt(dst_dc, 0, 0, dst, dst, src_dc, 0, 0, src, src, SRCCOPY);
+        SelectObject(src_dc, old_src);
+        SelectObject(dst_dc, old_dst);
+        let _ = DeleteObject(src_bmp);
+        let _ = DeleteDC(src_dc);
+        let _ = DeleteDC(dst_dc);
+        Ok(dst_bmp)
     }
 }
 

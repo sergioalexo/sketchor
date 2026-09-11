@@ -1,15 +1,18 @@
-//! Windows Explorer thumbnail provider for `.dxf` drawings.
+//! Windows Explorer thumbnail provider for `.dxf` drawings and
+//! `.step`/`.iges` 3D models.
 //!
 //! Implements an in-process COM server exposing `IThumbnailProvider`
-//! (initialised via `IInitializeWithFile`). Explorer calls `GetThumbnail`,
-//! we parse the DXF and rasterise it to an HBITMAP with GDI. Shares the
-//! rendering intent (dark background, light strokes, fit-to-box) with the
-//! Sketchor web thumbnails.
+//! (initialised via `IInitializeWithFile`). Explorer calls `GetThumbnail`;
+//! for a DXF we parse it and rasterise it to an HBITMAP with GDI, for a
+//! model we serve the preview Sketchor rendered (or a text-level wireframe
+//! when there is none yet — see model.rs). Shares the rendering intent (dark
+//! background, light strokes, fit-to-box) with the Sketchor web thumbnails.
 //!
 //! Build:   cargo build --release
 //! Register (admin): regsvr32 dxf_thumbnailer.dll
 //! Unregister:       regsvr32 /u dxf_thumbnailer.dll
 
+pub mod model;
 pub mod render;
 
 use std::ffi::c_void;
@@ -69,10 +72,7 @@ impl IThumbnailProvider_Impl for DxfThumb_Impl {
             .borrow()
             .clone()
             .ok_or_else(|| windows::core::Error::from(E_UNEXPECTED))?;
-        let text = std::fs::read_to_string(&path).map_err(|_| E_UNEXPECTED)?;
-        let shapes = dxf_parse::parse(&text);
-        let hbmp = render::render_thumbnail(&shapes, cx.max(16))
-            .map_err(|_| windows::core::Error::from(E_UNEXPECTED))?;
+        let hbmp = thumbnail_for(&path, cx.max(16)).ok_or_else(|| windows::core::Error::from(E_UNEXPECTED))?;
         unsafe {
             *phbmp = hbmp;
             if !pdwalpha.is_null() {
@@ -81,6 +81,26 @@ impl IThumbnailProvider_Impl for DxfThumb_Impl {
         }
         Ok(())
     }
+}
+
+/// Renders the thumbnail for a file of any supported kind, or None when
+/// there is nothing to show (Explorer then falls back to the icon).
+fn thumbnail_for(path: &str, size: u32) -> Option<windows::Win32::Graphics::Gdi::HBITMAP> {
+    if model::is_model(path) {
+        let bytes = std::fs::read(path).ok()?;
+        if let Some(p) = model::sidecar(&bytes) {
+            return render::bitmap_from_rgba(&p.rgba, p.size, size).ok();
+        }
+        let text = String::from_utf8_lossy(&bytes);
+        let shapes = model::wireframe(path, &text);
+        if shapes.is_empty() {
+            return None;
+        }
+        return render::render_thumbnail(&shapes, size).ok();
+    }
+    let text = std::fs::read_to_string(path).ok()?;
+    let shapes = dxf_parse::parse(&text);
+    render::render_thumbnail(&shapes, size).ok()
 }
 
 /* --------------------------- class factory -------------------------- */
@@ -264,36 +284,46 @@ fn set_dword(path: &str, name: &str, value: u32) -> Result<(), ()> {
     }
 }
 
+/// Extensions this provider handles. STEP/IGES previews come from the
+/// sidecar cache or the wireframe fallback — see model.rs.
+const EXTENSIONS: [&str; 5] = [".dxf", ".step", ".stp", ".iges", ".igs"];
+
 fn register(clsid: &str, dll: &str) -> Result<(), ()> {
     let base = format!("CLSID\\{clsid}");
-    set_string(&base, None, "Sketchor DXF Thumbnail Provider")?;
+    set_string(&base, None, "Sketchor Thumbnail Provider")?;
     let inproc = format!("{base}\\InprocServer32");
     set_string(&inproc, None, dll)?;
     set_string(&inproc, Some("ThreadingModel"), "Apartment")?;
     // Allow IInitializeWithFile (file path) instead of stream isolation.
     set_dword(&base, "DisableProcessIsolation", 1)?;
-    // Associate .dxf with this thumbnail provider. Register at the extension
-    // level and under SystemFileAssociations (the shell consults both, and the
-    // latter survives even if another app owns the .dxf ProgID).
-    set_string(&format!(".dxf\\ShellEx\\{SHELLEX_THUMB}"), None, clsid)?;
-    set_string(
-        &format!("SystemFileAssociations\\.dxf\\ShellEx\\{SHELLEX_THUMB}"),
-        None,
-        clsid,
-    )?;
+    // Associate each extension with this thumbnail provider. Register at the
+    // extension level and under SystemFileAssociations (the shell consults
+    // both, and the latter survives even if another app owns the ProgID).
+    for ext in EXTENSIONS {
+        set_string(&format!("{ext}\\ShellEx\\{SHELLEX_THUMB}"), None, clsid)?;
+        set_string(
+            &format!("SystemFileAssociations\\{ext}\\ShellEx\\{SHELLEX_THUMB}"),
+            None,
+            clsid,
+        )?;
+    }
     Ok(())
 }
 
 fn unregister(clsid: &str) -> Result<(), ()> {
     let base = wide(&classes(&format!("CLSID\\{clsid}")));
-    let assoc = wide(&classes(&format!(".dxf\\ShellEx\\{SHELLEX_THUMB}")));
-    let sysassoc = wide(&classes(&format!(
-        "SystemFileAssociations\\.dxf\\ShellEx\\{SHELLEX_THUMB}"
-    )));
     unsafe {
         let _ = RegDeleteTreeW(HKEY_CURRENT_USER, RegStr(base.as_ptr()));
-        let _ = RegDeleteTreeW(HKEY_CURRENT_USER, RegStr(assoc.as_ptr()));
-        let _ = RegDeleteTreeW(HKEY_CURRENT_USER, RegStr(sysassoc.as_ptr()));
+    }
+    for ext in EXTENSIONS {
+        let assoc = wide(&classes(&format!("{ext}\\ShellEx\\{SHELLEX_THUMB}")));
+        let sysassoc = wide(&classes(&format!(
+            "SystemFileAssociations\\{ext}\\ShellEx\\{SHELLEX_THUMB}"
+        )));
+        unsafe {
+            let _ = RegDeleteTreeW(HKEY_CURRENT_USER, RegStr(assoc.as_ptr()));
+            let _ = RegDeleteTreeW(HKEY_CURRENT_USER, RegStr(sysassoc.as_ptr()));
+        }
     }
     Ok(())
 }

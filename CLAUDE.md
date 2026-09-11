@@ -13,7 +13,8 @@ apps/web             React UI + custom Canvas2D viewport
 apps/web/src/model3d STEP/IGES viewer: OpenCascade wasm in a worker pool, three.js, IndexedDB cache
 apps/web/src-tauri   Tauri 2 desktop shell (Rust); same UI as a native app
 native/dxf-parse     dependency-free Rust DXF parser + fit-to-box projection (shared)
-native/dxf-thumbnailer   Windows Explorer thumbnail COM shell extension (Rust)
+native/step-wire     dependency-free STEP wireframe extractor (B-rep edges + assembly transforms, no kernel)
+native/dxf-thumbnailer   Windows Explorer thumbnail COM shell extension for DXF + STEP/IGES (Rust)
 native/dxf-quicklook     macOS Finder Quick Look thumbnail extension (.appex; Rust FFI + Swift)
 ```
 
@@ -89,6 +90,15 @@ wasm). So:
 - `modelThumbnail.ts` renders the file-browser's isometric PNG through one
   shared offscreen WebGL context (browsers cap live contexts).
 - Z is up. View presets live in `modelScene.ts`.
+- **Explorer previews** (Windows): every rendered thumbnail is also mirrored
+  via the `write_thumbnail_cache` command to `%LOCALAPPDATA%\Sketchor\thumbs\<sha256>.png`; `native/dxf-thumbnailer` (`src/model.rs`) hashes the file
+  and serves that PNG, else falls back to `native/step-wire` — a text-level
+  B-rep edge extractor that resolves NAUO/CDSR/ITEM_DEFINED_TRANSFORMATION
+  placements and MAPPED_ITEMs (both rep_1/rep_2 orderings seen in the wild
+  are handled by matching against the child's representations). The DLL
+  registers `.dxf .step .stp .iges .igs` (`EXTENSIONS` in lib.rs). Verify
+  end-to-end with `cargo run --release --example verify_shell_thumb -- file.step out.png`;
+  the shell caches by path+mtime, so test a fresh copy after changing a sidecar.
 
 Debug: `window.sketchor.openModel(name, arrayBuffer)` / `getModel()`.
 

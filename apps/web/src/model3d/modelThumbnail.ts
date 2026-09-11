@@ -60,6 +60,23 @@ export function renderModelThumbnail(model: Model3D): string | null {
 }
 
 /**
+ * Desktop only: mirrors a preview to `%LOCALAPPDATA%/Sketchor/thumbs` for
+ * the Explorer thumbnail handler (native/dxf-thumbnailer), so the file's
+ * icon in Explorer shows the same picture as the app. No-op on the web.
+ */
+async function mirrorToExplorer(hash: string, dataUrl: string): Promise<void> {
+  const tauri = (window as unknown as { __TAURI__?: { core: { invoke: (c: string, a: Record<string, unknown>) => Promise<unknown> } } }).__TAURI__;
+  if (!tauri) return;
+  const comma = dataUrl.indexOf(",");
+  if (!dataUrl.startsWith("data:image/png;base64,") || comma < 0) return;
+  try {
+    await tauri.core.invoke("write_thumbnail_cache", { hash, pngBase64: dataUrl.slice(comma + 1) });
+  } catch {
+    // Best-effort: Explorer falls back to its wireframe preview.
+  }
+}
+
+/**
  * The thumbnail for a model file's bytes: from the thumbnail cache if it has
  * been rendered before, else by loading the model (itself cached) and
  * rendering it. `buffer` is consumed.
@@ -67,9 +84,31 @@ export function renderModelThumbnail(model: Model3D): string | null {
 export async function thumbnailForModelFile(name: string, buffer: ArrayBuffer): Promise<string | null> {
   const hash = await hashBytes(buffer);
   const cached = await getCachedThumb(hash);
-  if (cached) return cached;
+  if (cached) {
+    void mirrorToExplorer(hash, cached);
+    return cached;
+  }
   const model = await loadModel(name, buffer, "thumbnail", hash);
   const dataUrl = renderModelThumbnail(model);
-  if (dataUrl) await putCachedThumb(hash, dataUrl);
+  if (dataUrl) {
+    await putCachedThumb(hash, dataUrl);
+    void mirrorToExplorer(hash, dataUrl);
+  }
   return dataUrl;
+}
+
+/**
+ * Makes sure an already-loaded model has a thumbnail in both caches — called
+ * after a model is *opened*, so a file reached through the Open dialog or a
+ * double-click in Explorer gets its Explorer preview too, not only files the
+ * in-app browser scrolled past.
+ */
+export async function ensureThumbnail(model: Model3D): Promise<void> {
+  let dataUrl = await getCachedThumb(model.hash);
+  if (!dataUrl) {
+    dataUrl = renderModelThumbnail(model);
+    if (!dataUrl) return;
+    await putCachedThumb(model.hash, dataUrl);
+  }
+  await mirrorToExplorer(model.hash, dataUrl);
 }

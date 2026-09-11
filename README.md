@@ -176,6 +176,13 @@ stays responsive and several previews load in parallel. The result is
 along with the thumbnail, so any file you have looked at once — opened, or
 merely browsed past — comes back instantly afterwards.
 
+On Windows, **Explorer shows previews for model files too**, through the
+same shell extension that previews DXF: for any model Sketchor has rendered
+once (opened, or browsed past) it's the exact shaded isometric picture;
+for a STEP file it has never seen, a wireframe read straight from the file's
+edges — assembly placements resolved — so the icon still shows the shape.
+Opening the file upgrades the icon to the shaded version.
+
 There is no SAT or Parasolid support: those are proprietary kernels with no
 open-source reader. Export STEP from the source CAD instead (Onshape does).
 

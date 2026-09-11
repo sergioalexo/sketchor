@@ -259,7 +259,14 @@ export async function saveAs(format: SaveFormat = activeSaveTarget()?.format ?? 
  * finishes. `buffer` is consumed.
  */
 export function openModelBytes(name: string, buffer: ArrayBuffer): void {
-  openModelIntoSession(name, loadModel(name, buffer, "open"));
+  const loading = loadModel(name, buffer, "open");
+  openModelIntoSession(name, loading);
+  // Once it's in, make sure it has a preview — in the in-app cache and, on
+  // the desktop, mirrored for Explorer's file icon (see modelThumbnail.ts).
+  loading.then(
+    (model) => import("../model3d/modelThumbnail").then(({ ensureThumbnail }) => ensureThumbnail(model)),
+    () => undefined,
+  ).catch(() => undefined);
 }
 
 // Debug / automation hook, alongside the drawing ones in state/store.ts.

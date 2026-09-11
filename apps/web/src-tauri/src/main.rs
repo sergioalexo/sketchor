@@ -167,6 +167,40 @@ fn write_drawing_file(path: String, contents: String) -> Result<(), String> {
     std::fs::write(&path, contents).map_err(|e| e.to_string())
 }
 
+/// Where model previews are mirrored for the Explorer thumbnail handler.
+/// Must agree with `cache_dir` in native/dxf-thumbnailer/src/model.rs:
+/// `%LOCALAPPDATA%/Sketchor/thumbs`. None off Windows (no handler there).
+fn thumbnail_cache_dir() -> Option<std::path::PathBuf> {
+    let base = std::env::var_os("LOCALAPPDATA")?;
+    Some(std::path::Path::new(&base).join("Sketchor").join("thumbs"))
+}
+
+/// Mirrors a rendered model preview (PNG, base64) to the thumbnail cache the
+/// Explorer shell extension reads, keyed by the SHA-256 of the model file's
+/// bytes — the same key the web side's own cache uses. Explorer then shows
+/// the exact picture the app rendered instead of the DLL's wireframe
+/// fallback. Idempotent; returns whether a file was written.
+#[tauri::command]
+fn write_thumbnail_cache(hash: String, png_base64: String) -> Result<bool, String> {
+    if hash.len() != 64 || !hash.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err("bad hash".into());
+    }
+    let Some(dir) = thumbnail_cache_dir() else { return Ok(false) };
+    let path = dir.join(format!("{hash}.png"));
+    if path.exists() {
+        return Ok(false);
+    }
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(png_base64.as_bytes())
+        .map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    // Write-then-rename so Explorer never reads a half-written PNG.
+    let tmp = dir.join(format!("{hash}.tmp"));
+    std::fs::write(&tmp, bytes).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, &path).map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
 fn main() {
     tauri::Builder::default()
         // Opens URLs (release notes, the website behind the logo).
@@ -188,7 +222,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             list_drawings_in_dir,
             read_drawing_file,
-            write_drawing_file
+            write_drawing_file,
+            write_thumbnail_cache
         ])
         .setup(|app| {
             // Handle a file passed on the initial launch.
@@ -204,4 +239,38 @@ fn main() {
         })
         .run(tauri::generate_context!())
         .expect("error while running Sketchor");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use base64::Engine;
+
+    /// The sidecar cache is what Explorer's thumbnail handler reads; a key that
+    /// isn't exactly the file hash, or a path that escapes the cache folder,
+    /// would either hide previews or let a web page write outside it.
+    #[test]
+    fn thumbnail_cache_writes_once_under_the_hash_and_rejects_bad_keys() {
+        let tmp = std::env::temp_dir().join(format!("sketchor-thumb-test-{}", std::process::id()));
+        std::env::set_var("LOCALAPPDATA", &tmp);
+        let png = base64::engine::general_purpose::STANDARD.encode(b"\x89PNG\r\n\x1a\nnot really");
+        let hash = "e062355918f93e71fa391310ebbfc037a0c11f6436104f90b96fdbd737787d17".to_string();
+
+        assert_eq!(write_thumbnail_cache(hash.clone(), png.clone()), Ok(true));
+        let path = tmp.join("Sketchor").join("thumbs").join(format!("{hash}.png"));
+        assert!(path.is_file());
+        // Second write is a no-op (the file is content-addressed).
+        assert_eq!(write_thumbnail_cache(hash.clone(), png.clone()), Ok(false));
+        assert!(!tmp.join("Sketchor").join("thumbs").join(format!("{hash}.tmp")).exists());
+
+        for bad in ["", "abc", "../../evil", &"z".repeat(64), &format!("{}/x", &hash[..61])] {
+            assert!(write_thumbnail_cache(bad.to_string(), png.clone()).is_err(), "{bad}");
+        }
+        // A fresh key with undecodable data writes nothing (the existence
+        // check above comes first on purpose — it is the cheap path).
+        let other = "0".repeat(64);
+        assert!(write_thumbnail_cache(other.clone(), "%%%not base64".into()).is_err());
+        assert!(!tmp.join("Sketchor").join("thumbs").join(format!("{other}.png")).exists());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
 }

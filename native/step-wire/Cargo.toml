@@ -1,0 +1,12 @@
+[package]
+name = "step-wire"
+version = "0.1.0"
+license = "AGPL-3.0-or-later"
+edition = "2021"
+description = "Dependency-free STEP (ISO 10303-21) wireframe extractor for Sketchor's Explorer thumbnails: B-rep edges, assembly transforms resolved, no geometry kernel"
+
+[lib]
+crate-type = ["rlib"]
+
+[dev-dependencies]
+image = { version = "0.25", default-features = false, features = ["png"] }

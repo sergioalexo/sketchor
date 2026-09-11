@@ -1,6 +1,6 @@
 ; Sketchor Explorer shell extension -- NSIS installer hooks.
 ; -----------------------------------------------------------
-; The .dxf thumbnail/preview handler is a COM in-proc server
+; The .dxf / .step / .iges thumbnail handler is a COM in-proc server
 ; (shell-ext\dxf_thumbnailer.dll, staged by native/build-shell-extensions.ps1
 ; and bundled as a resource). These hooks register it at install time and
 ; unregister it at uninstall time, so users never have to run

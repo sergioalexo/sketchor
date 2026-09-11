@@ -3,7 +3,7 @@ name = "dxf-thumbnailer"
 version = "0.1.0"
 license = "AGPL-3.0-or-later"
 edition = "2021"
-description = "Windows Explorer thumbnail provider for DXF drawings (Sketchor)"
+description = "Windows Explorer thumbnail provider for DXF drawings and STEP/IGES models (Sketchor)"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -13,6 +13,12 @@ windows-core = "0.58"
 # The DXF parser + fit-to-box projection, shared with the macOS Quick Look
 # extension so previews match across platforms. See native/dxf-parse.
 dxf-parse = { path = "../dxf-parse" }
+# STEP wireframe fallback for models Sketchor hasn't rendered yet. See native/step-wire.
+step-wire = { path = "../step-wire" }
+# Sidecar previews: Sketchor writes %LOCALAPPDATA%/Sketchor/thumbs/<sha256>.png
+# for every model it renders; the DLL hashes the file and decodes that PNG.
+sha2 = "0.10"
+png = "0.17"
 
 [dev-dependencies]
 image = { version = "0.25", default-features = false, features = ["png"] }

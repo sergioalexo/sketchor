@@ -1,8 +1,17 @@
 # dxf-thumbnailer
 
-A Windows Explorer **thumbnail provider** for `.dxf` files — so DXF drawings
-render as little previews directly on their file icons in Explorer, the same
-way images do. Part of Sketchor's DXF support (phase 2).
+A Windows Explorer **thumbnail provider** for `.dxf` drawings and
+`.step`/`.stp`/`.iges`/`.igs` 3D models — so they render as little previews
+directly on their file icons in Explorer, the same way images do.
+
+DXF is parsed and stroked here (`native/dxf-parse`). Models work in two
+tiers (`src/model.rs`): the preview Sketchor itself rendered, mirrored to
+`%LOCALAPPDATA%\Sketchor\thumbs\<sha256>.png` whenever the app renders one
+(so Explorer shows the exact shaded isometric picture for any model you have
+opened or browsed past), and otherwise — for STEP — a wireframe read straight
+out of the file's B-rep edges by `native/step-wire`, assembly transforms
+resolved, in milliseconds and without a geometry kernel. IGES has no text
+fallback and gets the mirrored preview or the plain icon.
 
 It's an in-process COM server (`IThumbnailProvider` + `IInitializeWithFile`)
 written in Rust with `windows-rs`. It parses the DXF and rasterises it with
