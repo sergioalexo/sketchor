@@ -1882,6 +1882,9 @@ kbd.shortcut-key-fixed {
   inset: 0;
   background: #17181c;
   overflow: hidden;
+  /* Lets the overlays below adapt to the stage's own width (a tablet, or a
+     desktop with every side panel open), not the window's. */
+  container-type: size;
 }
 
 .model-canvas {
@@ -1890,7 +1893,11 @@ kbd.shortcut-key-fixed {
   width: 100%;
   height: 100%;
   display: block;
+  /* All gestures belong to the viewer: no browser pinch-zoom, scroll, or long-press menu. */
   touch-action: none;
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
   cursor: default;
 }
 
@@ -2079,6 +2086,80 @@ kbd.shortcut-key-fixed {
 @keyframes model-spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+/* Touch screens: bigger targets, and a toolbar that wraps instead of overflowing a phone. */
+@media (pointer: coarse) {
+  .model-toolbar {
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: calc(100% - 20px);
+    gap: 6px;
+    padding: 6px;
+  }
+
+  .model-toolbar .btn.sm {
+    min-height: 40px;
+    min-width: 44px;
+    padding: 8px 12px;
+    font-size: 13px;
+  }
+
+  .model-toolbar-sep {
+    height: 24px;
+  }
+
+  .model-parts {
+    width: min(320px, calc(100% - 20px));
+  }
+
+  .model-parts .filexplorer-search {
+    padding: 8px 10px;
+    font-size: 14px;
+  }
+
+  .model-parts-group,
+  .model-parts-row {
+    min-height: 40px;
+    padding-top: 6px;
+    padding-bottom: 6px;
+    font-size: 14px;
+  }
+
+  .model-parts-eye {
+    width: 32px;
+    height: 32px;
+    font-size: 14px;
+  }
+
+  .model-parts-header .btn.sm {
+    min-height: 36px;
+    min-width: 36px;
+  }
+
+  .model-status {
+    font-size: 13px;
+    /* Keep clear of the wrapped toolbar's shadow and the parts panel on narrow screens. */
+    max-width: calc(100% - 24px);
+    flex-wrap: wrap;
+    row-gap: 2px;
+  }
+}
+
+/* Narrow stage: the parts tree becomes a bottom sheet instead of covering the model. */
+@container (max-width: 640px) {
+  .model-parts {
+    top: auto;
+    left: 10px;
+    right: 10px;
+    bottom: 10px;
+    width: auto;
+    height: 45%;
+  }
+
+  .model-stage:has(.model-parts) .model-status {
+    display: none;
   }
 }
 

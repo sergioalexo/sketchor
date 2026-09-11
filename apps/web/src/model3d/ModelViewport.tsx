@@ -21,7 +21,9 @@ import type { Model3D, ModelNode } from "./types";
  * The 3D viewer that replaces the drawing canvas in a model tab.
  *
  * Mouse: left-drag orbits, right/middle-drag pans, wheel zooms toward the
- * cursor, click selects a part, double-click frames it. Keys: F fits all,
+ * cursor, click selects a part, double-click frames it. Touch: one finger
+ * orbits, two fingers pinch-zoom and pan, tap selects, double-tap frames,
+ * long-press hides the part under the finger. Keys: F fits all,
  * H hides the selected part, Shift+H shows everything, E toggles edges,
  * Esc clears the selection, 1/2/3/4 jump to iso/top/front/right.
  *
@@ -143,6 +145,8 @@ function Viewer({ model }: { model: Model3D }) {
     controls.zoomToCursor = true;
     controls.screenSpacePanning = true;
     controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.PAN, RIGHT: THREE.MOUSE.PAN };
+    // One finger orbits; two fingers pinch-zoom and pan together.
+    controls.touches = { ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN };
     controls.target.copy(framePerspective(camera, model.bounds, "iso"));
     controls.update();
 
@@ -289,21 +293,78 @@ function Viewer({ model }: { model: Model3D }) {
   const fitPart = (part: number) => frame(model.parts[part].bounds);
 
   // ---- pointer + keys -----------------------------------------------------
-  const downAt = useRef<{ x: number; y: number } | null>(null);
+  // Taps and clicks share one path. Touch gets a wider "didn't move" budget
+  // (fingers wobble), its own double-tap detection (dblclick is unreliable
+  // once touch-action is none), and a long-press to hide the part under the
+  // finger — the touch stand-in for the H key. Orbit/pan/pinch themselves are
+  // OrbitControls' built-in one- and two-finger gestures.
+  const downAt = useRef<{ x: number; y: number; id: number; touch: boolean } | null>(null);
+  const lastTap = useRef<{ at: number; x: number; y: number } | null>(null);
+  const longPress = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelLongPress = () => {
+    if (longPress.current) clearTimeout(longPress.current);
+    longPress.current = null;
+  };
+  const slop = (touch: boolean) => (touch ? 12 : 4);
+
   const onPointerDown = (e: React.PointerEvent) => {
-    downAt.current = { x: e.clientX, y: e.clientY };
+    const touch = e.pointerType === "touch";
+    // A second finger means a pinch/pan gesture, never a tap.
+    if (downAt.current && touch) {
+      downAt.current = null;
+      cancelLongPress();
+      return;
+    }
+    downAt.current = { x: e.clientX, y: e.clientY, id: e.pointerId, touch };
+    cancelLongPress();
+    if (touch) {
+      const { clientX, clientY } = e;
+      longPress.current = setTimeout(() => {
+        longPress.current = null;
+        downAt.current = null;
+        const part = pick(clientX, clientY);
+        if (part === null) return;
+        setHidden((h) => new Set(h).add(part));
+        setSelected((sel) => (sel === part ? null : sel));
+      }, 550);
+    }
+  };
+  const onPointerMove = (e: React.PointerEvent) => {
+    const d = downAt.current;
+    if (d && d.id === e.pointerId && Math.hypot(e.clientX - d.x, e.clientY - d.y) > slop(d.touch)) cancelLongPress();
   };
   const onPointerUp = (e: React.PointerEvent) => {
+    cancelLongPress();
     const d = downAt.current;
     downAt.current = null;
     // A drag is an orbit, not a click.
-    if (!d || e.button !== 0 || Math.hypot(e.clientX - d.x, e.clientY - d.y) > 4) return;
+    if (!d || d.id !== e.pointerId || e.button !== 0 || Math.hypot(e.clientX - d.x, e.clientY - d.y) > slop(d.touch)) return;
+    if (d.touch) {
+      const prev = lastTap.current;
+      const now = performance.now();
+      if (prev && now - prev.at < 350 && Math.hypot(e.clientX - prev.x, e.clientY - prev.y) < 30) {
+        lastTap.current = null;
+        frameAt(e.clientX, e.clientY);
+        return;
+      }
+      lastTap.current = { at: now, x: e.clientX, y: e.clientY };
+    }
     setSelected(pick(e.clientX, e.clientY));
   };
-  const onDoubleClick = (e: React.MouseEvent) => {
-    const part = pick(e.clientX, e.clientY);
+  const onPointerCancel = () => {
+    cancelLongPress();
+    downAt.current = null;
+  };
+  /** Double-click / double-tap: frame the part under the cursor, or everything. */
+  const frameAt = (clientX: number, clientY: number) => {
+    const part = pick(clientX, clientY);
     if (part !== null) fitPart(part);
     else fitAll();
+  };
+  const onDoubleClick = (e: React.MouseEvent) => {
+    // Touch double-taps are handled in onPointerUp.
+    if ((e.nativeEvent as PointerEvent).pointerType === "touch") return;
+    frameAt(e.clientX, e.clientY);
   };
 
   useEffect(() => {
@@ -366,7 +427,9 @@ function Viewer({ model }: { model: Model3D }) {
         ref={canvasRef}
         className="model-canvas"
         onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
+        onPointerCancel={onPointerCancel}
         onDoubleClick={onDoubleClick}
         onContextMenu={(e) => e.preventDefault()}
       />

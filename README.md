@@ -159,6 +159,11 @@ the selected part and `Shift+H` shows everything again; `E` toggles edges,
 `F` fits, and `1`–`4` jump to isometric / top / front / right. The **Parts**
 button opens the assembly tree, with a filter and per-part hide/show.
 
+On a touch screen: one finger orbits, two fingers pinch-zoom and pan, tap
+selects, double-tap frames, and a long-press hides the part under your
+finger (Show all brings it back). Buttons grow to finger size, and on a
+narrow stage the parts tree docks as a bottom sheet.
+
 The file browser lists model files next to drawings and previews each one as
 an **isometric thumbnail**.
 
