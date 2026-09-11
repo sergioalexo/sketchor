@@ -245,53 +245,62 @@ fn explorer_previews_status() -> ExplorerPreviewStatus {
     }
 }
 
-/// Runs `reg add` for every marker key in one elevated cmd (one UAC prompt),
-/// hidden, and waits. Returns whether the keys are all present afterwards —
-/// false when the user declined the prompt.
+/// The marker keys as a `.reg` file: one elevated `regedit /s` import (one
+/// UAC prompt, shown as "Registry Editor", Microsoft-signed) covers every
+/// extension. Exposed for the installer-side script and tests to share.
+fn markers_reg_file() -> String {
+    let mut out = String::from("Windows Registry Editor Version 5.00\r\n");
+    for ext in THUMB_MARKER_EXTS {
+        out.push_str(&format!(
+            "\r\n[HKEY_LOCAL_MACHINE\\Software\\Classes\\{ext}\\ShellEx\\{SHELLEX_THUMB}]\r\n@=\"{SKETCHOR_THUMB_CLSID}\"\r\n"
+        ));
+    }
+    out
+}
+
+/// Creates the marker keys through an elevated `regedit /s` import (a UAC
+/// prompt) and waits. Returns whether the keys are all present afterwards —
+/// false when the user declined.
 #[tauri::command]
 fn enable_explorer_previews() -> Result<bool, String> {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
-        let adds: Vec<String> = THUMB_MARKER_EXTS
-            .iter()
-            .map(|ext| {
-                format!(
-                    r#"reg add "HKLM\Software\Classes\{ext}\ShellEx\{SHELLEX_THUMB}" /ve /d "{SKETCHOR_THUMB_CLSID}" /f"#
-                )
-            })
-            .collect();
-        let inner = adds.join(" & ");
+        if !marker_missing() {
+            return Ok(true);
+        }
+        let reg = std::env::temp_dir().join("sketchor-explorer-previews.reg");
+        std::fs::write(&reg, markers_reg_file()).map_err(|e| e.to_string())?;
         // Start-Process -Verb RunAs is the supported way to request elevation
         // from an unelevated process; -Wait so the re-check below is honest.
         let ps = format!(
-            "Start-Process -FilePath cmd.exe -ArgumentList '/c {}' -Verb RunAs -WindowStyle Hidden -Wait",
-            inner.replace('\'', "''")
+            "Start-Process -FilePath regedit.exe -ArgumentList '/s \"{}\"' -Verb RunAs -Wait",
+            reg.display()
         );
-        let status = std::process::Command::new("powershell")
+        // A declined prompt makes Start-Process throw; the re-check is what
+        // we report either way, so the exit status itself is ignored.
+        let _ = std::process::Command::new("powershell")
             .args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", &ps])
             .creation_flags(0x0800_0000)
             .status()
             .map_err(|e| e.to_string())?;
-        // A declined UAC prompt makes Start-Process throw (non-zero exit); the
-        // re-check is what we report either way.
-        let _ = status;
-        if !marker_missing() {
-            // Tell Explorer the associations changed so open windows refresh.
-            let _ = std::process::Command::new("powershell")
-                .args([
-                    "-NoProfile",
-                    "-NonInteractive",
-                    "-WindowStyle",
-                    "Hidden",
-                    "-Command",
-                    "Add-Type -Name N -Namespace S -MemberDefinition '[DllImport(\"shell32.dll\")] public static extern void SHChangeNotify(int e, int f, IntPtr a, IntPtr b);'; [S.N]::SHChangeNotify(0x08000000, 0, [IntPtr]::Zero, [IntPtr]::Zero)",
-                ])
-                .creation_flags(0x0800_0000)
-                .status();
-            return Ok(true);
+        let _ = std::fs::remove_file(&reg);
+        if marker_missing() {
+            return Ok(false);
         }
-        Ok(false)
+        // Tell Explorer the associations changed so open windows refresh.
+        let _ = std::process::Command::new("powershell")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-WindowStyle",
+                "Hidden",
+                "-Command",
+                "Add-Type -Name N -Namespace S -MemberDefinition '[DllImport(\"shell32.dll\")] public static extern void SHChangeNotify(int e, int f, IntPtr a, IntPtr b);'; [S.N]::SHChangeNotify(0x08000000, 0, [IntPtr]::Zero, [IntPtr]::Zero)",
+            ])
+            .creation_flags(0x0800_0000)
+            .status();
+        Ok(true)
     }
     #[cfg(not(windows))]
     {
@@ -372,5 +381,20 @@ mod tests {
         assert!(write_thumbnail_cache(other.clone(), "%%%not base64".into()).is_err());
         assert!(!tmp.join("Sketchor").join("thumbs").join(format!("{other}.png")).exists());
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// The .reg import is the only way the markers get created on a user's
+    /// machine; a malformed file imports nothing and Explorer silently keeps
+    /// showing icons.
+    #[test]
+    fn markers_reg_file_covers_every_extension_in_regedit_syntax() {
+        let reg = markers_reg_file();
+        assert!(reg.starts_with("Windows Registry Editor Version 5.00\r\n"));
+        for ext in THUMB_MARKER_EXTS {
+            let expected = format!(
+                "[HKEY_LOCAL_MACHINE\\Software\\Classes\\{ext}\\ShellEx\\{SHELLEX_THUMB}]\r\n@=\"{SKETCHOR_THUMB_CLSID}\""
+            );
+            assert!(reg.contains(&expected), "{ext}");
+        }
     }
 }

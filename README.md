@@ -183,8 +183,9 @@ for a STEP file it has never seen, a wireframe read straight from the file's
 edges — assembly placements resolved — so the icon still shows the shape.
 Opening the file upgrades the icon to the shaded version. Windows needs a
 one-time administrator approval before Explorer will consult the handler
-for a file type; the installer asks for it, and if you skipped that (or
-arrived via an automatic update) Sketchor offers it in a banner at launch.
+for a file type: the installer asks for it, and if that was skipped (or the
+update arrived silently) Sketchor asks at its next launch — one "Registry
+Editor" prompt, then never again. Declining is respected for a week.
 
 There is no SAT or Parasolid support: those are proprietary kernels with no
 open-source reader. Export STEP from the source CAD instead (Onshape does).

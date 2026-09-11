@@ -110,8 +110,11 @@ wasm). So:
   rule, which is why every probe passed while Explorer showed icons. DXF
   only worked on the dev PC because eDrawings had left that key. The
   per-user installer asks for elevation once (skipped when silent), and
-  `ExplorerPreviewBanner` + the `explorer_previews_status` /
-  `enable_explorer_previews` commands offer it in-app. To see what Explorer
+  `desktop/explorerPreviews.ts` asks at launch when the markers are missing
+  (on by default; declines respected for a week; never mid-update) via the
+  `explorer_previews_status` / `enable_explorer_previews` commands — one
+  `regedit /s` import of a generated .reg file, so the UAC dialog reads
+  "Registry Editor". To see what Explorer
   actually asks the DLL, create an empty `%LOCALAPPDATA%\Sketchor\thumb-debug.log`
   — every request is appended (opt-in trace in lib.rs).
 

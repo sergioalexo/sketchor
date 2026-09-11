@@ -29,15 +29,22 @@
 ;    though the handler and the value it resolves to may live in HKCU. A
 ;    per-user installer can't write HKLM, so the post-install hook asks for
 ;    elevation ONCE (a UAC prompt) to create those keys; declining just
-;    leaves Explorer showing icons, and the app offers the same step later
-;    (see `enable_explorer_previews` in src/main.rs). Silent installs -- the
-;    in-app updater -- never prompt.
+;    leaves Explorer showing icons. Silent installs -- the in-app updater --
+;    never prompt; the app asks at its next launch instead (on by default,
+;    see desktop/explorerPreviews.ts and `enable_explorer_previews`).
 
 !include "x64.nsh"
 !include "LogicLib.nsh"
 
 !define SHELLEX_THUMB "{E357FCCD-A995-4576-B01F-234630154E96}"
 !define SKETCHOR_THUMB_CLSID "{6F9E2A31-7C4B-4D8E-9A1F-2B3C4D5E6F70}"
+
+; One .reg section per extension: the marker key with our CLSID as its
+; default value. $2 is the open file handle.
+!macro WRITE_THUMB_MARKER EXT
+  FileWrite $2 "$\r$\n[HKEY_LOCAL_MACHINE\Software\Classes\${EXT}\ShellEx\${SHELLEX_THUMB}]$\r$\n"
+  FileWrite $2 '@="${SKETCHOR_THUMB_CLSID}"$\r$\n'
+!macroend
 
 !macro NSIS_HOOK_PREINSTALL
   ; Park a DLL Explorer may still have loaded so File can write the new one.
@@ -60,13 +67,27 @@
   ${EndIf}
 
   ; Machine-wide "this extension has a thumbnail handler" markers (see note 2).
-  ; One UAC prompt, only when interactive and only if they're not there yet.
+  ; One UAC prompt ("Registry Editor" -- a regedit /s import of a .reg file we
+  ; write to $TEMP), only when interactive and only if they're not there yet.
+  ; The app repeats this at launch if it was skipped (desktop/explorerPreviews.ts).
   ${IfNot} ${Silent}
     ClearErrors
     ReadRegStr $1 HKLM "Software\Classes\.step\ShellEx\${SHELLEX_THUMB}" ""
     ${If} ${Errors}
-      DetailPrint "Enabling Explorer previews for 3D models (administrator approval)..."
-      ExecShellWait "runas" "$SYSDIR\cmd.exe" '/c reg add "HKLM\Software\Classes\.step\ShellEx\${SHELLEX_THUMB}" /ve /d "${SKETCHOR_THUMB_CLSID}" /f & reg add "HKLM\Software\Classes\.stp\ShellEx\${SHELLEX_THUMB}" /ve /d "${SKETCHOR_THUMB_CLSID}" /f & reg add "HKLM\Software\Classes\.iges\ShellEx\${SHELLEX_THUMB}" /ve /d "${SKETCHOR_THUMB_CLSID}" /f & reg add "HKLM\Software\Classes\.igs\ShellEx\${SHELLEX_THUMB}" /ve /d "${SKETCHOR_THUMB_CLSID}" /f & reg add "HKLM\Software\Classes\.dxf\ShellEx\${SHELLEX_THUMB}" /ve /d "${SKETCHOR_THUMB_CLSID}" /f' SW_HIDE
+      DetailPrint "Enabling Explorer previews for drawings and models (administrator approval)..."
+      ClearErrors
+      FileOpen $2 "$TEMP\sketchor-explorer-previews.reg" w
+      ${IfNot} ${Errors}
+        FileWrite $2 "Windows Registry Editor Version 5.00$\r$\n"
+        !insertmacro WRITE_THUMB_MARKER ".dxf"
+        !insertmacro WRITE_THUMB_MARKER ".step"
+        !insertmacro WRITE_THUMB_MARKER ".stp"
+        !insertmacro WRITE_THUMB_MARKER ".iges"
+        !insertmacro WRITE_THUMB_MARKER ".igs"
+        FileClose $2
+        ExecShellWait "runas" "regedit.exe" '/s "$TEMP\sketchor-explorer-previews.reg"' SW_HIDE
+        Delete "$TEMP\sketchor-explorer-previews.reg"
+      ${EndIf}
       ClearErrors
     ${EndIf}
   ${EndIf}
