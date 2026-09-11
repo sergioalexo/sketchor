@@ -201,6 +201,104 @@ fn write_thumbnail_cache(hash: String, png_base64: String) -> Result<bool, Strin
     Ok(true)
 }
 
+/// Explorer (Windows 11) only consults a per-user thumbnail handler for an
+/// extension when `HKLM\Software\Classes\<ext>\ShellEx\{thumbnail}` exists.
+/// The per-user installer can't write HKLM, so the app offers the one-time
+/// elevated step. These two commands back that: the first says whether it's
+/// still needed, the second performs it (a UAC prompt) and re-checks.
+/// Off Windows both report "not applicable".
+const THUMB_MARKER_EXTS: [&str; 5] = [".step", ".stp", ".iges", ".igs", ".dxf"];
+const SHELLEX_THUMB: &str = "{E357FCCD-A995-4576-B01F-234630154E96}";
+const SKETCHOR_THUMB_CLSID: &str = "{6F9E2A31-7C4B-4D8E-9A1F-2B3C4D5E6F70}";
+
+#[derive(serde::Serialize)]
+struct ExplorerPreviewStatus {
+    /// True on Windows when at least one marker key is missing.
+    needs_elevation: bool,
+    applicable: bool,
+}
+
+#[cfg(windows)]
+fn marker_missing() -> bool {
+    use std::os::windows::process::CommandExt;
+    THUMB_MARKER_EXTS.iter().any(|ext| {
+        let key = format!(r"HKLM\Software\Classes\{ext}\ShellEx\{SHELLEX_THUMB}");
+        // CREATE_NO_WINDOW: no console flash from reg.exe.
+        !std::process::Command::new("reg")
+            .args(["query", &key, "/ve"])
+            .creation_flags(0x0800_0000)
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    })
+}
+
+#[tauri::command]
+fn explorer_previews_status() -> ExplorerPreviewStatus {
+    #[cfg(windows)]
+    {
+        ExplorerPreviewStatus { needs_elevation: marker_missing(), applicable: true }
+    }
+    #[cfg(not(windows))]
+    {
+        ExplorerPreviewStatus { needs_elevation: false, applicable: false }
+    }
+}
+
+/// Runs `reg add` for every marker key in one elevated cmd (one UAC prompt),
+/// hidden, and waits. Returns whether the keys are all present afterwards —
+/// false when the user declined the prompt.
+#[tauri::command]
+fn enable_explorer_previews() -> Result<bool, String> {
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        let adds: Vec<String> = THUMB_MARKER_EXTS
+            .iter()
+            .map(|ext| {
+                format!(
+                    r#"reg add "HKLM\Software\Classes\{ext}\ShellEx\{SHELLEX_THUMB}" /ve /d "{SKETCHOR_THUMB_CLSID}" /f"#
+                )
+            })
+            .collect();
+        let inner = adds.join(" & ");
+        // Start-Process -Verb RunAs is the supported way to request elevation
+        // from an unelevated process; -Wait so the re-check below is honest.
+        let ps = format!(
+            "Start-Process -FilePath cmd.exe -ArgumentList '/c {}' -Verb RunAs -WindowStyle Hidden -Wait",
+            inner.replace('\'', "''")
+        );
+        let status = std::process::Command::new("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", &ps])
+            .creation_flags(0x0800_0000)
+            .status()
+            .map_err(|e| e.to_string())?;
+        // A declined UAC prompt makes Start-Process throw (non-zero exit); the
+        // re-check is what we report either way.
+        let _ = status;
+        if !marker_missing() {
+            // Tell Explorer the associations changed so open windows refresh.
+            let _ = std::process::Command::new("powershell")
+                .args([
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-WindowStyle",
+                    "Hidden",
+                    "-Command",
+                    "Add-Type -Name N -Namespace S -MemberDefinition '[DllImport(\"shell32.dll\")] public static extern void SHChangeNotify(int e, int f, IntPtr a, IntPtr b);'; [S.N]::SHChangeNotify(0x08000000, 0, [IntPtr]::Zero, [IntPtr]::Zero)",
+                ])
+                .creation_flags(0x0800_0000)
+                .status();
+            return Ok(true);
+        }
+        Ok(false)
+    }
+    #[cfg(not(windows))]
+    {
+        Ok(false)
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         // Opens URLs (release notes, the website behind the logo).
@@ -223,7 +321,9 @@ fn main() {
             list_drawings_in_dir,
             read_drawing_file,
             write_drawing_file,
-            write_thumbnail_cache
+            write_thumbnail_cache,
+            explorer_previews_status,
+            enable_explorer_previews
         ])
         .setup(|app| {
             // Handle a file passed on the initial launch.

@@ -27,6 +27,7 @@ import { TabStrip } from "./tabs/TabStrip";
 // The 3D viewer pulls in three.js; it's loaded only once a model tab exists.
 const ModelViewport = lazy(() => import("./model3d/ModelViewport").then((m) => ({ default: m.ModelViewport })));
 import { UpdateBanner, UpdateButton } from "./update/UpdatePanel";
+import { ExplorerPreviewBanner } from "./desktop/ExplorerPreviewBanner";
 import { openExternal } from "./update/updateService";
 
 /**
@@ -813,6 +814,7 @@ export function App() {
       </header>
 
       <UpdateBanner />
+      <ExplorerPreviewBanner />
       <ImportReportBanner />
 
       <div className="body">

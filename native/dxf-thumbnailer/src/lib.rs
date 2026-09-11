@@ -39,6 +39,11 @@ const CLSID_DXF_THUMB: GUID = GUID::from_u128(0x6f9e2a31_7c4b_4d8e_9a1f_2b3c4d5e
 // Shell's IThumbnailProvider category GUID under .ext\ShellEx.
 const SHELLEX_THUMB: &str = "{E357FCCD-A995-4576-B01F-234630154E96}";
 
+/// LockServer count plus live provider instances: `DllCanUnloadNow` must say
+/// no while any object exists, or Explorer's periodic CoFreeUnusedLibraries
+/// would unmap the code under a thumbnail that is still being drawn. Getting
+/// this right is also what lets an updated DLL take effect without a
+/// sign-out — Explorer drops the idle old module and loads the new file.
 static LOCKS: AtomicI32 = AtomicI32::new(0);
 static mut MODULE: HMODULE = HMODULE(std::ptr::null_mut());
 
@@ -49,9 +54,23 @@ struct DxfThumb {
     path: RefCell<Option<String>>,
 }
 
+impl DxfThumb {
+    fn new() -> Self {
+        LOCKS.fetch_add(1, Ordering::SeqCst);
+        DxfThumb { path: RefCell::new(None) }
+    }
+}
+
+impl Drop for DxfThumb {
+    fn drop(&mut self) {
+        LOCKS.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
 impl IInitializeWithFile_Impl for DxfThumb_Impl {
     fn Initialize(&self, pszfilepath: &PCWSTR, _grfmode: u32) -> windows::core::Result<()> {
         let path = unsafe { pszfilepath.to_string() }.map_err(|_| E_INVALIDARG)?;
+        trace(&format!("initialize {path}"));
         *self.path.borrow_mut() = Some(path);
         Ok(())
     }
@@ -83,24 +102,54 @@ impl IThumbnailProvider_Impl for DxfThumb_Impl {
     }
 }
 
+/// Opt-in trace for diagnosing "no preview in Explorer": create an empty
+/// `%LOCALAPPDATA%\Sketchor	humb-debug.log` and every request the shell
+/// makes gets appended to it (path, size, which tier answered). Explorer
+/// gives no other signal about what a thumbnail handler did.
+fn trace(msg: &str) {
+    let Some(dir) = model::cache_dir().and_then(|d| d.parent().map(|p| p.to_path_buf())) else { return };
+    let log = dir.join("thumb-debug.log");
+    if !log.exists() {
+        return;
+    }
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new().append(true).open(log) {
+        let _ = writeln!(f, "[pid {}] {msg}", std::process::id());
+    }
+}
+
 /// Renders the thumbnail for a file of any supported kind, or None when
 /// there is nothing to show (Explorer then falls back to the icon).
 fn thumbnail_for(path: &str, size: u32) -> Option<windows::Win32::Graphics::Gdi::HBITMAP> {
+    trace(&format!("request {size}px {path}"));
     if model::is_model(path) {
-        let bytes = std::fs::read(path).ok()?;
+        let bytes = match std::fs::read(path) {
+            Ok(b) => b,
+            Err(e) => {
+                trace(&format!("  read failed: {e}"));
+                return None;
+            }
+        };
         if let Some(p) = model::sidecar(&bytes) {
-            return render::bitmap_from_rgba(&p.rgba, p.size, size).ok();
+            let r = render::bitmap_from_rgba(&p.rgba, p.size, size);
+            trace(&format!("  sidecar {}px -> {}", p.size, if r.is_ok() { "ok" } else { "bitmap failed" }));
+            return r.ok();
         }
         let text = String::from_utf8_lossy(&bytes);
         let shapes = model::wireframe(path, &text);
+        trace(&format!("  no sidecar; wireframe {} segments", shapes.len()));
         if shapes.is_empty() {
             return None;
         }
-        return render::render_thumbnail(&shapes, size).ok();
+        let r = render::render_thumbnail(&shapes, size);
+        trace(&format!("  render -> {}", if r.is_ok() { "ok" } else { "failed" }));
+        return r.ok();
     }
     let text = std::fs::read_to_string(path).ok()?;
     let shapes = dxf_parse::parse(&text);
-    render::render_thumbnail(&shapes, size).ok()
+    let r = render::render_thumbnail(&shapes, size);
+    trace(&format!("  dxf {} shapes -> {}", shapes.len(), if r.is_ok() { "ok" } else { "failed" }));
+    r.ok()
 }
 
 /* --------------------------- class factory -------------------------- */
@@ -123,11 +172,10 @@ impl IClassFactory_Impl for Factory_Impl {
         if punkouter.is_some() {
             return Err(CLASS_E_NOAGGREGATION.into());
         }
-        let provider: IUnknown = DxfThumb {
-            path: RefCell::new(None),
-        }
-        .into();
-        unsafe { provider.query(riid, ppvobject).ok() }
+        let provider: IUnknown = DxfThumb::new().into();
+        let hr = unsafe { provider.query(riid, ppvobject) };
+        trace(&format!("create-instance riid={:?} -> {:?}", unsafe { *riid }, hr));
+        hr.ok()
     }
 
     fn LockServer(&self, flock: BOOL) -> windows::core::Result<()> {
@@ -162,6 +210,7 @@ extern "system" fn DllGetClassObject(
             return E_INVALIDARG;
         }
         *ppv = std::ptr::null_mut();
+        trace(&format!("get-class-object clsid={:?} riid={:?}", *rclsid, *riid));
         if *rclsid != CLSID_DXF_THUMB {
             return CLASS_E_CLASSNOTAVAILABLE;
         }

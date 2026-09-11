@@ -68,6 +68,24 @@ if (-not (Test-Path $thumbKey)) {
 }
 Write-Host "Verified thumbnail handler registration."
 
+# Windows 11 Explorer only consults a thumbnail handler for an extension if
+# HKLM\Software\Classes\<ext>\ShellEx\{E357FCCD-...} exists -- the handler
+# itself may live in HKCU, but the marker must be machine-wide. That needs
+# elevation once (UAC prompt); declining leaves Explorer showing icons.
+$thumbCat = "{E357FCCD-A995-4576-B01F-234630154E96}"
+$clsid = "{6F9E2A31-7C4B-4D8E-9A1F-2B3C4D5E6F70}"
+$exts = ".dxf", ".step", ".stp", ".iges", ".igs"
+$missing = $exts | Where-Object { -not (Test-Path "HKLM:\Software\Classes\$_\ShellEx\$thumbCat") }
+if ($missing) {
+  Write-Host "Creating machine-wide thumbnail markers for $($missing -join ', ') (administrator approval)..."
+  $cmds = $missing | ForEach-Object { "reg add `"HKLM\Software\Classes\$_\ShellEx\$thumbCat`" /ve /d `"$clsid`" /f" }
+  try {
+    Start-Process cmd.exe -ArgumentList "/c $($cmds -join ' & ')" -Verb RunAs -WindowStyle Hidden -Wait
+  } catch {
+    Write-Warning "Elevation declined; Explorer will keep showing icons for $($missing -join ', ')."
+  }
+}
+
 if (-not $NoRestart) {
   Write-Host "Clearing thumbnail cache and restarting Explorer..."
   Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue

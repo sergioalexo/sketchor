@@ -99,6 +99,21 @@ wasm). So:
   registers `.dxf .step .stp .iges .igs` (`EXTENSIONS` in lib.rs). Verify
   end-to-end with `cargo run --release --example verify_shell_thumb -- file.step out.png`;
   the shell caches by path+mtime, so test a fresh copy after changing a sidecar.
+- **Two Explorer gotchas that cost a release (0.14.2):** (1) Explorer keeps
+  the DLL mapped, so an installer can't overwrite it — the NSIS pre-install
+  hook renames it to `.old` first; `DllCanUnloadNow` counts live instances so
+  Explorer can drop the idle old module. (2) **Windows 11 Explorer only
+  consults a thumbnail handler for an extension if
+  `HKLM\Software\Classes\<ext>\ShellEx\{E357FCCD-…}` exists** (value may even
+  be empty; the CLSID resolves from HKCU). `IShellItemImageFactory` and the
+  `LocalThumbnailCache` service from any other process do NOT have this
+  rule, which is why every probe passed while Explorer showed icons. DXF
+  only worked on the dev PC because eDrawings had left that key. The
+  per-user installer asks for elevation once (skipped when silent), and
+  `ExplorerPreviewBanner` + the `explorer_previews_status` /
+  `enable_explorer_previews` commands offer it in-app. To see what Explorer
+  actually asks the DLL, create an empty `%LOCALAPPDATA%\Sketchor\thumb-debug.log`
+  — every request is appended (opt-in trace in lib.rs).
 
 Debug: `window.sketchor.openModel(name, arrayBuffer)` / `getModel()`.
 
