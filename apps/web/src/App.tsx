@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { freeEndpointEntityIds } from "@sketchor/core";
-import { bus, doc, getSessions, measurementText, TOOL_HINTS, useApp, type ToolId } from "./state/store";
+import { bus, doc, getSessions, isModelSession, measurementText, TOOL_HINTS, useApp, type ToolId } from "./state/store";
 import { activeSaveTarget, openDrawing, overlayDrawing, saveCurrent, saveDrawing } from "./io/drawingFile";
 import { DISPLAY_UNITS, formatLength, type DisplayUnit } from "./units";
 import { Viewport } from "./viewport/Viewport";
@@ -23,6 +23,9 @@ import { PluginsPanel } from "./plugins/PluginsPanel";
 import { listActions, listExporters, onRegistriesChange, runCommand, runExporter, runGenerator } from "./plugins/host/registries";
 import { StraightenPanel } from "./viewport/StraightenPanel";
 import { TabStrip } from "./tabs/TabStrip";
+
+// The 3D viewer pulls in three.js; it's loaded only once a model tab exists.
+const ModelViewport = lazy(() => import("./model3d/ModelViewport").then((m) => ({ default: m.ModelViewport })));
 import { UpdateBanner, UpdateButton } from "./update/UpdatePanel";
 import { openExternal } from "./update/updateService";
 
@@ -335,6 +338,10 @@ export function App() {
   // switching tabs) bumps that counter.
   useApp((s) => s.sessionsVersion);
   const saveTarget = activeSaveTarget();
+  const activeSessionId = useApp((s) => s.activeSessionId);
+  const activeSession = getSessions().find((s) => s.id === activeSessionId);
+  // A STEP/IGES tab swaps the drawing canvas for the 3D viewer (see model3d/).
+  const modelTab = isModelSession(activeSession);
 
   const referenceEdge = referenceEdgeId ? doc.get(referenceEdgeId) : null;
   const referenceAngleDeg =
@@ -834,10 +841,18 @@ export function App() {
         <div className="center">
           <TabStrip />
           <main className="stage">
-            <Viewport />
-            {tool === "straighten" && <StraightenPanel />}
-            {tool === "fill" && <FillPanel />}
-            {(tool === "text" || tool === "dim") && <TextPanel />}
+            {modelTab && activeSession ? (
+              <Suspense fallback={<div className="model-stage" />}>
+                <ModelViewport session={activeSession} />
+              </Suspense>
+            ) : (
+              <>
+                <Viewport />
+                {tool === "straighten" && <StraightenPanel />}
+                {tool === "fill" && <FillPanel />}
+                {(tool === "text" || tool === "dim") && <TextPanel />}
+              </>
+            )}
           </main>
         </div>
         {showDiag && <DiagnosticsPanel onClose={() => setShowDiag(false)} />}
@@ -866,7 +881,7 @@ export function App() {
             </option>
           ))}
         </select>
-        <span data-testid="entity-count">{doc.all().length} entities</span>
+        <span data-testid="entity-count">{modelTab ? "3D model (view-only)" : `${doc.all().length} entities`}</span>
         {saveNotice && (
           <span
             className={saveNotice.kind === "error" ? "save-notice error" : "save-notice"}

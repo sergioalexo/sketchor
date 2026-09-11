@@ -138,12 +138,41 @@ format:
 - **DWG** — read-only, via a GPL-3.0 WebAssembly build of GNU LibreDWG (see
   `apps/web/src/browser/dwgImport.ts` and `/NOTICE.md`). There is no DWG
   export.
+- **STEP / IGES** — 3D models, **view-only**, in their own tab. Read by
+  OpenCascade compiled to WebAssembly (`occt-import-js`, LGPL — see
+  `/NOTICE.md`) and drawn with three.js. See *3D models* below.
 
-Use the **Open** button (or `Ctrl+O`) to load any of the three; **Save**
+Use the **Open** button (or `Ctrl+O`) to load any of these; **Save**
 (`Ctrl+S`) offers a choice of DXF or SVG. The File System Access API is used
 in the browser and in Tauri's WebView2, with a download / file-input fallback
 elsewhere. Opening a file that's already open in a tab switches to that tab
 (and reloads it) instead of opening a duplicate.
+
+### 3D models (STEP / IGES)
+
+Opening a `.step`/`.stp` (or `.iges`/`.igs`) file gives a 3D viewer tab
+instead of a drawing: shaded parts in the colours the file carries, B-rep
+edges drawn as dark outlines, orbit with the left mouse button, pan with the
+right or middle, wheel to zoom toward the cursor. Click a part to select it
+(its name shows in the corner readout), double-click to frame it, `H` hides
+the selected part and `Shift+H` shows everything again; `E` toggles edges,
+`F` fits, and `1`–`4` jump to isometric / top / front / right. The **Parts**
+button opens the assembly tree, with a filter and per-part hide/show.
+
+The file browser lists model files next to drawings and previews each one as
+an **isometric thumbnail**.
+
+What to expect for speed: reading a STEP file is the slow part (it's a B-rep
+that has to be tessellated — a few hundred KB opens in about a second, a
+3 MB assembly of ~1,700 parts in under half a minute, a 10 MB one in a
+couple of minutes) and it runs in a pool of background workers, so the app
+stays responsive and several previews load in parallel. The result is
+**cached** (IndexedDB, keyed by a hash of the file's bytes, up to ~768 MB)
+along with the thumbnail, so any file you have looked at once — opened, or
+merely browsed past — comes back instantly afterwards.
+
+There is no SAT or Parasolid support: those are proprietary kernels with no
+open-source reader. Export STEP from the source CAD instead (Onshape does).
 
 ### The file browser
 
@@ -216,7 +245,8 @@ Two write paths back the same behaviour: a File System Access handle where the
 file was picked through a dialog, and the `write_drawing_file` Tauri command
 where the desktop build only has a native path (its folder browser and the
 `.dxf` file association both hand over paths, not handles). DWG is import-only,
-so a DWG tab stays unbound and Save falls through to a prompt.
+so a DWG tab stays unbound and Save falls through to a prompt. A 3D model tab
+has nothing to save at all — Save just says so.
 
 ## Updates
 

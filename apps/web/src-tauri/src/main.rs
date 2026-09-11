@@ -23,10 +23,10 @@ struct OpenFile {
     path: String,
 }
 
-/// Reads a `.dxf`, `.svg`, or `.dwg` file and forwards its content to the
-/// web UI, which loads it onto the canvas. The event name selects how the UI
-/// interprets it. Reading in Rust avoids needing filesystem permissions in
-/// the frontend.
+/// Reads a `.dxf`, `.svg`, `.dwg`, or `.step`/`.iges` file and forwards its
+/// content to the web UI, which loads it onto the canvas (or, for 3D models,
+/// into a viewer tab). The event name selects how the UI interprets it.
+/// Reading in Rust avoids needing filesystem permissions in the frontend.
 fn emit_file(app: &AppHandle, path: &str) {
     let lower = path.to_lowercase();
     let (event, is_binary) = if lower.ends_with(".dxf") {
@@ -35,6 +35,10 @@ fn emit_file(app: &AppHandle, path: &str) {
         ("open-svg", false)
     } else if lower.ends_with(".dwg") {
         ("open-dwg", true)
+    } else if is_model_path(&lower) {
+        // STEP/IGES are text, but the UI hashes the exact bytes as its model
+        // cache key, so they travel as bytes like DWG does.
+        ("open-model", true)
     } else {
         return;
     };
@@ -65,12 +69,16 @@ fn emit_file(app: &AppHandle, path: &str) {
     }
 }
 
+fn is_model_path(lower: &str) -> bool {
+    lower.ends_with(".step") || lower.ends_with(".stp") || lower.ends_with(".iges") || lower.ends_with(".igs")
+}
+
 fn first_drawing_arg(args: &[String]) -> Option<String> {
     args.iter()
         .skip(1)
         .find(|a| {
             let l = a.to_lowercase();
-            l.ends_with(".dxf") || l.ends_with(".svg") || l.ends_with(".dwg")
+            l.ends_with(".dxf") || l.ends_with(".svg") || l.ends_with(".dwg") || is_model_path(&l)
         })
         .cloned()
 }
@@ -89,9 +97,10 @@ struct DrawingEntry {
     size: Option<f64>,
 }
 
-/// Lists `.dxf`/`.svg` files directly inside `dir` (non-recursive), for
-/// the in-app file browser's left-dock panel. Reads no file contents —
-/// those are fetched on demand per visible card via `read_drawing_file`.
+/// Lists `.dxf`/`.svg` drawings and `.step`/`.iges` models directly inside
+/// `dir` (non-recursive), for the in-app file browser's left-dock panel.
+/// Reads no file contents — those are fetched on demand per visible card via
+/// `read_drawing_file`.
 /// DWG isn't listed here — it's binary and import-only, opened via the Open
 /// dialog or file association instead of the folder-browser grid.
 ///
@@ -115,7 +124,7 @@ fn scan_drawings(dir: &str) -> Result<Vec<DrawingEntry>, String> {
             continue;
         }
         let lower = path.to_string_lossy().to_lowercase();
-        if !(lower.ends_with(".dxf") || lower.ends_with(".svg")) {
+        if !(lower.ends_with(".dxf") || lower.ends_with(".svg") || is_model_path(&lower)) {
             continue;
         }
         let name = match path.file_name() {

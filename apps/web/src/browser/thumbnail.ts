@@ -1,12 +1,14 @@
 import { dxfToSvg, entitiesToSvg, parseSvgText, type ThumbnailOptions } from "@sketchor/core";
 
 /**
- * True for drawing file kinds the in-app file browser lists thumbnails for.
- * DWG is import-only and not text-readable, so it's opened via the Open
- * dialog / file association rather than browsed here — see drawingFile.ts.
+ * True for file kinds the in-app file browser lists thumbnails for:
+ * drawings (DXF/SVG) and 3D models (STEP/IGES, previewed in isometric view
+ * via model3d/modelThumbnail.ts). DWG is import-only and not text-readable,
+ * so it's opened via the Open dialog / file association rather than browsed
+ * here — see drawingFile.ts.
  */
 export function isDrawingFile(name: string): boolean {
-  return /\.(dxf|svg)$/i.test(name);
+  return /\.(dxf|svg|step|stp|iges|igs)$/i.test(name);
 }
 
 /**

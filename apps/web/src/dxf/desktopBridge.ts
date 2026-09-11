@@ -1,6 +1,6 @@
 import { importDxfText, importEntities, openIntoSession, useApp } from "../state/store";
 import { importDwgBuffer } from "../browser/dwgImport";
-import { bindSavePath } from "../io/drawingFile";
+import { bindSavePath, openModelBytes } from "../io/drawingFile";
 import { parseSvgText } from "@sketchor/core";
 
 /**
@@ -13,6 +13,8 @@ import { parseSvgText } from "@sketchor/core";
  *  - `open-svg` → import SVG geometry (payload.text)
  *  - `open-dwg` → import DWG geometry (payload.base64, since DWG is binary
  *    — see dwgImport.ts)
+ *  - `open-model` → open a STEP/IGES model in a 3D viewer tab (payload.base64;
+ *    the exact bytes are the model cache key — see model3d/)
  *
  * On the web there is no `window.__TAURI__`, so this is a no-op — the same
  * bundle runs in the browser and the desktop shell.
@@ -65,6 +67,12 @@ export function initDesktopFileOpen(): void {
     const { entities, warnings } = parseSvgText(payload.text);
     openIntoSession(payload.name, () => importEntities(entities, warnings));
     bindOpened(payload.path, payload.name);
+    revealFolder(payload.dir);
+  });
+
+  tauri.event.listen("open-model", ({ payload }) => {
+    if (!payload?.base64) return;
+    openModelBytes(payload.name, base64ToArrayBuffer(payload.base64));
     revealFolder(payload.dir);
   });
 

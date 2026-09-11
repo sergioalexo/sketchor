@@ -10,6 +10,7 @@ isn't obvious from the README: how things are wired and how to build/run them.
 ```
 packages/core        framework-free document model, command bus, DXF/SVG/DWG IO, geometry analysis (pure TS)
 apps/web             React UI + custom Canvas2D viewport
+apps/web/src/model3d STEP/IGES viewer: OpenCascade wasm in a worker pool, three.js, IndexedDB cache
 apps/web/src-tauri   Tauri 2 desktop shell (Rust); same UI as a native app
 native/dxf-parse     dependency-free Rust DXF parser + fit-to-box projection (shared)
 native/dxf-thumbnailer   Windows Explorer thumbnail COM shell extension (Rust)
@@ -59,8 +60,37 @@ the `.dll` resource, the PowerShell `beforeBuildCommand`) live in
 Info.plist keys live in `apps/web/src-tauri/Info.plist` (Tauri merges it).
 
 The Rust shell (`src-tauri/src/main.rs`) is fully cross-platform: it emits opened
-files to the UI (DXF/SVG as text, DWG as base64) and exposes
+files to the UI (DXF/SVG as text, DWG and STEP/IGES as base64) and exposes
 `list_drawings_in_dir` / `read_drawing_file` / `write_drawing_file` commands.
+
+## 3D model tabs (`apps/web/src/model3d/`)
+
+A STEP/IGES file opens as a *view-only* tab: `DocSession.model` is set (with
+`modelLoading`/`modelError` while it isn't yet) and `App.tsx` swaps the
+`Viewport` for the lazily-loaded `ModelViewport`. Nothing goes through the
+command bus — there is no document behind a model tab and nothing to save.
+
+The pipeline is built for one fact measured on real Onshape exports:
+**reading the STEP dominates and tessellation density barely matters**
+(0.7 MB → ~1 s, 3 MB/1,700 parts → ~27 s, 11 MB/3,400 parts → ~130 s in
+wasm). So:
+
+- `occt.worker.ts` runs occt-import-js; `stepImport.ts` is a pool of up to
+  three workers with a queue where *opens* preempt *thumbnails*, and requests
+  for identical bytes share one parse.
+- `buildModel.ts` (pure, tested) merges every mesh into **one** vertex/index
+  buffer plus a part table of ranges, bakes vertex colours, and extracts
+  B-rep edges (welded triangle edges shared by two *different* faces).
+  Selection/hide in the viewer work on those ranges — two draw calls for any
+  assembly, and picking is box-prefiltered + `drawRange`-scoped raycasts.
+- `modelCache.ts` persists models and thumbnails in IndexedDB keyed by
+  `LAYOUT_VERSION:sha256(bytes)`; bump `LAYOUT_VERSION` whenever `Model3D` or
+  the extraction changes. LRU-evicted past 768 MB.
+- `modelThumbnail.ts` renders the file-browser's isometric PNG through one
+  shared offscreen WebGL context (browsers cap live contexts).
+- Z is up. View presets live in `modelScene.ts`.
+
+Debug: `window.sketchor.openModel(name, arrayBuffer)` / `getModel()`.
 
 ## Testing
 

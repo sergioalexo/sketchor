@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { parseSvgText } from "@sketchor/core";
 import { getSessions, importDxfText, importEntities, openIntoSession, useApp } from "../state/store";
-import { bindSaveHandle, bindSavePath } from "../io/drawingFile";
+import { bindSaveHandle, bindSavePath, openModelBytes } from "../io/drawingFile";
+import { isModelFile } from "../model3d/stepImport";
 import { fileToSvg, isDrawingFile, queueThumbnail } from "./thumbnail";
 
 interface Entry {
@@ -77,7 +78,24 @@ async function readEntryText(entry: Entry): Promise<string> {
   return "";
 }
 
-function openEntry(entry: Entry, text: string): void {
+/**
+ * Raw bytes of an entry, for 3D model files — read raw rather than through
+ * the text path so the content hash (the model cache key) matches what the
+ * Open dialog and desktop file association produce from the same file.
+ */
+async function readEntryBytes(entry: Entry): Promise<ArrayBuffer> {
+  if (entry.file) return entry.file.arrayBuffer();
+  if (entry.handle) return (await entry.handle.getFile()).arrayBuffer();
+  const text = await readEntryText(entry);
+  return new TextEncoder().encode(text).buffer as ArrayBuffer;
+}
+
+async function openEntry(entry: Entry, text: string): Promise<void> {
+  if (isModelFile(entry.name)) {
+    // View-only, opens in its own 3D tab; nothing to bind a Save to.
+    openModelBytes(entry.name, await readEntryBytes(entry));
+    return;
+  }
   if (/\.svg$/i.test(entry.name)) {
     const { entities, warnings } = parseSvgText(text);
     openIntoSession(entry.name, () => importEntities(entities, warnings));
@@ -635,7 +653,7 @@ export function FileExplorerPanel({ hidden, onClose }: { hidden: boolean; onClos
         <input
           ref={fileInputRef}
           type="file"
-          accept=".dxf,.svg"
+          accept=".dxf,.svg,.step,.stp,.iges,.igs"
           multiple
           hidden
           onChange={(e) => void addFiles(e.target.files)}
@@ -739,7 +757,7 @@ export function FileExplorerPanel({ hidden, onClose }: { hidden: boolean; onClos
       ) : entries.length === 0 ? (
         <div className="filexplorer-empty">
           {isDesktop
-            ? "Open a .dxf or .svg file, or pick a folder, to browse its drawings."
+            ? "Open a .dxf, .svg or .step file, or pick a folder, to browse its drawings and models."
             : supportsDirPicker
               ? "Use Open folder… or Add files… to browse drawings."
               : "Use Add files… to preview and open drawings."}
@@ -869,7 +887,11 @@ function SortHeader({
   );
 }
 
-/** Lazily renders a geometry preview once the element scrolls into view. */
+/**
+ * Lazily renders a geometry preview once the element scrolls into view.
+ * Returns markup: an inline SVG for drawings, an `<img>` (isometric PNG)
+ * for 3D models — see model3d/modelThumbnail.ts, loaded on first use.
+ */
 function useThumbnail(
   entry: Entry,
   getText: () => Promise<string>,
@@ -881,6 +903,7 @@ function useThumbnail(
     const el = ref.current;
     if (!el) return;
     let done = false;
+    let unmounted = false;
     let cancelQueued: (() => void) | null = null;
     const observer = new IntersectionObserver(
       (entries) => {
@@ -891,6 +914,31 @@ function useThumbnail(
           // of hundreds of drawings fills in gradually instead of locking up
           // the app while every visible card parses at once.
           cancelQueued = queueThumbnail(async () => {
+            if (isModelFile(entry.name)) {
+              // The model parse runs in the worker pool (and is cached), so
+              // it must not hold this serial queue: read the bytes here, hand
+              // them off, and let the card fill in whenever the pool is done.
+              // Several model previews then load in parallel instead of one
+              // slow assembly stalling every card behind it.
+              const fallback = `<span class="filecard-model-fallback">3D</span>`;
+              try {
+                const [{ thumbnailForModelFile }, bytes] = await Promise.all([
+                  import("../model3d/modelThumbnail"),
+                  readEntryBytes(entry),
+                ]);
+                void thumbnailForModelFile(entry.name, bytes).then(
+                  (url) => {
+                    if (!unmounted) setSvg(url ? `<img src="${url}" alt="" draggable="false" />` : fallback);
+                  },
+                  () => {
+                    if (!unmounted) setSvg(fallback);
+                  },
+                );
+              } catch {
+                setSvg(fallback);
+              }
+              return;
+            }
             try {
               const text = await getText();
               setSvg(fileToSvg(entry.name, text, { size, background: "#17181c", stroke: "#c7d0dc" }));
@@ -904,6 +952,7 @@ function useThumbnail(
     );
     observer.observe(el);
     return () => {
+      unmounted = true;
       observer.disconnect();
       cancelQueued?.();
     };
@@ -919,7 +968,8 @@ function FileCard({ entry, activeSessionId, tags, reserveTags, selected, onToggl
   const activeName = getSessions().find((s) => s.id === activeSessionId)?.name;
   const isActive = activeName === entry.name;
 
-  const handleOpen = async () => openEntry(entry, await getText());
+  // Model files read their own bytes inside openEntry; no need for the text.
+  const handleOpen = async () => openEntry(entry, isModelFile(entry.name) ? "" : await getText());
 
   return (
     <button
@@ -965,7 +1015,8 @@ function FileRow({ entry, activeSessionId, tags, selected, onToggleSelect, onEdi
   const activeName = getSessions().find((s) => s.id === activeSessionId)?.name;
   const isActive = activeName === entry.name;
 
-  const handleOpen = async () => openEntry(entry, await getText());
+  // Model files read their own bytes inside openEntry; no need for the text.
+  const handleOpen = async () => openEntry(entry, isModelFile(entry.name) ? "" : await getText());
 
   return (
     <button

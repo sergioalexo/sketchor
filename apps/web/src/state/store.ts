@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { Model3D } from "../model3d/types";
 import { dxfCodeToDisplayUnit, formatArea, formatLength, loadDisplayUnit, saveDisplayUnit, type DisplayUnit } from "../units";
 import {
   CommandBus,
@@ -69,6 +70,20 @@ export interface DocSession {
   view: { scale: number; ox: number; oy: number } | null;
   /** Display unit for this tab (e.g. from a DXF's $INSUNITS on open), restored when it becomes active again. */
   displayUnit: DisplayUnit;
+  /**
+   * A 3D model tab (STEP/IGES, view-only — see model3d/). While set, the
+   * stage shows the 3D viewer instead of the drawing canvas; `doc` stays
+   * empty and there is nothing to save. `null` with `modelLoading` means the
+   * tab exists but the file is still being read.
+   */
+  model?: Model3D | null;
+  modelLoading?: boolean;
+  modelError?: string | null;
+}
+
+/** True for a tab that shows (or is loading) a 3D model rather than a drawing. */
+export function isModelSession(s: DocSession | undefined): boolean {
+  return !!s && (s.model != null || !!s.modelLoading || !!s.modelError);
 }
 
 let sessionCounter = 0;
@@ -781,7 +796,7 @@ function bumpSessionsVersion(): void {
 }
 
 function isSessionBlank(s: DocSession): boolean {
-  return s.doc.all().length === 0 && !s.dirty && !s.named;
+  return s.doc.all().length === 0 && !s.dirty && !s.named && !isModelSession(s);
 }
 
 function nextUntitledName(): string {
@@ -899,6 +914,42 @@ export function openIntoSession(name: string, load: () => void): void {
   bumpSessionsVersion();
 }
 
+/**
+ * Opens a 3D model into a tab. The tab appears at once (so the user sees it
+ * queued and can keep working elsewhere — reading a big STEP file can take a
+ * while) and fills in when `loading` settles. Errors show in the tab too.
+ */
+export function openModelIntoSession(name: string, loading: Promise<Model3D>): void {
+  let target: DocSession | undefined;
+  openIntoSession(name, () => {
+    target = activeSession();
+    // A reused tab could be an "Untitled" drawing or a re-open of this same
+    // model — either way it becomes a fresh loading model tab.
+    target.model = null;
+    target.modelLoading = true;
+    target.modelError = null;
+  });
+  loading.then(
+    (model) => {
+      if (!target) return;
+      target.model = model;
+      target.modelLoading = false;
+      bumpSessionsVersion();
+    },
+    (err: Error) => {
+      if (!target) return;
+      target.modelLoading = false;
+      target.modelError = err?.message ?? String(err);
+      bumpSessionsVersion();
+    },
+  );
+}
+
+/** The active tab itself (read-only use; mutate through the helpers above). */
+export function getActiveSession(): DocSession {
+  return activeSession();
+}
+
 /** Marks the active tab as saved under `name` (e.g. after a successful Save-as). */
 export function finishSessionSave(name: string): void {
   const active = sessions.find((s) => s.id === useApp.getState().activeSessionId);
@@ -929,6 +980,10 @@ declare global {
       closeTab: typeof closeTab;
       switchToSession: typeof switchToSession;
       getSessions: typeof getSessions;
+      /** The 3D model shown in the active tab, if it is a model tab (see model3d/). */
+      getModel: () => Model3D | null;
+      /** Opens STEP/IGES bytes in a viewer tab; attached by io/drawingFile.ts (it can't be imported here). */
+      openModel: (name: string, buffer: ArrayBuffer) => void;
     };
   }
 }
@@ -948,4 +1003,8 @@ window.sketchor = {
   closeTab,
   switchToSession,
   getSessions,
+  getModel: () => activeSession().model ?? null,
+  openModel: () => {
+    throw new Error("io/drawingFile.ts not loaded yet");
+  },
 };

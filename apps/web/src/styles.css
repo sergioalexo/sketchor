@@ -1874,3 +1874,229 @@ kbd.shortcut-key-fixed {
   color: var(--text-dim);
   margin-bottom: 2px;
 }
+
+/* ---------- 3D model viewer (model3d/) ---------- */
+
+.model-stage {
+  position: absolute;
+  inset: 0;
+  background: #17181c;
+  overflow: hidden;
+}
+
+.model-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+  cursor: default;
+}
+
+.model-toolbar {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  background: color-mix(in srgb, var(--panel) 88%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  backdrop-filter: blur(6px);
+}
+
+.model-toolbar .btn.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.model-toolbar-sep {
+  width: 1px;
+  height: 16px;
+  background: var(--border);
+  margin: 0 3px;
+}
+
+.model-status {
+  position: absolute;
+  left: 12px;
+  bottom: 10px;
+  display: flex;
+  gap: 16px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--panel) 80%, transparent);
+  color: var(--text-dim);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.model-status-part {
+  color: var(--text);
+}
+
+.model-parts {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  bottom: 10px;
+  width: 260px;
+  display: flex;
+  flex-direction: column;
+  background: color-mix(in srgb, var(--panel) 94%, transparent);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.model-parts-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 6px 6px 12px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+}
+
+.model-parts .filexplorer-search {
+  flex: none;
+  margin: 6px 8px;
+}
+
+.model-parts-list {
+  flex: 1;
+  overflow-y: auto;
+  padding-bottom: 6px;
+}
+
+.model-parts-group,
+.model-parts-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.model-parts-group {
+  color: var(--text-dim);
+  font-weight: 600;
+}
+
+.model-parts-caret {
+  width: 10px;
+  display: inline-block;
+}
+
+.model-parts-row:hover {
+  background: var(--border);
+}
+
+.model-parts-row.selected {
+  background: var(--accent-soft);
+  color: #fff;
+}
+
+.model-parts-row.hidden .model-parts-name {
+  color: var(--text-dim);
+  text-decoration: line-through;
+}
+
+.model-parts-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.model-parts-eye {
+  flex-shrink: 0;
+  width: 16px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.model-parts-eye:hover {
+  color: var(--text);
+}
+
+.model-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.model-loading-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  max-width: 360px;
+  padding: 22px 26px;
+  text-align: center;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.model-loading-card.error {
+  border-color: #7a3b3b;
+}
+
+.model-loading-title {
+  font-weight: 600;
+}
+
+.model-loading-phase {
+  color: var(--text);
+}
+
+.model-loading-hint {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.model-loading-spinner {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  animation: model-spin 0.9s linear infinite;
+}
+
+@keyframes model-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* File-browser cards: model thumbnails are PNGs, not inline SVG. */
+.filecard-thumb img,
+.filerow-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.filecard-model-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  aspect-ratio: 1;
+  color: var(--text-dim);
+  font-weight: 600;
+}

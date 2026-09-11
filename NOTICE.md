@@ -28,3 +28,22 @@ This tradeoff was made deliberately (DWG has no open specification, and
 the realistic alternatives are this GPL library or a paid commercial SDK)
 but it should be revisited with actual legal input before a wide release,
 not treated as settled by this note.
+
+## STEP / IGES import — LGPL-2.1
+
+Sketchor reads `.step`/`.stp` and `.iges`/`.igs` 3D models with
+[`occt-import-js`](https://github.com/kovacsv/occt-import-js), a WebAssembly
+build of [Open CASCADE Technology](https://dev.opencascade.org/) that
+tessellates B-rep geometry into triangle meshes. Both are **LGPL-2.1**
+(OCCT with its usual linking exception). The wasm binary is bundled from the
+npm package at build time and loaded in a Web Worker
+(`apps/web/src/model3d/occt.worker.ts`).
+
+LGPL is materially different from the GPL note above: it permits use in a
+differently-licensed application as long as the library itself stays
+replaceable and its source (and license) is made available. Sketchor uses it
+unmodified, dynamically loaded as a separate `.wasm` file, and ships this
+notice — which is the usual way to satisfy those terms. Nothing here changes
+Sketchor's own AGPL-3.0 license.
+
+three.js (MIT) renders the result.

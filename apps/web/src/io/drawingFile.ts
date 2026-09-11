@@ -1,12 +1,16 @@
 import { entitiesToDxf, entitiesToSvgDocument, parseSvgText } from "@sketchor/core";
 import { importDwgBuffer } from "../browser/dwgImport";
+import { isModelFile, loadModel } from "../model3d/stepImport";
 import {
   doc,
   finishSessionSave,
+  getActiveSession,
   getSessions,
   importDxfText,
   importEntities,
+  isModelSession,
   openIntoSession,
+  openModelIntoSession,
   overlayDxfText,
   overlayEntities,
   useApp,
@@ -16,7 +20,8 @@ import { displayUnitToDxfCode, factorFromMm } from "../units";
 /**
  * Save / open of Sketchor's supported drawing formats: DXF and SVG for
  * both directions, plus DWG import (read-only — see dwgImport.ts and
- * NOTICE.md for why there's no DWG export).
+ * NOTICE.md for why there's no DWG export) and STEP/IGES 3D models
+ * (view-only, in their own tab — see model3d/).
  *
  * Prefers the File System Access API (`showSaveFilePicker` / `showOpenFilePicker`),
  * which is available both in Chromium browsers and in Tauri's WebView2, so the
@@ -59,8 +64,9 @@ interface WindowWithFS extends Window {
 }
 
 const OPEN_TYPES: PickerType[] = [
-  { description: "Drawing", accept: { "application/octet-stream": [".dxf", ".svg", ".dwg"] } },
+  { description: "Drawing or 3D model", accept: { "application/octet-stream": [".dxf", ".svg", ".dwg", ".step", ".stp", ".iges", ".igs"] } },
 ];
+const OPEN_ACCEPT = ".dxf,.svg,.dwg,.step,.stp,.iges,.igs";
 
 function serialize(format: SaveFormat): string {
   const entities = doc.all();
@@ -95,10 +101,11 @@ export type SaveTarget =
 
 const saveTargets = new Map<string, SaveTarget>();
 
-/** The format a filename implies, or null when it isn't something we can write (DWG). */
+/** The format a filename implies, or null when it isn't something we can write (DWG, 3D models). */
 function writableFormat(name: string): SaveFormat | null {
   if (/\.svg$/i.test(name)) return "svg";
   if (/\.dwg$/i.test(name)) return null; // import-only, nothing to save back to
+  if (isModelFile(name)) return null; // view-only
   return "dxf";
 }
 
@@ -165,11 +172,16 @@ function defaultSaveName(format: SaveFormat): string {
   const target = activeSaveTarget();
   const base = target?.name ?? getSessions().find((s) => s.id === activeSessionId() && s.named)?.name;
   if (!base) return `drawing.${format}`;
-  return `${base.replace(/\.(dxf|svg|dwg)$/i, "")}.${format}`;
+  return `${base.replace(/\.(dxf|svg|dwg|step|stp|iges|igs)$/i, "")}.${format}`;
 }
 
 /** Saves the current drawing as DXF or SVG. No-op if the location prompt is cancelled. */
 export async function saveDrawing(format: SaveFormat, suggestedName?: string, mode: SaveMode = "save"): Promise<void> {
+  if (isModelSession(getActiveSession())) {
+    // A model tab has no drawing behind it; saving would write an empty DXF.
+    useApp.getState().setSaveNotice({ kind: "error", message: "3D models are view-only — nothing to save", at: Date.now() });
+    return;
+  }
   const text = serialize(format);
   const { mime, description } = SAVE_FORMAT[format];
   const w = window as WindowWithFS;
@@ -241,9 +253,23 @@ export async function saveAs(format: SaveFormat = activeSaveTarget()?.format ?? 
   await saveDrawing(format, undefined, "save-as");
 }
 
-/** Loads a DXF/SVG/DWG `File` into a tab (opening or reusing one — see openIntoSession). */
+/**
+ * Opens a STEP/IGES model from its raw bytes in a 3D viewer tab. The tab
+ * shows immediately and fills in when the (worker-side, cached) read
+ * finishes. `buffer` is consumed.
+ */
+export function openModelBytes(name: string, buffer: ArrayBuffer): void {
+  openModelIntoSession(name, loadModel(name, buffer, "open"));
+}
+
+// Debug / automation hook, alongside the drawing ones in state/store.ts.
+window.sketchor.openModel = openModelBytes;
+
+/** Loads a DXF/SVG/DWG `File` into a tab (opening or reusing one — see openIntoSession), or a STEP/IGES into a viewer tab. */
 export async function loadDrawingFile(name: string, file: File): Promise<void> {
-  if (/\.svg$/i.test(name)) {
+  if (isModelFile(name)) {
+    openModelBytes(name, await file.arrayBuffer());
+  } else if (/\.svg$/i.test(name)) {
     const text = await file.text();
     const { entities, warnings } = parseSvgText(text);
     openIntoSession(name, () => importEntities(entities, warnings));
@@ -257,7 +283,7 @@ export async function loadDrawingFile(name: string, file: File): Promise<void> {
   }
 }
 
-/** Opens a DXF/SVG/DWG file into the canvas. No-op if cancelled. */
+/** Opens a DXF/SVG/DWG file into the canvas, or a STEP/IGES model into a viewer tab. No-op if cancelled. */
 export async function openDrawing(): Promise<void> {
   const w = window as WindowWithFS;
 
@@ -280,7 +306,7 @@ export async function openDrawing(): Promise<void> {
   await new Promise<void>((resolve) => {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = ".dxf,.svg,.dwg";
+    input.accept = OPEN_ACCEPT;
     input.onchange = async () => {
       const file = input.files?.[0];
       if (file) await loadDrawingFile(file.name, file);
@@ -300,6 +326,11 @@ export async function openDrawing(): Promise<void> {
  */
 export async function overlayDrawingFile(name: string, file: File): Promise<{ count: number; warnings: string[]; layer: string }> {
   const label = name.replace(/\.(dxf|svg|dwg)$/i, "");
+  if (isModelFile(name)) {
+    const warnings = ["3D models open in their own tab and can't be overlaid on a drawing"];
+    useApp.getState().setFileWarnings(warnings);
+    return { count: 0, warnings, layer: label };
+  }
   if (/\.svg$/i.test(name)) {
     const text = await file.text();
     const { entities, warnings } = parseSvgText(text);
