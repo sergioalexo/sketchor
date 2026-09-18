@@ -1,5 +1,5 @@
-import occtimportjs from "occt-import-js";
-import wasmUrl from "occt-import-js/dist/occt-import-js.wasm?url";
+import occtimportjs from "../../vendor/occt-import-js/occt-import-js.mjs";
+import wasmUrl from "../../vendor/occt-import-js/occt-import-js.wasm?url";
 import { buildModel } from "./buildModel";
 import { getCachedModel, putCachedModel } from "./modelCache";
 import type { Model3D, ModelFormat, OcctResult } from "./types";
@@ -8,11 +8,17 @@ import type { Model3D, ModelFormat, OcctResult } from "./types";
  * Import worker: OpenCascade (occt-import-js, LGPL — see NOTICE.md) reads a
  * STEP/IGES file and tessellates it; `buildModel` flattens the result; the
  * model is cached and handed back with its buffers *transferred*, not
- * copied. One worker holds one wasm instance; the pool in stepImport.ts
+ * copied. The wasm is Sketchor's own build of occt-import-js
+ * (apps/web/vendor, built by native/occt-import-js-build): the upstream
+ * package resolves every face's colour with a linear scan of the whole
+ * assembly, which made a 3,000-part file take 90 s to read; the patched
+ * build indexes the labels once and reads the same file in 4 s.
+ *
+ * One worker holds one wasm instance; the pool in stepImport.ts
  * decides how many run at once.
  *
- * Everything slow lives here on purpose. A 10 MB assembly can take a couple
- * of minutes to read, and the UI keeps drawing throughout.
+ * Everything slow lives here on purpose. A 10 MB assembly still takes
+ * seconds to read, and the UI keeps drawing throughout.
  */
 
 export interface ParseRequest {

@@ -35,15 +35,23 @@ Sketchor reads `.step`/`.stp` and `.iges`/`.igs` 3D models with
 [`occt-import-js`](https://github.com/kovacsv/occt-import-js), a WebAssembly
 build of [Open CASCADE Technology](https://dev.opencascade.org/) that
 tessellates B-rep geometry into triangle meshes. Both are **LGPL-2.1**
-(OCCT with its usual linking exception). The wasm binary is bundled from the
-npm package at build time and loaded in a Web Worker
-(`apps/web/src/model3d/occt.worker.ts`).
+(OCCT with its usual linking exception). The wasm binary is Sketchor's own
+build of occt-import-js 0.0.23 (upstream commit as of December 2024, OCCT
+7.6.1), vendored at `apps/web/vendor/occt-import-js/` and loaded in a Web
+Worker (`apps/web/src/model3d/occt.worker.ts`).
+
+**The build is modified.** `native/occt-import-js-build/patch_importer.py`
+is the complete change (a one-time shape→label index in
+`importer-xcaf.cpp` replacing per-face linear searches, plus `-O2` instead
+of `-Oz`), and the README next to it documents how to reproduce the binary
+from upstream sources. Publishing the modification in source form alongside
+the binary is what LGPL-2.1 §2/§3 ask of a modified library.
 
 LGPL is materially different from the GPL note above: it permits use in a
 differently-licensed application as long as the library itself stays
-replaceable and its source (and license) is made available. Sketchor uses it
-unmodified, dynamically loaded as a separate `.wasm` file, and ships this
-notice — which is the usual way to satisfy those terms. Nothing here changes
-Sketchor's own AGPL-3.0 license.
+replaceable and its source (and license) is made available. Sketchor loads
+it dynamically as a separate `.wasm` file, ships this notice and the
+modification's source — which is the usual way to satisfy those terms.
+Nothing here changes Sketchor's own AGPL-3.0 license.
 
 three.js (MIT) renders the result.

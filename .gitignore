@@ -16,3 +16,8 @@ Thumbs.db
 # Plugin signing private keys (never commit)
 plugin-key.json
 *.sketchor-key.json
+
+# occt-import-js rebuild workspace (upstream checkout, emsdk, object files — see native/occt-import-js-build/README.md)
+native/occt-import-js-build/src/
+native/occt-import-js-build/emsdk/
+native/occt-import-js-build/build/
