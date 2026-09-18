@@ -14,6 +14,7 @@ import {
   type ModelObjects,
   type ViewPreset,
 } from "./modelScene";
+import { measureBetween, snapToEdges, type MeasurePoint } from "./measure3d";
 import { useOpenLoads } from "./stepImport";
 import type { Model3D, ModelNode } from "./types";
 
@@ -25,7 +26,14 @@ import type { Model3D, ModelNode } from "./types";
  * orbits, two fingers pinch-zoom and pan, tap selects, double-tap frames,
  * long-press hides the part under the finger. Keys: F fits all,
  * H hides the selected part, Shift+H shows everything, E toggles edges,
- * Esc clears the selection, 1/2/3/4 jump to iso/top/front/right.
+ * M toggles the measure tool, Esc clears the measurement / selection,
+ * 1/2/3/4 jump to iso/top/front/right.
+ *
+ * Measure: with the tool on, each click/tap picks a point on the model,
+ * snapped to the nearest B-rep vertex or edge (measure3d.ts); the second
+ * point completes a distance, drawn as a screen-space overlay that is
+ * re-projected after every render so it sticks to the geometry while the
+ * camera moves. Nothing is stored — a measurement is a readout, not data.
  *
  * Rendering is on demand — a frame is drawn only when the camera or the
  * scene changed — so an open model tab costs nothing while idle.
@@ -105,6 +113,8 @@ interface Scene {
   raycaster: THREE.Raycaster;
   partBoxes: THREE.Box3[];
   requestRender: () => void;
+  /** Called after each frame with the camera settled — the measure overlay re-projects itself here. */
+  afterRender: { current: (() => void) | null };
   dispose: () => void;
 }
 
@@ -117,6 +127,12 @@ function Viewer({ model }: { model: Model3D }) {
   const [showEdges, setShowEdges] = useState(true);
   const [showParts, setShowParts] = useState(false);
   const [hovered, setHovered] = useState<number | null>(null);
+  const [measuring, setMeasuring] = useState(false);
+  const [measure, setMeasure] = useState<{ a: MeasurePoint | null; b: MeasurePoint | null }>({ a: null, b: null });
+  const measureRef = useRef(measure);
+  measureRef.current = measure;
+  const overlayRef = useRef<SVGSVGElement>(null);
+  const labelRef = useRef<HTMLDivElement>(null);
   const displayUnit = useApp((s) => s.displayUnit);
 
   // ---- scene lifetime: one per model --------------------------------------
@@ -151,12 +167,14 @@ function Viewer({ model }: { model: Model3D }) {
     controls.update();
 
     let pending = false;
+    const afterRender: Scene["afterRender"] = { current: null };
     const requestRender = () => {
       if (pending) return;
       pending = true;
       requestAnimationFrame(() => {
         pending = false;
         renderer.render(scene, camera);
+        afterRender.current?.();
       });
     };
     controls.addEventListener("change", requestRender);
@@ -185,6 +203,7 @@ function Viewer({ model }: { model: Model3D }) {
       raycaster: new THREE.Raycaster(),
       partBoxes,
       requestRender,
+      afterRender,
       dispose() {
         observer.disconnect();
         controls.dispose();
@@ -249,7 +268,8 @@ function Viewer({ model }: { model: Model3D }) {
   }, [hidden, model]);
 
   // ---- picking ------------------------------------------------------------
-  const pick = (clientX: number, clientY: number): number | null => {
+  /** Nearest visible part under a screen point, with the surface hit and its camera distance. */
+  const pickHit = (clientX: number, clientY: number): { part: number; point: THREE.Vector3; dist: number } | null => {
     const s = sceneRef.current;
     const canvas = canvasRef.current;
     if (!s || !canvas) return null;
@@ -268,17 +288,98 @@ function Viewer({ model }: { model: Model3D }) {
     }
     candidates.sort((a, b) => a.dist - b.dist);
     const geometry = s.objects.geometry;
-    let best: { part: number; dist: number } | null = null;
+    let best: { part: number; point: THREE.Vector3; dist: number } | null = null;
     for (const c of candidates) {
       if (best && c.dist > best.dist) break;
       const p = model.parts[c.part];
       geometry.setDrawRange(p.indexStart, p.indexCount);
       const hits = s.raycaster.intersectObject(s.objects.mesh, false);
-      if (hits.length > 0 && (!best || hits[0].distance < best.dist)) best = { part: c.part, dist: hits[0].distance };
+      if (hits.length > 0 && (!best || hits[0].distance < best.dist)) {
+        best = { part: c.part, point: hits[0].point.clone(), dist: hits[0].distance };
+      }
     }
     geometry.setDrawRange(0, Infinity);
-    return best?.part ?? null;
+    return best;
   };
+  const pick = (clientX: number, clientY: number): number | null => pickHit(clientX, clientY)?.part ?? null;
+
+  /**
+   * A measure point under the pointer: the surface hit snapped to the part's
+   * vertices/edges within a pixel tolerance — wider for a finger — converted
+   * to world units at the hit's depth.
+   */
+  const pickMeasurePoint = (clientX: number, clientY: number, touch: boolean): MeasurePoint | null => {
+    const s = sceneRef.current;
+    const canvas = canvasRef.current;
+    const hit = pickHit(clientX, clientY);
+    if (!s || !canvas || !hit) return null;
+    const px = touch ? 18 : 10;
+    const worldPerPixel = (2 * hit.dist * Math.tan((s.camera.fov * Math.PI) / 360)) / Math.max(1, canvas.clientHeight);
+    return snapToEdges(model, hit.part, [hit.point.x, hit.point.y, hit.point.z], px * worldPerPixel);
+  };
+
+  const addMeasurePoint = (clientX: number, clientY: number, touch: boolean) => {
+    const pt = pickMeasurePoint(clientX, clientY, touch);
+    if (!pt) return;
+    setMeasure((m) => (m.a && !m.b ? { a: m.a, b: pt } : { a: pt, b: null }));
+  };
+  const clearMeasure = () => setMeasure({ a: null, b: null });
+
+  // The overlay is re-projected imperatively after each render rather than
+  // through React state, so orbiting with a measurement on screen doesn't
+  // re-render the component per frame.
+  useEffect(() => {
+    const s = sceneRef.current;
+    if (!s) return;
+    const sync = () => {
+      const svg = overlayRef.current;
+      const label = labelRef.current;
+      const canvas = canvasRef.current;
+      const m = measureRef.current;
+      if (!svg || !label || !canvas) return;
+      const w = canvas.clientWidth;
+      const h = canvas.clientHeight;
+      const project = (pt: MeasurePoint) => {
+        const v = new THREE.Vector3(...pt.point).project(s.camera);
+        return { x: ((v.x + 1) / 2) * w, y: ((1 - v.y) / 2) * h, visible: v.z < 1 };
+      };
+      const pts = [m.a, m.b].filter((p): p is MeasurePoint => !!p).map(project);
+      svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+      const [c1, c2, line] = ["#m-a", "#m-b", "#m-line"].map((id) => svg.querySelector(id) as SVGElement | null);
+      const place = (el: SVGElement | null, p?: { x: number; y: number; visible: boolean }) => {
+        if (!el) return;
+        el.style.display = p && p.visible ? "" : "none";
+        if (p) {
+          el.setAttribute("cx", String(p.x));
+          el.setAttribute("cy", String(p.y));
+        }
+      };
+      place(c1, pts[0]);
+      place(c2, pts[1]);
+      if (line) {
+        const both = pts.length === 2 && pts[0].visible && pts[1].visible;
+        line.style.display = both ? "" : "none";
+        if (both) {
+          line.setAttribute("x1", String(pts[0].x));
+          line.setAttribute("y1", String(pts[0].y));
+          line.setAttribute("x2", String(pts[1].x));
+          line.setAttribute("y2", String(pts[1].y));
+        }
+        label.style.display = both ? "" : "none";
+        if (both) {
+          label.style.left = `${(pts[0].x + pts[1].x) / 2}px`;
+          label.style.top = `${(pts[0].y + pts[1].y) / 2}px`;
+        }
+      }
+    };
+    s.afterRender.current = sync;
+    sync();
+    return () => {
+      if (s.afterRender.current === sync) s.afterRender.current = null;
+    };
+  }, [measure, model]);
+
+  const measured = useMemo(() => (measure.a && measure.b ? measureBetween(measure.a.point, measure.b.point) : null), [measure]);
 
   /** Frames `bounds` from a preset, or from wherever the camera is looking now. */
   const frame = (bounds: Model3D["bounds"], preset?: ViewPreset) => {
@@ -349,6 +450,10 @@ function Viewer({ model }: { model: Model3D }) {
       }
       lastTap.current = { at: now, x: e.clientX, y: e.clientY };
     }
+    if (measuring) {
+      addMeasurePoint(e.clientX, e.clientY, d.touch);
+      return;
+    }
     setSelected(pick(e.clientX, e.clientY));
   };
   const onPointerCancel = () => {
@@ -390,8 +495,15 @@ function Viewer({ model }: { model: Model3D }) {
         case "H":
           setHidden(new Set());
           break;
+        case "m":
+        case "M":
+          toggleMeasuring();
+          break;
         case "Escape":
-          setSelected(null);
+          // Peel back one layer at a time: points, then the tool, then the selection.
+          if (measure.a) clearMeasure();
+          else if (measuring) setMeasuring(false);
+          else setSelected(null);
           break;
         case "1":
           fitAll("iso");
@@ -413,19 +525,31 @@ function Viewer({ model }: { model: Model3D }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, hidden, model]);
+  }, [selected, hidden, model, measuring, measure]);
 
-  const size = useMemo(() => {
-    const b = model.bounds;
-    return [0, 1, 2].map((k) => formatLength(b.max[k] - b.min[k], displayUnit)).join(" × ");
-  }, [model, displayUnit]);
+  const toggleMeasuring = () => {
+    setMeasuring((v) => {
+      if (v) clearMeasure();
+      return !v;
+    });
+  };
+
+  const sizeOf = (b: Model3D["bounds"]) => [0, 1, 2].map((k) => formatLength(b.max[k] - b.min[k], displayUnit)).join(" × ");
+  const size = useMemo(() => sizeOf(model.bounds), [model, displayUnit]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const statusPart = hovered ?? selected;
+  const measureHint = !measuring
+    ? null
+    : !measure.a
+      ? "Tap the first point"
+      : !measure.b
+        ? "Tap the second point"
+        : null;
   return (
     <div className="model-stage" ref={hostRef} data-testid="model-viewport">
       <canvas
         ref={canvasRef}
-        className="model-canvas"
+        className={`model-canvas ${measuring ? "measuring" : ""}`}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
@@ -433,68 +557,99 @@ function Viewer({ model }: { model: Model3D }) {
         onDoubleClick={onDoubleClick}
         onContextMenu={(e) => e.preventDefault()}
       />
+      {/* Measurement overlay: screen-space, re-projected after every render (see the sync effect). */}
+      <svg ref={overlayRef} className="model-measure-overlay" data-testid="model-measure-overlay" aria-hidden="true">
+        <line id="m-line" style={{ display: "none" }} />
+        <circle id="m-a" r="5" style={{ display: "none" }} />
+        <circle id="m-b" r="5" style={{ display: "none" }} />
+      </svg>
+      <div ref={labelRef} className="model-measure-label" data-testid="model-measure-label" style={{ display: "none" }}>
+        {measured ? formatLength(measured.distance, displayUnit) : ""}
+      </div>
       <div className="model-toolbar" data-testid="model-toolbar">
-        <button className="btn ghost sm" title="Isometric (1)" onClick={() => fitAll("iso")}>
-          Iso
-        </button>
-        <button className="btn ghost sm" title="Top (2)" onClick={() => fitAll("top")}>
-          Top
-        </button>
-        <button className="btn ghost sm" title="Front (3)" onClick={() => fitAll("front")}>
-          Front
-        </button>
-        <button className="btn ghost sm" title="Right (4)" onClick={() => fitAll("right")}>
-          Right
-        </button>
+        <ToolButton title="Isometric (1)" label="Iso" icon={ICONS.iso} onClick={() => fitAll("iso")} />
+        <ToolButton title="Top (2)" label="Top" icon={ICONS.top} onClick={() => fitAll("top")} />
+        <ToolButton title="Front (3)" label="Front" icon={ICONS.front} onClick={() => fitAll("front")} />
+        <ToolButton title="Right (4)" label="Right" icon={ICONS.right} onClick={() => fitAll("right")} />
         <span className="model-toolbar-sep" />
-        <button className="btn ghost sm" title="Fit everything visible (F)" onClick={() => fitAll()}>
-          Fit
-        </button>
-        <button
-          className={`btn ghost sm ${showEdges ? "active" : ""}`}
+        <ToolButton title="Fit everything visible (F)" label="Fit" icon={ICONS.fit} onClick={() => fitAll()} />
+        <ToolButton
           title="Toggle B-rep edges (E)"
+          label="Edges"
+          icon={ICONS.edges}
+          active={showEdges}
           onClick={() => setShowEdges((v) => !v)}
-        >
-          Edges
-        </button>
-        <button
-          className="btn ghost sm"
+        />
+        <ToolButton
+          title="Measure the distance between two points — snaps to corners and edges (M)"
+          label="Measure"
+          icon={ICONS.measure}
+          active={measuring}
+          onClick={toggleMeasuring}
+          testId="model-measure-toggle"
+        />
+        <ToolButton
           title="Hide selected part (H)"
+          label="Hide"
+          icon={ICONS.hide}
           disabled={selected === null}
           onClick={() => {
             if (selected === null) return;
             setHidden((h) => new Set(h).add(selected));
             setSelected(null);
           }}
-        >
-          Hide
-        </button>
-        <button
-          className="btn ghost sm"
+        />
+        <ToolButton
           title="Show all hidden parts (Shift+H)"
+          label={`Show all${hidden.size > 0 ? ` (${hidden.size})` : ""}`}
+          icon={ICONS.showAll}
           disabled={hidden.size === 0}
           onClick={() => setHidden(new Set())}
-        >
-          Show all{hidden.size > 0 ? ` (${hidden.size})` : ""}
-        </button>
+        />
         <span className="model-toolbar-sep" />
-        <button
-          className={`btn ghost sm ${showParts ? "active" : ""}`}
+        <ToolButton
           title="Parts tree"
+          label="Parts"
+          icon={ICONS.parts}
+          active={showParts}
           onClick={() => setShowParts((v) => !v)}
-          data-testid="model-parts-toggle"
-        >
-          Parts
-        </button>
+          testId="model-parts-toggle"
+        />
       </div>
       <div className="model-status" data-testid="model-status">
-        <span>{model.parts.length} parts</span>
-        <span>{model.triangleCount.toLocaleString()} triangles</span>
-        <span title="Bounding box, X × Y × Z">{size}</span>
-        {statusPart !== null && (
-          <span className="model-status-part" data-testid="model-status-part">
-            {model.parts[statusPart].name}
-          </span>
+        {measuring ? (
+          <>
+            {measured && measure.a && measure.b ? (
+              <span className="model-status-measure" data-testid="model-measure-readout">
+                <b>{formatLength(measured.distance, displayUnit)}</b>
+                {" · ΔX "}
+                {formatLength(measured.dx, displayUnit)}
+                {" ΔY "}
+                {formatLength(measured.dy, displayUnit)}
+                {" ΔZ "}
+                {formatLength(measured.dz, displayUnit)}
+                <span className="model-status-snap">
+                  {" "}
+                  ({measure.a.snap} → {measure.b.snap})
+                </span>
+              </span>
+            ) : (
+              <span className="model-status-part">{measureHint}</span>
+            )}
+          </>
+        ) : (
+          <>
+            <span>{model.parts.length} parts</span>
+            <span>{model.triangleCount.toLocaleString()} triangles</span>
+            <span title={statusPart !== null ? "Part bounding box, X × Y × Z" : "Bounding box, X × Y × Z"}>
+              {statusPart !== null ? sizeOf(model.parts[statusPart].bounds) : size}
+            </span>
+            {statusPart !== null && (
+              <span className="model-status-part" data-testid="model-status-part">
+                {model.parts[statusPart].name}
+              </span>
+            )}
+          </>
         )}
       </div>
       {showParts && (
@@ -519,6 +674,98 @@ function Viewer({ model }: { model: Model3D }) {
     </div>
   );
 }
+
+/* ------------------------------- toolbar --------------------------------- */
+
+interface ToolButtonProps {
+  title: string;
+  label: string;
+  icon: JSX.Element;
+  active?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  testId?: string;
+}
+
+/** A toolbar button: icon + label. In touch mode the stylesheet stacks them into a big tile. */
+function ToolButton({ title, label, icon, active, disabled, onClick, testId }: ToolButtonProps) {
+  return (
+    <button
+      className={`btn ghost sm model-tool ${active ? "active" : ""}`}
+      title={title}
+      disabled={disabled}
+      onClick={onClick}
+      data-testid={testId}
+    >
+      {icon}
+      <span className="model-tool-label">{label}</span>
+    </button>
+  );
+}
+
+const stroke = { stroke: "currentColor", strokeWidth: 1.8, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" } as const;
+
+const ICONS = {
+  iso: (
+    <svg viewBox="0 0 24 24" width="18" height="18">
+      <path d="M12 3l8 4.5v9L12 21l-8-4.5v-9zM12 12l8-4.5M12 12L4 7.5M12 12v9" {...stroke} />
+    </svg>
+  ),
+  top: (
+    <svg viewBox="0 0 24 24" width="18" height="18">
+      <rect x="4" y="4" width="16" height="16" rx="1.5" {...stroke} />
+      <path d="M4 9h16" {...stroke} />
+    </svg>
+  ),
+  front: (
+    <svg viewBox="0 0 24 24" width="18" height="18">
+      <rect x="4" y="4" width="16" height="16" rx="1.5" {...stroke} />
+      <path d="M4 15h16" {...stroke} />
+    </svg>
+  ),
+  right: (
+    <svg viewBox="0 0 24 24" width="18" height="18">
+      <rect x="4" y="4" width="16" height="16" rx="1.5" {...stroke} />
+      <path d="M15 4v16" {...stroke} />
+    </svg>
+  ),
+  fit: (
+    <svg viewBox="0 0 24 24" width="18" height="18">
+      <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" {...stroke} />
+      <rect x="9" y="9" width="6" height="6" {...stroke} />
+    </svg>
+  ),
+  edges: (
+    <svg viewBox="0 0 24 24" width="18" height="18">
+      <path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z" {...stroke} />
+      <path d="M12 12l8-4.5M12 12L4 7.5M12 12v9" {...stroke} strokeDasharray="2 2" />
+    </svg>
+  ),
+  measure: (
+    <svg viewBox="0 0 24 24" width="18" height="18">
+      <path d="M3 17L17 3l4 4L7 21z" {...stroke} />
+      <path d="M8 12l2 2M11 9l2 2M14 6l2 2" {...stroke} />
+    </svg>
+  ),
+  hide: (
+    <svg viewBox="0 0 24 24" width="18" height="18">
+      <path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6z" {...stroke} />
+      <path d="M4 4l16 16" {...stroke} />
+    </svg>
+  ),
+  showAll: (
+    <svg viewBox="0 0 24 24" width="18" height="18">
+      <path d="M3 12s3.5-6 9-6 9 6 9 6-3.5 6-9 6-9-6-9-6z" {...stroke} />
+      <circle cx="12" cy="12" r="2.5" {...stroke} />
+    </svg>
+  ),
+  parts: (
+    <svg viewBox="0 0 24 24" width="18" height="18">
+      <path d="M5 5h5M5 12h5M5 19h5M14 5h5M14 12h5M14 19h5" {...stroke} />
+      <path d="M3 5h.01M3 12h.01M3 19h.01" {...stroke} strokeWidth="2.6" />
+    </svg>
+  ),
+};
 
 function visibleBounds(model: Model3D, hidden: Set<number>) {
   const parts = model.parts.filter((_, i) => !hidden.has(i));
