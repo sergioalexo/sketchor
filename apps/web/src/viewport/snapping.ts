@@ -2,7 +2,8 @@ import type { Point, SketchDocument } from "@sketchor/core";
 import { arcPointAt, arcSweep, bulgeToArc, closestPointOnSegment, dist, imageCorners, mid, polylineSegments } from "@sketchor/core";
 import { gridStep, type View } from "./view";
 
-export type SnapKind = "origin" | "endpoint" | "midpoint" | "center" | "quadrant" | "intersection" | "on-line" | "grid";
+/** "tracking" is not found by findSnap: the viewport produces it when ortho/polar projected the cursor (tools/tracking.ts). */
+export type SnapKind = "origin" | "endpoint" | "midpoint" | "center" | "quadrant" | "intersection" | "on-line" | "grid" | "tracking";
 
 export interface Snap {
   point: Point;

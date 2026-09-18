@@ -47,34 +47,19 @@ import { render } from "./renderer";
 import { setImageDecodeCallback } from "./imageCache";
 import { findSnap, snapMovingSelection, snapRotation, type Snap } from "./snapping";
 import { fitToBounds, screenToWorld, worldToScreen, zoomAt, type View } from "./view";
+import { getTool, type Pick, type ToolContext } from "../tools";
+import { applyTracking, trackingIncrement, useTracking } from "../tools/tracking";
+import { parseTypedInput, resolveTypedInput, startsTypedInput } from "../tools/typedInput";
 
 /**
  * The half-finished states a pan can interrupt. Panning or zooming mid-draw
  * must not throw the drawing away — you routinely need to scroll to where the
  * far end of a line goes — so a pan stashes one of these in its `resume` and
- * puts it back on pointer-up.
+ * puts it back on pointer-up. (The drawing tools on the tool framework —
+ * see ../tools — keep their own state and need no stashing; only the
+ * legacy measure/dim sequences still live here.)
  */
-type DrawInteraction =
-  | { kind: "draw-line"; start: Point }
-  | { kind: "draw-polyline"; points: Point[] }
-  | { kind: "draw-circle"; center: Point }
-  | { kind: "draw-rectangle"; corner: Point }
-  | { kind: "measure"; start: Point }
-  | { kind: "dim"; start: Point };
-
-/** The four corners of the axis-aligned rectangle between two opposite corners, clockwise from the min corner. */
-function rectFromCorners(a: Point, b: Point): Point[] {
-  const x0 = Math.min(a.x, b.x);
-  const y0 = Math.min(a.y, b.y);
-  const x1 = Math.max(a.x, b.x);
-  const y1 = Math.max(a.y, b.y);
-  return [
-    { x: x0, y: y0 },
-    { x: x1, y: y0 },
-    { x: x1, y: y1 },
-    { x: x0, y: y1 },
-  ];
-}
+type DrawInteraction = { kind: "measure"; start: Point } | { kind: "dim"; start: Point };
 
 type Interaction =
   | { kind: "idle" }
@@ -103,7 +88,7 @@ type Interaction =
   | { kind: "rotate-group"; ids: EntityId[]; pivot: Point; startAngle: number; rotation: number }
   | { kind: "box-select"; startScreen: Point; startWorld: Point; currentWorld: Point; additive: boolean };
 
-const DRAW_KINDS = ["draw-line", "draw-polyline", "draw-circle", "draw-rectangle", "measure", "dim"] as const;
+const DRAW_KINDS = ["measure", "dim"] as const;
 
 /** Narrows to the states worth preserving across a pan (see DrawInteraction). */
 function resumable(i: Interaction): DrawInteraction | { kind: "idle" } {
@@ -280,7 +265,13 @@ export function Viewport() {
    */
   const pendingTouchRef = useRef<React.PointerEvent | null>(null);
   const snapRef = useRef<Snap | null>(null);
+  /** The ortho/polar guide to draw, when the last pointer move was projected onto one. */
+  const trackingRayRef = useRef<{ from: Point; to: Point; angleDeg: number } | null>(null);
+  /** Last pointer position on the canvas, where the typed-coordinate box opens. */
+  const lastScreenRef = useRef<Point | null>(null);
   const hoverRef = useRef<EntityId | null>(null);
+  /** The typed-coordinate box (T-08), open while a framework tool waits for a point and the user has started typing. */
+  const [typed, setTyped] = useState<{ text: string; screen: Point } | null>(null);
   const closedRegionsRef = useRef<ClosedRegion[]>([]);
   const tool = useApp((s) => s.tool);
   const selection = useApp((s) => s.selection);
@@ -318,23 +309,8 @@ export function Viewport() {
     const interaction: Interaction = held.kind === "pan" || held.kind === "pinch" ? held.resume : held;
     const snap = snapRef.current;
 
-    let preview: Entity | null = null;
-    if (snap && interaction.kind === "draw-line") {
-      preview = { id: "preview", type: "line", a: interaction.start, b: snap.point };
-    } else if (snap && interaction.kind === "draw-circle") {
-      preview = {
-        id: "preview",
-        type: "circle",
-        center: interaction.center,
-        radius: dist(interaction.center, snap.point),
-      };
-    } else if (interaction.kind === "draw-polyline") {
-      // Committed vertices plus a rubber-band leg to the cursor.
-      const points = snap ? [...interaction.points, snap.point] : interaction.points;
-      if (points.length >= 2) preview = { id: "preview", type: "polyline", points, closed: false };
-    } else if (snap && interaction.kind === "draw-rectangle") {
-      preview = { id: "preview", type: "polyline", points: rectFromCorners(interaction.corner, snap.point), closed: true };
-    }
+    const activeTool = getTool(state.tool);
+    const preview: Entity[] = activeTool ? activeTool.preview(toolCtx, snap?.point ?? null) : [];
 
     const straightenPlan = state.tool === "straighten" ? computeStraightenTransform() : null;
 
@@ -354,6 +330,7 @@ export function Viewport() {
       selection: new Set(state.selection),
       preview,
       snap: state.tool === "select" ? null : snap,
+      trackingRay: activeTool ? trackingRayRef.current : null,
       moveOffset:
         interaction.kind === "move" ? { dx: interaction.dx, dy: interaction.dy } : null,
       measurement: state.measurement,
@@ -384,6 +361,73 @@ export function Viewport() {
           : null,
     });
   };
+
+  /** What a framework tool may touch (see ../tools/tool.ts). Stable for the component's life. */
+  const toolCtxRef = useRef<ToolContext | null>(null);
+  if (!toolCtxRef.current) {
+    toolCtxRef.current = {
+      doc,
+      execute: (command) => bus.execute(command),
+      commit: (commands) => {
+        if (commands.length === 1) bus.execute(commands[0]);
+        else if (commands.length > 1) bus.execute({ type: "batch", commands });
+      },
+      activeLayer: () => useApp.getState().activeLayer,
+      redraw: () => redraw(),
+      setTool: (id) => useApp.getState().setTool(id),
+    };
+  }
+  const toolCtx = toolCtxRef.current;
+
+  /** Pushes the active tool's prompt to the status bar. */
+  const syncPrompt = () => {
+    const app = useApp.getState();
+    const t = getTool(app.tool);
+    app.setPrompt(t ? t.prompt() : "");
+  };
+
+  /**
+   * Resolves a cursor position into what a tool receives: object snap,
+   * then ortho/polar tracking from the tool's anchor (a feature snap the
+   * cursor touched still wins — see tracking.ts). Also records the guide
+   * ray for the renderer.
+   */
+  const resolvePick = (world: Point, shiftKey: boolean): { snap: Snap; ray: typeof trackingRayRef.current } => {
+    const view = viewRef.current;
+    const raw = findSnap(doc, view, world);
+    const app = useApp.getState();
+    const t = getTool(app.tool);
+    if (!t) return { snap: raw, ray: null };
+    const tracked = applyTracking(t.anchor(), world, raw, trackingIncrement(useTracking.getState(), shiftKey));
+    if (!tracked.ray) return { snap: raw, ray: null };
+    return {
+      snap: { point: tracked.point, kind: "tracking" },
+      ray: { from: tracked.ray.from, to: tracked.point, angleDeg: tracked.ray.angleDeg },
+    };
+  };
+
+  const pickFrom = (e: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean; altKey: boolean }, world: Point, snap: Snap): Pick => ({
+    point: snap.point,
+    world,
+    snap,
+    shiftKey: e.shiftKey,
+    ctrlKey: e.ctrlKey || e.metaKey,
+    altKey: e.altKey,
+  });
+
+  // Switching tools drops the previous tool's half-finished sequence and
+  // shows the new one's prompt.
+  const prevToolRef = useRef(tool);
+  useEffect(() => {
+    if (prevToolRef.current !== tool) {
+      getTool(prevToolRef.current)?.cancel(toolCtx);
+      prevToolRef.current = tool;
+      setTyped(null);
+    }
+    trackingRayRef.current = null;
+    syncPrompt();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tool]);
 
   // Initial placement of the origin + resize handling
   useEffect(() => {
@@ -572,15 +616,22 @@ export function Viewport() {
       } else if (matchesBinding(e, "edit.redo")) {
         bus.redo();
         e.preventDefault();
-      } else if (e.key === "Enter" && interactionRef.current.kind === "draw-polyline") {
-        finishPolyline(false);
-      } else if (e.key.toLowerCase() === "c" && !e.shiftKey && interactionRef.current.kind === "draw-polyline") {
-        // While drawing, C closes the shape rather than switching to the circle tool.
-        finishPolyline(true);
-      } else if (e.key === "Backspace" && interactionRef.current.kind === "draw-polyline") {
-        const points = interactionRef.current.points.slice(0, -1);
-        interactionRef.current = points.length > 0 ? { kind: "draw-polyline", points } : { kind: "idle" };
+      } else if (matchesBinding(e, "view.ortho")) {
+        e.preventDefault();
+        useTracking.getState().toggleOrtho();
+      } else if (matchesBinding(e, "view.polar")) {
+        e.preventDefault();
+        useTracking.getState().togglePolar();
+      } else if (getTool(app.tool)?.key?.(toolCtx, e)) {
+        // The active tool's own keys (finish/close a polyline, arc modes, ...) come before the global ones.
+        e.preventDefault();
+        syncPrompt();
         redraw();
+      } else if (getTool(app.tool) && startsTypedInput(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        // Start of a typed coordinate: open the box with this character in it.
+        e.preventDefault();
+        const screen = lastScreenRef.current ?? { x: 40, y: 40 };
+        setTyped({ text: e.key, screen });
       } else if (e.key === "Delete" || e.key === "Backspace") {
         if (app.selection.length > 0) {
           bus.execute({ type: "delete-entities", ids: app.selection });
@@ -589,6 +640,8 @@ export function Viewport() {
         // One key that always gets you back to a known-safe state: abandon
         // whatever is half-drawn, drop the selection, and fall back to the
         // select tool so the next stray click can't add geometry.
+        getTool(app.tool)?.cancel(toolCtx);
+        setTyped(null);
         interactionRef.current = { kind: "idle" };
         app.setSelection([]);
         app.setMeasurement(null);
@@ -608,6 +661,8 @@ export function Viewport() {
         app.setTool("rectangle");
       } else if (matchesBinding(e, "tool.circle")) {
         app.setTool("circle");
+      } else if (matchesBinding(e, "tool.arc")) {
+        app.setTool("arc");
       } else if (matchesBinding(e, "tool.point")) {
         app.setTool("point");
       } else if (matchesBinding(e, "tool.image")) {
@@ -638,28 +693,6 @@ export function Viewport() {
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  /** Commits an in-progress polyline (needs 2+ vertices) and resets the interaction. No-op otherwise. */
-  const finishPolyline = (closed: boolean): void => {
-    const interaction = interactionRef.current;
-    if (interaction.kind !== "draw-polyline") return;
-    const app = useApp.getState();
-    if (interaction.points.length >= 2) {
-      bus.execute({
-        type: "add-entity",
-        entity: {
-          id: newEntityId(),
-          type: "polyline",
-          name: nextEntityName(doc, "polyline"),
-          ...activeLayerProp(app.activeLayer),
-          points: interaction.points,
-          closed: closed && interaction.points.length >= 3,
-        },
-      });
-    }
-    interactionRef.current = { kind: "idle" };
-    redraw();
-  };
 
   const screenPos = (e: React.PointerEvent): Point => {
     const rect = canvasRef.current!.getBoundingClientRect();
@@ -695,10 +728,13 @@ export function Viewport() {
     const now = performance.now();
     if (prev && now - prev.at < 350 && dist(prev.screen, screen) < 30) {
       lastTapRef.current = null;
-      if (interactionRef.current.kind === "draw-polyline") {
-        finishPolyline(false);
+      const world = screenToWorld(viewRef.current, screen);
+      const t = getTool(useApp.getState().tool);
+      if (t?.doubleClick?.(toolCtx, pickFrom(e, world, resolvePick(world, e.shiftKey).snap))) {
+        syncPrompt();
+        redraw();
       } else {
-        const hit = hitTest(viewRef.current, screenToWorld(viewRef.current, screen));
+        const hit = hitTest(viewRef.current, world);
         fitView(hit ? [hit] : undefined);
       }
       return;
@@ -750,100 +786,28 @@ export function Viewport() {
       }
     }
 
+    const fwTool = getTool(app.tool);
+    if (fwTool) {
+      const { snap } = resolvePick(world, e.shiftKey);
+      fwTool.pick(toolCtx, pickFrom(e, world, snap));
+      setTyped(null);
+      syncPrompt();
+      redraw();
+      return;
+    }
+
     const snapped = findSnap(doc, view, world).point;
     const interaction = interactionRef.current;
 
     switch (app.tool) {
-      case "line": {
-        if (interaction.kind === "draw-line") {
-          if (dist(interaction.start, snapped) > 0) {
-            bus.execute({
-              type: "add-entity",
-              entity: {
-                id: newEntityId(),
-                type: "line",
-                name: nextEntityName(doc, "line"),
-                ...activeLayerProp(app.activeLayer),
-                a: interaction.start,
-                b: snapped,
-              },
-            });
-          }
-          interactionRef.current = { kind: "draw-line", start: snapped };
-        } else {
-          interactionRef.current = { kind: "draw-line", start: snapped };
-        }
+      case "line":
+      case "polyline":
+      case "circle":
+      case "arc":
+      case "rectangle":
+      case "point":
+        // On the tool framework; dispatched above.
         break;
-      }
-      case "polyline": {
-        if (interaction.kind === "draw-polyline") {
-          // Ignore a repeat click on the vertex just placed (double-click finishes instead, see onDoubleClick).
-          const last = interaction.points[interaction.points.length - 1];
-          if (dist(last, snapped) > 0) {
-            interactionRef.current = { kind: "draw-polyline", points: [...interaction.points, snapped] };
-          }
-        } else {
-          interactionRef.current = { kind: "draw-polyline", points: [snapped] };
-        }
-        break;
-      }
-      case "circle": {
-        if (interaction.kind === "draw-circle") {
-          const radius = dist(interaction.center, snapped);
-          if (radius > 0) {
-            bus.execute({
-              type: "add-entity",
-              entity: {
-                id: newEntityId(),
-                type: "circle",
-                name: nextEntityName(doc, "circle"),
-                ...activeLayerProp(app.activeLayer),
-                center: interaction.center,
-                radius,
-              },
-            });
-          }
-          interactionRef.current = { kind: "idle" };
-        } else {
-          interactionRef.current = { kind: "draw-circle", center: snapped };
-        }
-        break;
-      }
-      case "rectangle": {
-        if (interaction.kind === "draw-rectangle") {
-          const points = rectFromCorners(interaction.corner, snapped);
-          if (dist(interaction.corner, snapped) > 0) {
-            bus.execute({
-              type: "add-entity",
-              entity: {
-                id: newEntityId(),
-                type: "polyline",
-                name: nextEntityName(doc, "polyline"),
-                ...activeLayerProp(app.activeLayer),
-                points,
-                closed: true,
-              },
-            });
-          }
-          interactionRef.current = { kind: "idle" };
-        } else {
-          interactionRef.current = { kind: "draw-rectangle", corner: snapped };
-        }
-        break;
-      }
-      case "point": {
-        bus.execute({
-          type: "add-entity",
-          entity: {
-            id: newEntityId(),
-            type: "point",
-            name: nextEntityName(doc, "point"),
-            ...activeLayerProp(app.activeLayer),
-            p: snapped,
-          },
-        });
-        break;
-      }
       case "image": {
         // A file picker, not a two-click draw — insert at the point clicked
         // once a file is actually chosen, then drop back to the select tool
@@ -1207,8 +1171,11 @@ export function Viewport() {
       interactionRef.current = { ...interaction, currentWorld: world };
     }
 
-    const snap = findSnap(doc, view, world);
+    lastScreenRef.current = screen;
+    const resolved = resolvePick(world, e.shiftKey);
+    const snap = resolved.snap;
     snapRef.current = snap;
+    trackingRayRef.current = resolved.ray;
     hoverRef.current = app.tool === "measure" ? hitTest(view, world) : null;
     if (interaction.kind === "measure" || interaction.kind === "dim") {
       app.setMeasurement({ kind: "distance", a: interaction.start, b: snap.point });
@@ -1346,9 +1313,11 @@ export function Viewport() {
     const hit = hitTest(viewRef.current, world);
     const app = useApp.getState();
 
-    // Finishing a polyline takes priority over the zoom-to-fit / enter-group behavior below.
-    if (interactionRef.current.kind === "draw-polyline") {
-      finishPolyline(false);
+    // A tool's own double-click (finishing a polyline) takes priority over the zoom-to-fit / enter-group behavior below.
+    const t = getTool(app.tool);
+    if (t?.doubleClick?.(toolCtx, pickFrom(e, world, resolvePick(world, e.shiftKey).snap))) {
+      syncPrompt();
+      redraw();
       return;
     }
 
@@ -1390,6 +1359,39 @@ export function Viewport() {
         onDoubleClick={onDoubleClick}
         onContextMenu={(e) => e.preventDefault()}
       />
+      {typed && (
+        <TypedInputBox
+          value={typed.text}
+          screen={typed.screen}
+          onChange={(text) => {
+            setTyped({ text, screen: typed.screen });
+            // Live preview of where the typed point would land.
+            const t = getTool(useApp.getState().tool);
+            const parsed = parseTypedInput(text, useApp.getState().displayUnit);
+            const cursor = lastScreenRef.current ? screenToWorld(viewRef.current, lastScreenRef.current) : null;
+            const point = t && parsed ? resolveTypedInput(parsed, t.anchor(), cursor) : null;
+            if (point) snapRef.current = { point, kind: "tracking" };
+            redraw();
+          }}
+          onCommit={(text) => {
+            const app = useApp.getState();
+            const t = getTool(app.tool);
+            const parsed = parseTypedInput(text, app.displayUnit);
+            const cursor = lastScreenRef.current ? screenToWorld(viewRef.current, lastScreenRef.current) : null;
+            const point = t && parsed ? resolveTypedInput(parsed, t.anchor(), cursor) : null;
+            if (!t || !point) return false;
+            t.pick(toolCtx, { point, world: point, snap: null, shiftKey: false, ctrlKey: false, altKey: false });
+            setTyped(null);
+            syncPrompt();
+            redraw();
+            return true;
+          }}
+          onCancel={() => {
+            setTyped(null);
+            redraw();
+          }}
+        />
+      )}
       {textEdit && (
         <input
           className="text-editor"
@@ -1412,5 +1414,50 @@ export function Viewport() {
         />
       )}
     </>
+  );
+}
+
+/**
+ * The floating coordinate box (T-08). Opens at the cursor with the first
+ * typed character already in it; Enter commits when the text parses,
+ * Escape closes. Kept minimal on purpose — the grammar is the UI.
+ */
+function TypedInputBox({
+  value,
+  screen,
+  onChange,
+  onCommit,
+  onCancel,
+}: {
+  value: string;
+  screen: Point;
+  onChange: (text: string) => void;
+  onCommit: (text: string) => boolean;
+  onCancel: () => void;
+}) {
+  const [bad, setBad] = useState(false);
+  return (
+    <div className="typed-input" style={{ left: screen.x + 16, top: screen.y + 16 }} data-testid="typed-input">
+      <input
+        className={bad ? "invalid" : ""}
+        autoFocus
+        value={value}
+        spellCheck={false}
+        onChange={(ev) => {
+          setBad(false);
+          onChange(ev.target.value);
+        }}
+        onKeyDown={(ev) => {
+          if (ev.key === "Enter") {
+            if (!onCommit(value)) setBad(true);
+          } else if (ev.key === "Escape") {
+            onCancel();
+          }
+          ev.stopPropagation();
+        }}
+        onBlur={onCancel}
+      />
+      <div className="typed-input-hint">length · len&lt;angle · x,y · @dx,dy</div>
+    </div>
   );
 }

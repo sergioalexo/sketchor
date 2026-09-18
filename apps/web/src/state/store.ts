@@ -256,6 +256,7 @@ export type ToolId =
   | "polyline"
   | "rectangle"
   | "circle"
+  | "arc"
   | "point"
   | "image"
   | "measure"
@@ -267,10 +268,11 @@ export type ToolId =
 
 export const TOOL_HINTS: Record<ToolId, string> = {
   select: "Click to select (Shift adds) - drag left-to-right to window-select, right-to-left to crossing-select - drag to move - Del deletes - G groups - U ungroups - Shift+C toggles the selection between construction (dashed) and normal lines",
-  line: "Click start point, then click next points to chain - middle/right-drag pans and the wheel zooms without losing the line - Esc finishes and returns to the select tool",
-  polyline: "Click each vertex - Enter or double-click to finish, C to close the shape, Backspace undoes the last vertex, middle/right-drag pans without losing it, Esc cancels and returns to the select tool",
+  line: "Click start point, then click next points to chain - or type a length, 100<45, @dx,dy - F8 ortho, F10 polar - Esc finishes and returns to the select tool",
+  polyline: "Click each vertex - A switches to an arc leg (two clicks: through-point, end), T to a tangent arc, L back to lines - Enter or double-click to finish, C to close, Backspace undoes the last vertex",
   rectangle: "Click one corner, then click the opposite corner",
-  circle: "Click center, then click a point on the circle",
+  circle: "Click center, then click a point on the circle - or type the radius",
+  arc: "Three-point arc: click start, end, then a point on the arc - Tab cycles to center-start-end (Shift-click for clockwise) and tangent arc (click near the end of a line or arc, then the end point)",
   point: "Click to place a point",
   image: "Click where the image goes, then pick a picture file — drops back to the select tool once it's placed",
   measure: "Click two points to measure distance (snaps to endpoints, midpoints, centers, on-line points, intersections) - Ctrl-click a line to set it as the angle reference - Alt-click a line/circle/arc for its whole length/radius, Shift-Alt-click more lines/arcs to total - click inside a closed area for its area+perimeter - Ctrl+C copies the readout",
@@ -579,6 +581,9 @@ interface AppState {
   fitRequestId: number;
   requestFit: () => void;
   setTool: (tool: ToolId) => void;
+  /** The active tool's status-bar prompt ("Specify next point"); "" when the tool has none. */
+  prompt: string;
+  setPrompt: (prompt: string) => void;
   setSelection: (ids: EntityId[]) => void;
   setCursor: (cursor: { x: number; y: number } | null) => void;
   setZoom: (zoom: number) => void;
@@ -666,6 +671,8 @@ export const useApp = create<AppState>((set, get) => ({
   requestFit: () => set((s) => ({ fitRequestId: s.fitRequestId + 1 })),
   // Switching tools invalidates any in-progress reference-edge pick or entered group.
   setTool: (tool) => set({ tool, referenceEdgeId: null, referenceEdgeSegment: null, enteredGroupId: null }),
+  prompt: "",
+  setPrompt: (prompt) => set((s) => (s.prompt === prompt ? s : { prompt })),
   setSelection: (selection) => set({ selection }),
   setCursor: (cursor) => set({ cursor }),
   setZoom: (zoom) => set({ zoom }),

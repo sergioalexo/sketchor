@@ -130,6 +130,36 @@ the worker imports the vendored `.mjs`/`.wasm` directly. So:
 
 Debug: `window.sketchor.openModel(name, arrayBuffer)` / `getModel()`.
 
+## Tools (`apps/web/src/tools/`)
+
+Drawing tools are state machines on the framework in `tools/tool.ts`
+(`Tool`: `prompt/busy/anchor/cancel/pick/doubleClick?/key?/preview`), one
+instance each in `tools/index.ts`; `Viewport.tsx` decodes input (object
+snap → ortho/polar tracking → typed coordinates → touch deferral) and hands
+the tool finished `Pick`s, draws `preview()` dashed, and shows `prompt()`
+in the status bar. Tools not yet migrated (select, measure, text, image,
+fill, straighten, dim, pan) still run as `case`s in `Viewport.tsx`'s
+pointer handlers — `getTool()` returns null for those. Migrating one means
+moving its case into a class and deleting its `interaction` kind.
+
+Rules for a new tool (roadmap T-00):
+1. Geometry math is a pure function in `packages/core` with a test
+   (`arcs.ts` is the model). The tool only collects picks and calls it.
+2. Emit `Command`s through `ctx.execute`/`ctx.commit` — never mutate entities.
+3. `anchor()` is what relative typed input (`@dx,dy`, a bare length) and
+   ortho/polar measure from; return null for a pick that must not be
+   constrained (a 3-point arc's on-arc pick).
+4. Tool-local keys go in `key()`, which runs before the global bindings —
+   but only consume a key while `busy()`, or you steal a tool shortcut
+   (polyline's A/T/L are only live mid-polyline; the arc tool cycles modes
+   with Tab for the same reason). Digits, `@`, `-`, `.` open the typed
+   coordinate box (`typedInput.ts`) and are never tool keys.
+5. `cancel()` must leave the tool idle; Esc calls it, then falls back to
+   the select tool as before.
+
+`docs/sketching-tools-roadmap.md` is the backlog (T-xx ids); its progress
+log at the top says what's done.
+
 ## Touch (`apps/web/src/touchMode.ts`)
 
 Gestures work everywhere, regardless of the setting: in the 2D viewport one

@@ -2424,3 +2424,84 @@ kbd.shortcut-key-fixed {
     padding: 5px 10px;
   }
 }
+
+/* ---------- tool framework: prompt, tracking, typed input ---------- */
+
+.tool-prompt {
+  color: var(--text);
+}
+
+.tracking-toggles {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.tracking-toggle {
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.tracking-toggle:hover {
+  background: var(--border);
+}
+
+.tracking-toggle.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: #9ec1ff;
+}
+
+.app.touch .tracking-toggle {
+  min-height: 36px;
+  padding: 4px 12px;
+  font-size: 13px;
+}
+
+.typed-input {
+  position: absolute;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px;
+  background: var(--panel);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+}
+
+.typed-input input {
+  width: 150px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  outline: none;
+}
+
+.typed-input input.invalid {
+  border-color: #e5484d;
+}
+
+.typed-input-hint {
+  color: var(--text-dim);
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.app.touch .typed-input input {
+  width: 200px;
+  padding: 8px 10px;
+  font-size: 16px;
+}

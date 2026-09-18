@@ -24,9 +24,11 @@ export interface TransformPreview {
 
 export interface RenderUiState {
   selection: ReadonlySet<EntityId>;
-  /** Entity being drawn right now (not yet in the document). */
-  preview: Entity | null;
+  /** Entities being drawn right now (not yet in the document) — the active tool's live preview, dashed. */
+  preview: readonly Entity[];
   snap: Snap | null;
+  /** Ortho/polar guide: dashed ray from the tool's anchor through the tracked point, with the angle. */
+  trackingRay: { from: Point; to: Point; angleDeg: number } | null;
   /** Live offset while dragging a selection. */
   moveOffset: { dx: number; dy: number } | null;
   /** Active measure-tool result overlay, if any. */
@@ -150,11 +152,13 @@ export function render(
     ctx.setLineDash([]);
   }
 
-  if (ui.preview) {
+  if (ui.preview.length > 0) {
     ctx.setLineDash([6, 4]);
-    drawEntity(ctx, view, ui.preview, COLORS.preview, 1.25);
+    for (const p of ui.preview) drawEntity(ctx, view, p, COLORS.preview, 1.25);
     ctx.setLineDash([]);
   }
+
+  if (ui.trackingRay) drawTrackingRay(ctx, width, height, view, ui.trackingRay);
 
   // Drawn over the geometry, like a CAD axis icon: geometry frequently runs
   // straight through the origin, and a reference marker hidden underneath it
@@ -760,6 +764,53 @@ function drawSnapMarker(ctx: CanvasRenderingContext2D, view: View, snap: Snap): 
       ctx.moveTo(s.x, s.y - 4);
       ctx.lineTo(s.x, s.y + 4);
       break;
+    case "tracking":
+      // A diamond: the point is on a guide, not on geometry.
+      ctx.moveTo(s.x, s.y - 6);
+      ctx.lineTo(s.x + 6, s.y);
+      ctx.lineTo(s.x, s.y + 6);
+      ctx.lineTo(s.x - 6, s.y);
+      ctx.closePath();
+      break;
   }
   ctx.stroke();
+}
+
+/**
+ * The ortho/polar guide: a faint dashed ray from the anchor out past the
+ * tracked point to the edge of the canvas, and the angle next to the point
+ * (AutoCAD's polar tooltip).
+ */
+function drawTrackingRay(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  view: View,
+  ray: { from: Point; to: Point; angleDeg: number },
+): void {
+  const a = worldToScreen(view, ray.from);
+  const b = worldToScreen(view, ray.to);
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-6) return;
+  const reach = width + height;
+  const end = { x: a.x + (dx / len) * reach, y: a.y + (dy / len) * reach };
+  ctx.save();
+  ctx.strokeStyle = COLORS.snap;
+  ctx.globalAlpha = 0.55;
+  ctx.lineWidth = 1;
+  ctx.setLineDash([2, 4]);
+  ctx.beginPath();
+  ctx.moveTo(a.x, a.y);
+  ctx.lineTo(end.x, end.y);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = COLORS.snap;
+  ctx.font = "11px system-ui, sans-serif";
+  ctx.textBaseline = "bottom";
+  const label = `${Number.isInteger(ray.angleDeg) ? ray.angleDeg : ray.angleDeg.toFixed(1)}°`;
+  ctx.fillText(label, b.x + 10, b.y - 8);
+  ctx.restore();
 }

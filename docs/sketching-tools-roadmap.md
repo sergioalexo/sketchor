@@ -6,6 +6,12 @@ This document is the gap analysis + build order. Each item has an ID (`T-xx`) so
 
 Status as of 2026-09-11 (`main` @ v0.14.4).
 
+### Progress log
+
+| Date | Items | Notes |
+|---|---|---|
+| 2026-09-18 | **T-00** (partial), **T-08** (core), **T-09**, **T-01**, **T-03** | Tool framework in `apps/web/src/tools/` (`tool.ts` interface, `index.ts` registry, `drawTools.ts`); line/polyline/rectangle/circle/point migrated, select/measure/text/image/fill/straighten/dim/pan still on the legacy switch in `Viewport.tsx`. Typed input: floating box (digits/`@`/`-`/`.` open it), grammar `100`, `100<45`, `x,y`, `@dx,dy`, unit suffixes and feet-inches (`typedInput.ts`, tested); no docked command line, no post-commit quick-edit, no relative-zero yet. Ortho/polar: F8/F10, Shift = temporary ortho, status-bar toggles, dashed guide + angle (`tracking.ts`, tested). Arc tool: 3-point / center-start-end / tangent, Tab cycles (`packages/core/src/arcs.ts`, tested). Polyline `A`/`T`/`L` arc legs stored as bulges. T-21 not started. |
+
 ---
 
 ## 0. What exists today (baseline)
@@ -135,7 +141,7 @@ Sizes: **S** ≤ 2 days · **M** ≤ 1 week · **L** 1–3 weeks. Estimates assu
 
 ## 3. Phase 1 — Foundation
 
-### T-00 · Tool framework refactor — **P0, M**
+### T-00 · Tool framework refactor — **P0, M** — 🟡 framework + draw tools done 2026-09-18; legacy tools still to migrate
 
 **Why first:** every tool below is a small state machine (prompt → pick → pick → commit). Today they live as `case "line"` / `case "circle"` branches inside `Viewport.tsx`'s pointer handlers plus an `interaction` union. Twenty more tools that way is unmaintainable.
 
@@ -162,7 +168,7 @@ Sizes: **S** ≤ 2 days · **M** ≤ 1 week · **L** 1–3 weeks. Estimates assu
 3. Every new entity *type* touches the five exhaustive spots listed in the existing CLAUDE.md landmine note (`dxf.ts` ×2, `svg.ts`, `Viewport.tsx` hitTest, `renderer.ts`, `snapping.ts`, `boxSelect.ts`, `sketchtext.ts`, `pattern.ts`).
 4. Esc always cancels; Enter/Space repeats the last tool (AutoCAD habit); right-click = Enter while a tool is active.
 
-### T-08 · Dynamic input / command line — **P0, M**
+### T-08 · Dynamic input / command line — **P0, M** — 🟡 floating box + grammar done 2026-09-18; command line, quick-edit, relative-zero open
 
 **Ref:** AutoCAD DYN (floating boxes next to cursor, Tab cycles length↔angle) + Onshape's "type a number right after placing" + LibreCAD's command line for absolute/relative coordinates.
 
@@ -175,7 +181,7 @@ Sizes: **S** ≤ 2 days · **M** ≤ 1 week · **L** 1–3 weeks. Estimates assu
 
 **Where:** `apps/web/src/tools/typedInput.ts` (parser, pure + tests) · `TypedInputBox.tsx` overlay · tools receive `onInput`.
 
-### T-09 · Ortho and polar tracking — **P0, S**
+### T-09 · Ortho and polar tracking — **P0, S** — ✅ 2026-09-18
 
 **Ref:** AutoCAD F8/F10.
 
@@ -193,7 +199,7 @@ Snap settings popover: checkbox per kind, persisted in `localStorage` like keybi
 
 ## 4. Phase 2 — Core draw and modify tools
 
-### T-01 · Arc tool — **P0, S**
+### T-01 · Arc tool — **P0, S** — ✅ 2026-09-18
 
 `ArcEntity` already exists (`center, radius, start, end, ccw`). Tool modes (dropdown on the tool button, or sub-keys): **3-point** (start, end, point-on-arc — Onshape default), **center–start–end**, **tangent arc** (continues from the end of the last drawn line/arc tangentially — Onshape's most-used mode; also auto-triggered when the polyline tool is in arc mode). Core: `arcFrom3Points`, `arcFromCenterStartEnd` in `geometry.ts` + tests. The sketch-code DSL already has an `arc` statement, so no grammar work is needed.
 
@@ -201,7 +207,7 @@ Snap settings popover: checkbox per kind, persisted in `localStorage` like keybi
 
 Modes: center–radius (typed radius via T-08), center–diameter, 2-point (diameter ends), 3-point, **tan-tan-radius** (pick two entities + radius; core: `circleTangentToTwo` — solve the 4 candidate circles and pick the one nearest the two click points). Sub-mode key while the tool is active; persists per tool.
 
-### T-03 · Polyline arc segments — **P1, S**
+### T-03 · Polyline arc segments — **P1, S** — ✅ 2026-09-18
 
 In the polyline tool, `A` switches to arc mode (tangent-continuation, or 3-point via a second key), `L` back to line. Stores as `bulges[]` on the existing `PolylineEntity` — no model change. This is how AutoCAD PLINE works and it's what makes slots/rounded outlines drawable in one entity.
 

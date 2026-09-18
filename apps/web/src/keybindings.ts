@@ -25,6 +25,7 @@ export const ACTIONS: ActionDef[] = [
   { id: "tool.polyline", label: "Polyline tool", group: "Tools" },
   { id: "tool.rectangle", label: "Rectangle tool", group: "Tools" },
   { id: "tool.circle", label: "Circle tool", group: "Tools" },
+  { id: "tool.arc", label: "Arc tool", group: "Tools" },
   { id: "tool.point", label: "Point tool", group: "Tools" },
   { id: "tool.image", label: "Image tool", group: "Tools" },
   { id: "tool.measure", label: "Measure tool", group: "Tools" },
@@ -43,6 +44,8 @@ export const ACTIONS: ActionDef[] = [
   { id: "edit.group", label: "Group selection", group: "Edit" },
   { id: "edit.ungroup", label: "Ungroup selection", group: "Edit" },
   { id: "view.fit", label: "Fit view to selection", group: "View" },
+  { id: "view.ortho", label: "Ortho mode (constrain to 0/90°)", group: "View" },
+  { id: "view.polar", label: "Polar tracking (snap to angle increments)", group: "View" },
   { id: "app.commandPalette", label: "Command palette", group: "App" },
   { id: "app.truckNesting", label: "Truck Load Planner", group: "App" },
   { id: "app.shortcuts", label: "Keyboard shortcuts", group: "App" },
@@ -69,6 +72,8 @@ export const FIXED_SHORTCUTS: { label: string; description: string }[] = [
   { label: "Escape", description: "Cancel whatever's half-drawn, clear the selection, and return to the select tool" },
   { label: "Delete / Backspace", description: "Delete the current selection (not while a polyline is mid-draw)" },
   { label: "Enter", description: "Finish a polyline, apply the straighten tool, or pin a measurement — whichever is active" },
+  { label: "Typing a number while drawing", description: "Opens the coordinate box: 100 (length toward the cursor), 100<45 (polar), 50,20 (absolute), @50,20 (relative); units like 4in or 2'6\" accepted" },
+  { label: "Shift while drawing", description: "Temporary ortho — the next point is constrained to 0/90/180/270°" },
 ];
 
 export const DEFAULT_BINDINGS: Record<string, string> = {
@@ -77,6 +82,7 @@ export const DEFAULT_BINDINGS: Record<string, string> = {
   "tool.polyline": "w",
   "tool.rectangle": "r",
   "tool.circle": "c",
+  "tool.arc": "a",
   "tool.point": "p",
   "tool.image": "i",
   "tool.measure": "m",
@@ -95,6 +101,8 @@ export const DEFAULT_BINDINGS: Record<string, string> = {
   "edit.group": "g",
   "edit.ungroup": "u",
   "view.fit": "f",
+  "view.ortho": "f8",
+  "view.polar": "f10",
   "app.commandPalette": "ctrl+k",
   "app.truckNesting": "",
   "app.shortcuts": "",

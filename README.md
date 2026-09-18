@@ -15,8 +15,11 @@ npm run desktop    # native desktop window via Tauri (needs Rust toolchain)
 | Action | Input |
 |---|---|
 | Line tool | `L` — click points to chain, `Esc` to finish |
-| Polyline tool | `W` — click each vertex; `Enter` or double-click finishes, `C` closes the shape, `Backspace` undoes a vertex |
-| Circle tool | `C` — click center, then a point on the circle |
+| Polyline tool | `W` — click each vertex; `A` makes the next leg an arc (through-point, then end), `T` a tangent arc, `L` back to straight; `Enter` or double-click finishes, `C` closes the shape, `Backspace` undoes a vertex |
+| Circle tool | `C` — click center, then a point on the circle (or type the radius) |
+| Arc tool | `A` — three-point (start, end, point on the arc); `Tab` cycles to center-start-end and tangent-continuation |
+| Typed coordinates | while drawing, type `100` (length toward the cursor), `100<45`, `50,20`, `@50,20` — units like `4in`, `2'6"` accepted |
+| Ortho / polar | `F8` / `F10` (or the status-bar toggles); `Shift` held is temporary ortho |
 | Select tool | `V` — click (Shift adds), drag to move, `Del` deletes |
 | Measure tool | `M` — see below |
 | Pan | middle- or right-button drag, the Pan tool, or two fingers |

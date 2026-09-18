@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useState } from "react";
 import { freeEndpointEntityIds } from "@sketchor/core";
 import { bus, doc, getSessions, isModelSession, measurementText, TOOL_HINTS, useApp, type ToolId } from "./state/store";
 import { useTouchMode } from "./touchMode";
+import { POLAR_INCREMENTS, useTracking } from "./tools/tracking";
 import { activeSaveTarget, openDrawing, overlayDrawing, saveCurrent, saveDrawing } from "./io/drawingFile";
 import { DISPLAY_UNITS, formatLength, type DisplayUnit } from "./units";
 import { Viewport } from "./viewport/Viewport";
@@ -92,6 +93,19 @@ const TOOLS: { id: ToolId; label: string; keyHint: string; icon: JSX.Element }[]
       <svg viewBox="0 0 24 24" width="20" height="20">
         <circle cx="12" cy="12" r="8" stroke="currentColor" strokeWidth="2" fill="none" />
         <circle cx="12" cy="12" r="1.6" fill="currentColor" />
+      </svg>
+    ),
+  },
+  {
+    id: "arc",
+    label: "Arc",
+    keyHint: "A",
+    icon: (
+      <svg viewBox="0 0 24 24" width="20" height="20">
+        <path d="M4 18A9 9 0 0 1 20 12" stroke="currentColor" strokeWidth="2" fill="none" strokeLinecap="round" />
+        <circle cx="4" cy="18" r="1.6" fill="currentColor" />
+        <circle cx="20" cy="12" r="1.6" fill="currentColor" />
+        <circle cx="10.5" cy="11.8" r="1.6" fill="currentColor" />
       </svg>
     ),
   },
@@ -314,6 +328,13 @@ export function App() {
   const [showShortcuts, setShowShortcuts] = useState(false);
   const touchMode = useTouchMode((s) => s.enabled);
   const toggleTouchMode = useTouchMode((s) => s.toggle);
+  const prompt = useApp((s) => s.prompt);
+  const ortho = useTracking((s) => s.ortho);
+  const polar = useTracking((s) => s.polar);
+  const polarIncrement = useTracking((s) => s.polarIncrement);
+  const toggleOrtho = useTracking((s) => s.toggleOrtho);
+  const togglePolar = useTracking((s) => s.togglePolar);
+  const setPolarIncrement = useTracking((s) => s.setPolarIncrement);
   const [rebindTarget, setRebindTarget] = useState<{ actionId: string; x: number; y: number } | null>(null);
   const keyBindings = useKeybindings((s) => s.bindings);
   // Right-click any bindable toolbar button to reassign its shortcut.
@@ -949,7 +970,49 @@ export function App() {
             </option>
           ))}
         </select>
+        {!modelTab && (
+          <span className="tracking-toggles" data-testid="tracking-toggles">
+            <button
+              className={`tracking-toggle ${ortho ? "active" : ""}`}
+              title={withKey("Ortho: constrain the next point to 0/90/180/270° from the last one — Shift held does the same temporarily", "view.ortho")}
+              data-testid="toggle-ortho"
+              onClick={toggleOrtho}
+              onContextMenu={rebind("view.ortho")}
+            >
+              ORTHO
+            </button>
+            <button
+              className={`tracking-toggle ${polar ? "active" : ""}`}
+              title={withKey("Polar tracking: snap the next point to angle increments from the last one", "view.polar")}
+              data-testid="toggle-polar"
+              onClick={togglePolar}
+              onContextMenu={rebind("view.polar")}
+            >
+              POLAR
+            </button>
+            {polar && (
+              <select
+                className="unit-select"
+                title="Polar increment"
+                data-testid="polar-increment"
+                value={polarIncrement}
+                onChange={(e) => setPolarIncrement(Number(e.target.value))}
+              >
+                {POLAR_INCREMENTS.map((deg) => (
+                  <option key={deg} value={deg}>
+                    {deg}°
+                  </option>
+                ))}
+              </select>
+            )}
+          </span>
+        )}
         <span data-testid="entity-count">{modelTab ? "3D model (view-only)" : `${doc.all().length} entities`}</span>
+        {prompt && !modelTab && (
+          <span className="tool-prompt" data-testid="tool-prompt">
+            {prompt}
+          </span>
+        )}
         {saveNotice && (
           <span
             className={saveNotice.kind === "error" ? "save-notice error" : "save-notice"}
