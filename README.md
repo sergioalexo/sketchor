@@ -19,8 +19,8 @@ npm run desktop    # native desktop window via Tauri (needs Rust toolchain)
 | Circle tool | `C` — click center, then a point on the circle |
 | Select tool | `V` — click (Shift adds), drag to move, `Del` deletes |
 | Measure tool | `M` — see below |
-| Pan | middle- or right-button drag |
-| Zoom | mouse wheel (at cursor) |
+| Pan | middle- or right-button drag, the Pan tool, or two fingers |
+| Zoom | mouse wheel (at cursor), or pinch |
 | Save / Save As | `Ctrl+S` overwrites the tab's own file; the Save menu names that file and offers Save As / Save a Copy |
 | Close tab | `Ctrl+W` (desktop only — browsers reserve it for their own tab) |
 | Undo / Redo | `Ctrl+Z` / `Ctrl+Y` |
@@ -139,8 +139,10 @@ format:
   `apps/web/src/browser/dwgImport.ts` and `/NOTICE.md`). There is no DWG
   export.
 - **STEP / IGES** — 3D models, **view-only**, in their own tab. Read by
-  OpenCascade compiled to WebAssembly (`occt-import-js`, LGPL — see
-  `/NOTICE.md`) and drawn with three.js. See *3D models* below.
+  OpenCascade compiled to WebAssembly (Sketchor's own build of
+  `occt-import-js`, LGPL — see `/NOTICE.md` and
+  `native/occt-import-js-build/`) and drawn with three.js. A 3,000-part
+  assembly opens in a few seconds. See *3D models* below.
 
 Use the **Open** button (or `Ctrl+O`) to load any of these; **Save**
 (`Ctrl+S`) offers a choice of DXF or SVG. The File System Access API is used
@@ -157,12 +159,32 @@ right or middle, wheel to zoom toward the cursor. Click a part to select it
 (its name shows in the corner readout), double-click to frame it, `H` hides
 the selected part and `Shift+H` shows everything again; `E` toggles edges,
 `F` fits, and `1`–`4` jump to isometric / top / front / right. The **Parts**
-button opens the assembly tree, with a filter and per-part hide/show.
+button opens the assembly tree, with a filter and per-part hide/show. With
+a part selected, the readout shows its bounding-box size.
+
+**Measure** (`M`, or the toolbar button): click or tap two points on the
+model to get the straight-line distance plus ΔX / ΔY / ΔZ. Each point snaps
+to the nearest corner (B-rep vertex) or edge under the cursor, so aiming
+roughly at a corner measures the corner; the readout says which kind of
+point each end landed on. The measurement stays attached to the geometry
+while you orbit; `Esc` clears it, then leaves the tool.
 
 On a touch screen: one finger orbits, two fingers pinch-zoom and pan, tap
 selects, double-tap frames, and a long-press hides the part under your
 finger (Show all brings it back). Buttons grow to finger size, and on a
 narrow stage the parts tree docks as a bottom sheet.
+
+### Touch mode
+
+The hand button in the top bar turns on **touch mode**: the drawing tools
+move to a row of big labelled buttons along the bottom of the screen (where
+a thumb can reach them), and the 3D viewer's buttons do the same. It's on
+by default on devices that report a touch pointer and remembered either
+way. Independently of the setting, the 2D canvas understands fingers: one
+finger works the current tool (tap = click, drag = drag), two fingers pan
+and pinch-zoom from any tool without losing a half-drawn line, and a
+double-tap fits the drawing (or the tapped entity). The **Pan** tool makes
+one finger pan instead.
 
 The file browser lists model files next to drawings and previews each one as
 an **isometric thumbnail**.

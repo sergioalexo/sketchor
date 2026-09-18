@@ -73,8 +73,13 @@ command bus — there is no document behind a model tab and nothing to save.
 
 The pipeline is built for one fact measured on real Onshape exports:
 **reading the STEP dominates and tessellation density barely matters**
-(0.7 MB → ~1 s, 3 MB/1,700 parts → ~27 s, 11 MB/3,400 parts → ~130 s in
-wasm). So:
+(0.7 MB → ~0.7 s, 3 MB/1,700 parts → ~3 s, 6 MB/3,000 parts → ~4.5 s in
+wasm). Those numbers are with **Sketchor's own build of occt-import-js**
+(`apps/web/vendor/occt-import-js/`, reproducible from
+`native/occt-import-js-build/`): the upstream npm package looked up every
+face's colour with a linear scan of all labels, O(faces × parts), which
+made the same files take 28 s and 93 s. Don't reinstall the npm package —
+the worker imports the vendored `.mjs`/`.wasm` directly. So:
 
 - `occt.worker.ts` runs occt-import-js; `stepImport.ts` is a pool of up to
   three workers with a queue where *opens* preempt *thumbnails*, and requests
@@ -90,6 +95,11 @@ wasm). So:
 - `modelThumbnail.ts` renders the file-browser's isometric PNG through one
   shared offscreen WebGL context (browsers cap live contexts).
 - Z is up. View presets live in `modelScene.ts`.
+- **Measure tool** (M): `measure3d.ts` (pure, tested) snaps a raycast hit to
+  the hit part's B-rep vertices/edges within a pixel tolerance the viewer
+  converts to world units at the hit depth; the viewer draws the result as
+  a screen-space SVG overlay re-projected in an `afterRender` hook, not via
+  React state per frame.
 - **Explorer previews** (Windows): every rendered thumbnail is also mirrored
   via the `write_thumbnail_cache` command to `%LOCALAPPDATA%\Sketchor\thumbs\<sha256>.png`; `native/dxf-thumbnailer` (`src/model.rs`) hashes the file
   and serves that PNG, else falls back to `native/step-wire` — a text-level
@@ -119,6 +129,19 @@ wasm). So:
   — every request is appended (opt-in trace in lib.rs).
 
 Debug: `window.sketchor.openModel(name, arrayBuffer)` / `getModel()`.
+
+## Touch (`apps/web/src/touchMode.ts`)
+
+Gestures work everywhere, regardless of the setting: in the 2D viewport one
+finger is the tool (its pointerdown is *deferred* until the finger moves,
+lifts, or is joined — a pinch always starts with one finger down, and the
+tools act on pointerdown), two fingers pan/pinch-zoom from any tool and keep
+a half-drawn entity like a middle-drag pan does, double-tap fits. The 3D
+viewer's touch handling is OrbitControls plus tap/double-tap/long-press.
+**Touch mode** is only layout: a persisted preference (default: the
+`pointer: coarse` media query, toggle in the topbar) that puts `.app.touch`
+on the root — the tool rail moves to the bottom as big labelled buttons, and
+so does the model toolbar. A "pan" tool exists so one finger can pan too.
 
 ## Testing
 
