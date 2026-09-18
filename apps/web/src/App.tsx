@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from "react";
 import { freeEndpointEntityIds } from "@sketchor/core";
 import { bus, doc, getSessions, isModelSession, measurementText, TOOL_HINTS, useApp, type ToolId } from "./state/store";
+import { useTouchMode } from "./touchMode";
 import { activeSaveTarget, openDrawing, overlayDrawing, saveCurrent, saveDrawing } from "./io/drawingFile";
 import { DISPLAY_UNITS, formatLength, type DisplayUnit } from "./units";
 import { Viewport } from "./viewport/Viewport";
@@ -195,7 +196,65 @@ const TOOLS: { id: ToolId; label: string; keyHint: string; icon: JSX.Element }[]
       </svg>
     ),
   },
+  {
+    id: "pan",
+    label: "Pan",
+    keyHint: "",
+    icon: (
+      <svg viewBox="0 0 24 24" width="20" height="20">
+        <path
+          d="M8 12V5.5a1.5 1.5 0 013 0V11m0-6.5v-1a1.5 1.5 0 013 0V11m0-5a1.5 1.5 0 013 0v5m0-3a1.5 1.5 0 013 0v6c0 4-2.5 7-6.5 7S8 18 6 15l-2.2-3.3a1.4 1.4 0 012.3-1.6L8 12"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          fill="none"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      </svg>
+    ),
+  },
 ];
+
+/**
+ * The tool buttons. On the left as a vertical rail by default; in touch
+ * mode (see touchMode.ts) the same list is rendered along the bottom as big
+ * labelled buttons that a thumb can hit.
+ */
+function ToolRail({
+  layout,
+  rebind,
+}: {
+  layout: "side" | "bottom";
+  rebind: (actionId: string) => (e: React.MouseEvent) => void;
+}) {
+  const tool = useApp((s) => s.tool);
+  const setTool = useApp((s) => s.setTool);
+  const keyBindings = useKeybindings((s) => s.bindings);
+  return (
+    <nav className={`toolrail ${layout}`} data-testid={layout === "bottom" ? "toolrail-bottom" : "toolrail"}>
+      {TOOLS.map((t) => {
+        const bound = bindingLabel(keyBindings[`tool.${t.id}`]);
+        return (
+          <button
+            key={t.id}
+            className={`tool ${tool === t.id ? "active" : ""}`}
+            title={`${t.label}${bound ? ` (${bound})` : ""} — right-click to change shortcut`}
+            data-testid={`tool-${t.id}`}
+            onClick={() => setTool(t.id)}
+            onContextMenu={rebind(`tool.${t.id}`)}
+          >
+            {t.icon}
+            {layout === "bottom" ? (
+              <span className="tool-label">{t.label}</span>
+            ) : (
+              <span className="keyhint">{bound || t.keyHint}</span>
+            )}
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
 
 /**
  * Runs a plugin-contributed exporter and downloads its output. Plugin IO sits
@@ -253,6 +312,8 @@ export function App() {
   const [showPluginMenu, setShowPluginMenu] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const touchMode = useTouchMode((s) => s.enabled);
+  const toggleTouchMode = useTouchMode((s) => s.toggle);
   const [rebindTarget, setRebindTarget] = useState<{ actionId: string; x: number; y: number } | null>(null);
   const keyBindings = useKeybindings((s) => s.bindings);
   // Right-click any bindable toolbar button to reassign its shortcut.
@@ -376,7 +437,7 @@ export function App() {
   };
 
   return (
-    <div className="app">
+    <div className={`app ${touchMode ? "touch" : ""}`}>
       <header className="topbar">
         <button
           className="brand"
@@ -790,6 +851,27 @@ export function App() {
             </svg>
           </button>
           <button
+            className={`action ${touchMode ? "toggled" : ""}`}
+            title={
+              touchMode
+                ? "Touch mode is on: big tool buttons along the bottom. Click to switch back to the compact desktop layout"
+                : "Touch mode: big finger-sized tool buttons along the bottom of the screen"
+            }
+            data-testid="toggle-touch-mode"
+            onClick={toggleTouchMode}
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18">
+              <path
+                d="M9 11V4.5a1.5 1.5 0 013 0V11m0-4a1.5 1.5 0 013 0v4m0-2a1.5 1.5 0 013 0v5.5c0 3.6-2.4 6.5-6 6.5-2.6 0-4-1.5-5.2-3.5L5 14.6a1.4 1.4 0 012.2-1.7L9 15"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                fill="none"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+          <button
             className="action"
             title={withKey("Keyboard shortcuts — right-click to add a shortcut", "app.shortcuts")}
             data-testid="toggle-shortcuts"
@@ -816,24 +898,7 @@ export function App() {
       <ImportReportBanner />
 
       <div className="body">
-        <nav className="toolrail">
-          {TOOLS.map((t) => {
-            const bound = bindingLabel(keyBindings[`tool.${t.id}`]);
-            return (
-              <button
-                key={t.id}
-                className={`tool ${tool === t.id ? "active" : ""}`}
-                title={`${t.label}${bound ? ` (${bound})` : ""} — right-click to change shortcut`}
-                data-testid={`tool-${t.id}`}
-                onClick={() => setTool(t.id)}
-                onContextMenu={rebind(`tool.${t.id}`)}
-              >
-                {t.icon}
-                <span className="keyhint">{bound || t.keyHint}</span>
-              </button>
-            );
-          })}
-        </nav>
+        {!touchMode && <ToolRail layout="side" rebind={rebind} />}
         <FileExplorerPanel hidden={!showFiles} onClose={() => setShowFiles(false)} />
         {/* Plugin panels dock on the left, next to the file browser. */}
         {showPlugins && <PluginsPanel onClose={() => setShowPlugins(false)} />}
@@ -862,6 +927,9 @@ export function App() {
         {/* Layers is always the rightmost panel. */}
         {showLayers && <LayerPanel />}
       </div>
+
+      {/* Touch mode: the drawing tools sit along the bottom edge, where thumbs are. A model tab has its own. */}
+      {touchMode && !modelTab && <ToolRail layout="bottom" rebind={rebind} />}
 
       <footer className="statusbar" data-revision={revision}>
         <span data-testid="coords">

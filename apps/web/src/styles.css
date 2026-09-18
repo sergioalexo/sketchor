@@ -2181,3 +2181,246 @@ kbd.shortcut-key-fixed {
   color: var(--text-dim);
   font-weight: 600;
 }
+
+/* ---------- touch mode (see touchMode.ts) ---------- */
+
+/*
+ * Big finger-sized targets. The tool rail becomes a row along the bottom
+ * edge — that's where thumbs are on a tablet — with a label under each
+ * icon, horizontally scrollable when the screen is narrower than the list.
+ * Everything else just grows to a comfortable 44px+ tap size.
+ */
+.toolrail.bottom {
+  flex-direction: row;
+  gap: 8px;
+  padding: 8px 10px;
+  border-right: none;
+  border-top: 1px solid var(--border);
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+  /* Only the strip itself scrolls sideways; the browser must not zoom or scroll the page. */
+  touch-action: pan-x;
+}
+
+.toolrail.bottom::-webkit-scrollbar {
+  display: none;
+}
+
+.toolrail.bottom .tool {
+  flex: 0 0 auto;
+  width: 72px;
+  height: 64px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border-radius: 12px;
+  border-color: var(--border);
+  background: var(--bg);
+}
+
+.toolrail.bottom .tool svg {
+  width: 26px;
+  height: 26px;
+}
+
+.toolrail.bottom .tool.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.tool-label {
+  font-size: 11px;
+  line-height: 1;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+
+.tool.active .tool-label {
+  color: inherit;
+}
+
+.app.touch .topbar {
+  padding: 6px 10px;
+}
+
+.app.touch .action {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+}
+
+.app.touch .action svg {
+  width: 22px;
+  height: 22px;
+}
+
+.app.touch .action-labeled {
+  width: auto;
+  padding: 0 14px;
+}
+
+.app.touch .hint {
+  /* The long tool hints don't fit next to 44px buttons on a tablet. */
+  display: none;
+}
+
+.app.touch .statusbar {
+  padding: 9px 14px;
+  font-size: 14px;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.app.touch .unit-select {
+  font-size: 14px;
+  padding: 4px 8px;
+}
+
+.app.touch .measure-copy,
+.app.touch .btn.sm {
+  min-height: 36px;
+  padding: 6px 12px;
+  font-size: 13px;
+}
+
+.app.touch .viewport {
+  /* A finger drawing a line shouldn't show a crosshair under itself, but a mouse still can. */
+  cursor: crosshair;
+}
+
+/* The 3D viewer's toolbar moves to the bottom as well, with labels under the icons. */
+.app.touch .model-toolbar {
+  top: auto;
+  bottom: 10px;
+  left: 10px;
+  right: 10px;
+  transform: none;
+  max-width: none;
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 12px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  touch-action: pan-x;
+}
+
+.app.touch .model-toolbar::-webkit-scrollbar {
+  display: none;
+}
+
+.app.touch .model-toolbar .btn.sm {
+  flex: 0 0 auto;
+  min-width: 72px;
+  min-height: 64px;
+  padding: 6px 10px;
+  border-radius: 12px;
+  font-size: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.app.touch .model-toolbar .btn.sm svg {
+  width: 26px;
+  height: 26px;
+}
+
+.app.touch .model-toolbar-sep {
+  height: 40px;
+}
+
+/* Status readout moves out of the toolbar's way, to the top-left. */
+.app.touch .model-status {
+  top: 10px;
+  bottom: auto;
+  font-size: 14px;
+}
+
+.app.touch .model-parts {
+  bottom: 96px;
+}
+
+@container (max-width: 640px) {
+  .app.touch .model-parts {
+    bottom: 96px;
+    height: 40%;
+  }
+}
+
+/* ---------- 3D measure tool ---------- */
+
+.model-canvas.measuring {
+  cursor: crosshair;
+}
+
+.model-measure-overlay {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.model-measure-overlay line {
+  stroke: #2dd4bf;
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+}
+
+.model-measure-overlay circle {
+  fill: #2dd4bf;
+  stroke: #0f172a;
+  stroke-width: 1.5;
+}
+
+.model-measure-label {
+  position: absolute;
+  transform: translate(-50%, -140%);
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: #0f172a;
+  border: 1px solid #2dd4bf;
+  color: #2dd4bf;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.model-status-measure {
+  color: var(--text);
+}
+
+.model-status-snap {
+  color: var(--text-dim);
+}
+
+.model-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.model-tool svg {
+  flex: 0 0 auto;
+}
+
+@media (pointer: coarse) {
+  .model-measure-overlay circle {
+    r: 7;
+  }
+
+  .model-measure-label {
+    font-size: 15px;
+    padding: 5px 10px;
+  }
+}

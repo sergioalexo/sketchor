@@ -79,6 +79,8 @@ function rectFromCorners(a: Point, b: Point): Point[] {
 type Interaction =
   | { kind: "idle" }
   | { kind: "pan"; lastX: number; lastY: number; resume: DrawInteraction | { kind: "idle" } }
+  /** Two fingers down: pan by the midpoint, zoom by the spread. Like "pan", it keeps a half-drawn entity. */
+  | { kind: "pinch"; resume: DrawInteraction | { kind: "idle" } }
   | DrawInteraction
   | {
       kind: "move";
@@ -258,6 +260,25 @@ export function Viewport() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const viewRef = useRef<View>({ scale: 2, ox: 0, oy: 0 });
   const interactionRef = useRef<Interaction>({ kind: "idle" });
+  /**
+   * Fingers currently on the canvas, by pointer id, in screen space. One
+   * finger is the tool (a tap clicks, a drag drags — exactly like the left
+   * mouse button); the moment a second finger lands the gesture becomes a
+   * two-finger pan/pinch-zoom from any tool, and a half-drawn line survives
+   * it the same way it survives a middle-drag pan.
+   */
+  const touchesRef = useRef<Map<number, Point>>(new Map());
+  /** Last single-finger tap, for double-tap detection (dblclick is unreliable with touch-action: none). */
+  const lastTapRef = useRef<{ at: number; screen: Point } | null>(null);
+  /**
+   * A finger that has landed but whose tool action hasn't run yet. A
+   * two-finger gesture necessarily starts with one finger down, and the
+   * tools act on pointerdown — so a pinch would first place a line vertex
+   * or select something. The action is held back until the finger either
+   * moves (a drag), lifts (a tap), or is joined by a second one (a pinch,
+   * and the action is dropped).
+   */
+  const pendingTouchRef = useRef<React.PointerEvent | null>(null);
   const snapRef = useRef<Snap | null>(null);
   const hoverRef = useRef<EntityId | null>(null);
   const closedRegionsRef = useRef<ClosedRegion[]>([]);
@@ -294,7 +315,7 @@ export function Viewport() {
     // During a pan, draw the interaction it suspended — otherwise the rubber
     // band vanishes the moment you scroll to see where the line is going.
     const held = interactionRef.current;
-    const interaction: Interaction = held.kind === "pan" ? held.resume : held;
+    const interaction: Interaction = held.kind === "pan" || held.kind === "pinch" ? held.resume : held;
     const snap = snapRef.current;
 
     let preview: Entity | null = null;
@@ -651,6 +672,51 @@ export function Viewport() {
     } catch {
       // synthetic events (tests, automation) have no active pointer
     }
+    if (e.pointerType !== "touch") {
+      toolPointerDown(e);
+      return;
+    }
+    const screen = screenPos(e);
+    touchesRef.current.set(e.pointerId, screen);
+    if (touchesRef.current.size >= 2) {
+      // Second finger: the first finger's pending action is dropped and the
+      // gesture becomes a pinch. A drag-move or box-select already in
+      // progress is simply abandoned (nothing was committed yet); a
+      // half-drawn entity is kept, as for a pan.
+      pendingTouchRef.current = null;
+      if (interactionRef.current.kind !== "pinch") {
+        interactionRef.current = { kind: "pinch", resume: resumable(interactionRef.current) };
+        redraw();
+      }
+      return;
+    }
+    // Double-tap: fit the tapped entity, or the whole drawing.
+    const prev = lastTapRef.current;
+    const now = performance.now();
+    if (prev && now - prev.at < 350 && dist(prev.screen, screen) < 30) {
+      lastTapRef.current = null;
+      if (interactionRef.current.kind === "draw-polyline") {
+        finishPolyline(false);
+      } else {
+        const hit = hitTest(viewRef.current, screenToWorld(viewRef.current, screen));
+        fitView(hit ? [hit] : undefined);
+      }
+      return;
+    }
+    lastTapRef.current = { at: now, screen };
+    pendingTouchRef.current = e;
+  };
+
+  /** Runs the held-back tool action of a single finger (see pendingTouchRef), if any. */
+  const flushPendingTouch = () => {
+    const pending = pendingTouchRef.current;
+    if (!pending) return;
+    pendingTouchRef.current = null;
+    toolPointerDown(pending);
+  };
+
+  /** The tool's response to a primary-button press (or a single finger): what pointerdown does once it's known not to be a gesture. */
+  const toolPointerDown = (e: React.PointerEvent) => {
     const screen = screenPos(e);
     const view = viewRef.current;
     const world = screenToWorld(view, screen);
@@ -658,7 +724,8 @@ export function Viewport() {
 
     // Middle/right-drag pans from any tool, and explicitly preserves a
     // half-drawn line/polyline/circle/measurement rather than replacing it.
-    if (e.button === 1 || e.button === 2) {
+    // The pan tool does the same with the primary button (one finger).
+    if (e.button === 1 || e.button === 2 || (e.button === 0 && app.tool === "pan")) {
       interactionRef.current = {
         kind: "pan",
         lastX: screen.x,
@@ -1008,6 +1075,9 @@ export function Viewport() {
         }
         break;
       }
+      case "pan":
+        // Handled above, together with the middle/right-button pan.
+        break;
       case "dim": {
         if (interaction.kind === "dim") {
           placeDimension(interaction.start, snapped);
@@ -1098,6 +1168,22 @@ export function Viewport() {
     const app = useApp.getState();
     const interaction = interactionRef.current;
 
+    if (e.pointerType === "touch" && touchesRef.current.has(e.pointerId)) {
+      if (interaction.kind === "pinch") {
+        pinchMove(e.pointerId, screen);
+        return;
+      }
+      touchesRef.current.set(e.pointerId, screen);
+      const pending = pendingTouchRef.current;
+      if (pending) {
+        // Still within the wobble budget: keep waiting for a tap or a second finger.
+        if (dist(screenPos(pending), screen) < 10) return;
+        flushPendingTouch();
+        onPointerMove(e);
+        return;
+      }
+    }
+
     if (interaction.kind === "pan") {
       view.ox += screen.x - interaction.lastX;
       view.oy += screen.y - interaction.lastY;
@@ -1132,12 +1218,52 @@ export function Viewport() {
     redraw();
   };
 
+  /** Two-finger move: pan by the midpoint's travel, zoom by the change in finger spread, about the midpoint. */
+  const pinchMove = (pointerId: number, screen: Point) => {
+    const touches = touchesRef.current;
+    const before = [...touches.values()];
+    touches.set(pointerId, screen);
+    const after = [...touches.values()];
+    if (before.length < 2 || after.length < 2) return;
+    const mid = (pts: Point[]) => ({ x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 });
+    const m0 = mid(before);
+    const m1 = mid(after);
+    const d0 = dist(before[0], before[1]);
+    const d1 = dist(after[0], after[1]);
+    let view = viewRef.current;
+    if (d0 > 0 && d1 > 0) view = zoomAt(view, m0, d1 / d0);
+    view = { ...view, ox: view.ox + (m1.x - m0.x), oy: view.oy + (m1.y - m0.y) };
+    viewRef.current = view;
+    useApp.getState().setZoom(view.scale);
+    redraw();
+  };
+
   const onPointerUp = (e: React.PointerEvent) => {
+    if (e.pointerType === "touch") {
+      touchesRef.current.delete(e.pointerId);
+      // A tap: the finger's action runs now, then its release is handled as usual.
+      if (e.type !== "pointercancel") flushPendingTouch();
+      else pendingTouchRef.current = null;
+      // A finger lifting out of a pinch ends the gesture; the remaining
+      // finger is not promoted to a tool action, it just has to lift too.
+      if (interactionRef.current.kind === "pinch") {
+        if (touchesRef.current.size === 0) {
+          interactionRef.current = interactionRef.current.resume;
+          redraw();
+        }
+        try {
+          canvasRef.current!.releasePointerCapture(e.pointerId);
+        } catch {
+          // see setPointerCapture note
+        }
+        return;
+      }
+    }
     const interaction = interactionRef.current;
     if (interaction.kind === "box-select") {
       const screen = screenPos(e);
       const app = useApp.getState();
-      if (dist(screen, interaction.startScreen) < 4) {
+      if (dist(screen, interaction.startScreen) < (e.pointerType === "touch" ? 10 : 4)) {
         // Barely moved: treat as a plain click on empty canvas.
         if (!interaction.additive) app.setSelection([]);
       } else {
@@ -1167,7 +1293,7 @@ export function Viewport() {
       interactionRef.current = interaction.resume;
       redraw();
     } else if (interaction.kind === "move") {
-      const moved = dist(screenPos(e), interaction.startScreen) >= 4;
+      const moved = dist(screenPos(e), interaction.startScreen) >= (e.pointerType === "touch" ? 10 : 4);
       if (moved && (interaction.dx !== 0 || interaction.dy !== 0)) {
         bus.execute({
           type: "move-entities",
@@ -1213,6 +1339,8 @@ export function Viewport() {
   };
 
   const onDoubleClick = (e: React.MouseEvent) => {
+    // Touch double-taps are detected in onPointerDown.
+    if ((e.nativeEvent as PointerEvent).pointerType === "touch") return;
     const screen = { x: e.nativeEvent.offsetX, y: e.nativeEvent.offsetY };
     const world = screenToWorld(viewRef.current, screen);
     const hit = hitTest(viewRef.current, world);
@@ -1257,6 +1385,7 @@ export function Viewport() {
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
+        onPointerCancel={onPointerUp}
         onWheel={onWheel}
         onDoubleClick={onDoubleClick}
         onContextMenu={(e) => e.preventDefault()}

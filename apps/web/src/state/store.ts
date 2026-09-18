@@ -262,7 +262,8 @@ export type ToolId =
   | "straighten"
   | "fill"
   | "text"
-  | "dim";
+  | "dim"
+  | "pan";
 
 export const TOOL_HINTS: Record<ToolId, string> = {
   select: "Click to select (Shift adds) - drag left-to-right to window-select, right-to-left to crossing-select - drag to move - Del deletes - G groups - U ungroups - Shift+C toggles the selection between construction (dashed) and normal lines",
@@ -277,6 +278,7 @@ export const TOOL_HINTS: Record<ToolId, string> = {
   fill: "Pick a colour, then click a closed shape to hatch-fill it - Alt-click removes a fill - use the panel to apply to a whole selection",
   text: "Click where the text goes and type - Enter places it, Esc cancels - double-click existing text to edit it",
   dim: "Click two points to place a linear dimension on the Dimensions layer, in the current display unit",
+  pan: "Drag to pan the view - pinch with two fingers to zoom - double-tap to fit the drawing",
 };
 
 export type StraightenAxis = "horizontal" | "vertical";
