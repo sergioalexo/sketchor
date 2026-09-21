@@ -5,6 +5,7 @@ import {
   bulgeToArc,
   dist,
   entityPoints,
+  gripsOf,
   layerOf,
   polylineSegments,
   transformed,
@@ -51,6 +52,8 @@ export interface RenderUiState {
   crossingMarkers: readonly Point[];
   /** Dashed bbox + rotate handle shown when the selection is exactly one whole group. */
   groupHandle: { bounds: Bounds; pivot: Point } | null;
+  /** While a grip is being dragged: the entity as it will be, drawn dashed over the original. */
+  gripPreview: Entity | null;
   /**
    * R2's interim connectivity hint (opt-in, off by default): entities with a
    * free endpoint render blue. NOT real constraint/DOF status — see
@@ -140,6 +143,13 @@ export function render(
   }
 
   if (ui.groupHandle) drawGroupHandle(ctx, view, ui.groupHandle);
+
+  if (ui.gripPreview) {
+    ctx.setLineDash([6, 4]);
+    drawEntity(ctx, view, ui.gripPreview, COLORS.preview, 1.5);
+    ctx.setLineDash([]);
+    drawHandles(ctx, view, ui.gripPreview);
+  }
 
   if (ui.transformPreview) {
     const { ids, pivot, rotation } = ui.transformPreview;
@@ -715,12 +725,15 @@ function drawEntity(
   ctx.setLineDash([]);
 }
 
+/** Grips (T-27): a filled square per handle; midpoint/center grips are hollow so they read as "move", not "stretch". */
 function drawHandles(ctx: CanvasRenderingContext2D, view: View, entity: Entity): void {
-  const points: Point[] = entity.type === "circle" ? [entity.center] : entityPoints(entity);
   ctx.fillStyle = COLORS.handle;
-  for (const p of points) {
-    const s = worldToScreen(view, p);
-    ctx.fillRect(s.x - 3, s.y - 3, 6, 6);
+  ctx.strokeStyle = COLORS.handle;
+  ctx.lineWidth = 1.5;
+  for (const g of gripsOf(entity)) {
+    const s = worldToScreen(view, g.point);
+    if (g.kind === "mid" || g.kind === "center") ctx.strokeRect(s.x - 3.5, s.y - 3.5, 7, 7);
+    else ctx.fillRect(s.x - 3.5, s.y - 3.5, 7, 7);
   }
 }
 

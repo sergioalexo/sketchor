@@ -7,6 +7,7 @@ export * from "./offset";
 export * from "./clipboard";
 export * from "./shapes";
 export * from "./joinExplode";
+export * from "./grips";
 export * from "./entities";
 export * from "./groups";
 export * from "./constraints";

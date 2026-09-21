@@ -1,8 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import type { BoxSelectMode, ClosedRegion, Command, Entity, EntityId, Point, TextEntity } from "@sketchor/core";
 import {
+  applyGrip,
   arcSweep,
   boundsOf,
+  gripsOf,
+  type Grip,
   explodeCommands,
   joinCommands,
   bulgeToArc,
@@ -90,9 +93,28 @@ type Interaction =
       collapseTo: EntityId[] | null;
     }
   | { kind: "rotate-group"; ids: EntityId[]; pivot: Point; startAngle: number; rotation: number }
+  /** Dragging one grip of a selected entity (T-27); `preview` is the entity with the grip at the cursor. */
+  | { kind: "grip"; entityId: EntityId; grip: Grip; startScreen: Point; preview: Entity | null }
   | { kind: "box-select"; startScreen: Point; startWorld: Point; currentWorld: Point; additive: boolean };
 
 const DRAW_KINDS = ["measure", "dim"] as const;
+
+/** The grip of a selected entity within reach of a screen point, nearest first. */
+function findGrip(selection: EntityId[], screen: Point, view: View, touch: boolean): { entityId: EntityId; grip: Grip } | null {
+  // Grips only show for small selections; a hundred selected entities would be a field of squares.
+  if (selection.length === 0 || selection.length > 8) return null;
+  const reach = touch ? GRIP_HIT_PX * 2 : GRIP_HIT_PX;
+  let best: { entityId: EntityId; grip: Grip; d: number } | null = null;
+  for (const id of selection) {
+    const entity = doc.get(id);
+    if (!entity) continue;
+    for (const grip of gripsOf(entity)) {
+      const d = dist(worldToScreen(view, grip.point), screen);
+      if (d <= reach && (!best || d < best.d)) best = { entityId: id, grip, d };
+    }
+  }
+  return best;
+}
 
 /** Narrows to the states worth preserving across a pan (see DrawInteraction). */
 function resumable(i: Interaction): DrawInteraction | { kind: "idle" } {
@@ -102,6 +124,8 @@ function resumable(i: Interaction): DrawInteraction | { kind: "idle" } {
 /** Fixed pixel offset above a selected group's bounding box where its rotate handle is drawn/hit-tested. */
 const GROUP_HANDLE_OFFSET_PX = 26;
 const GROUP_HANDLE_HIT_PX = 8;
+/** How close (screen px) a click must be to a grip to grab it. */
+const GRIP_HIT_PX = 7;
 
 function groupHandleScreenPos(view: View, bb: { minX: number; maxX: number; maxY: number }): Point {
   const s = worldToScreen(view, { x: (bb.minX + bb.maxX) / 2, y: bb.maxY });
@@ -351,6 +375,7 @@ export function Viewport() {
       duplicateMarkers: state.duplicateIssues.map((i) => i.location),
       crossingMarkers: state.crossingIssues.map((i) => i.location),
       groupHandle: groupBounds && groupPivot ? { bounds: groupBounds, pivot: groupPivot } : null,
+      gripPreview: interaction.kind === "grip" ? interaction.preview : null,
       freeEndpointIds: state.showConnectivityHint ? freeEndpointEntityIds(doc) : null,
       closedRegions: state.showClosedRegions ? closedRegionsRef.current.map((r) => r.points) : [],
       fmtLength: (n: number) => formatLength(n, state.displayUnit),
@@ -893,6 +918,13 @@ export function Viewport() {
     if (e.button !== 0) return;
 
     if (app.tool === "select") {
+      // A grip of a selected entity under the cursor beats everything else.
+      const gripHit = findGrip(app.selection, screen, view, e.pointerType === "touch");
+      if (gripHit) {
+        interactionRef.current = { kind: "grip", entityId: gripHit.entityId, grip: gripHit.grip, startScreen: screen, preview: null };
+        redraw();
+        return;
+      }
       const groupId = wholeGroupSelected(doc, app.selection);
       const bb = groupId
         ? boundsOf(app.selection.map((id) => doc.get(id)).filter((ent): ent is Entity => !!ent))
@@ -1301,6 +1333,13 @@ export function Viewport() {
       // Snap to 45° steps so a turned pallet still lines up; Ctrl frees it.
       const rotation = snapRotation(angle - interaction.startAngle, noSnap(e));
       interactionRef.current = { ...interaction, rotation };
+    } else if (interaction.kind === "grip") {
+      const entity = doc.get(interaction.entityId);
+      if (entity) {
+        // Snap to everything but the entity being edited; ortho/polar from the grip's other end for a line.
+        const target = noSnap(e) ? world : findSnap(doc, view, world, { exclude: [entity.id], settings: useSnapSettings.getState().settings }).point;
+        interactionRef.current = { ...interaction, preview: applyGrip(entity, interaction.grip, target) };
+      }
     } else if (interaction.kind === "box-select") {
       interactionRef.current = { ...interaction, currentWorld: world };
     }
@@ -1421,6 +1460,11 @@ export function Viewport() {
           scale: 1,
         });
       }
+      interactionRef.current = { kind: "idle" };
+      redraw();
+    } else if (interaction.kind === "grip") {
+      const moved = dist(screenPos(e), interaction.startScreen) >= (e.pointerType === "touch" ? 10 : 3);
+      if (moved && interaction.preview) bus.execute({ type: "update-entity", entity: interaction.preview });
       interactionRef.current = { kind: "idle" };
       redraw();
     }
