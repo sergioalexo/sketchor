@@ -34,6 +34,10 @@ npm run desktop    # native desktop window via Tauri (needs Rust toolchain)
 | Undo / Redo | `Ctrl+Z` / `Ctrl+Y` |
 | Copy / Cut / Paste | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` (at the cursor) / `Ctrl+Shift+V` (in place) / `Ctrl+D` (duplicate) — the clipboard holds readable sketch code, so a copy pastes into a chat or editor too |
 | Nudge | arrow keys move the selection one grid step; `Shift` = ten |
+| Select all / invert | `Ctrl+A` / `Ctrl+I` |
+| Join / Explode | `J` chains the selected lines and arcs into one polyline (closed when the ends meet); `Ctrl+E` explodes selected polylines back into lines and arcs |
+| Divide | Divide tool: type a count (or a spacing like `25mm`), click an entity — points mark the divisions |
+| Zoom window / previous | `Z` then two corners / `Shift+Z` |
 
 Snapping is automatic, in priority order: **the origin**, endpoints, centers,
 quadrants, **intersections** (any two curves), nodes, and — measured from the
