@@ -278,7 +278,10 @@ export type ToolId =
   | "chamfer"
   | "offset"
   | "zoom"
-  | "divide";
+  | "divide"
+  | "align"
+  | "lengthen"
+  | "match";
 
 export const TOOL_HINTS: Record<ToolId, string> = {
   select: "Click to select (Shift adds) - drag left-to-right to window-select, right-to-left to crossing-select - drag to move - Del deletes - G groups - U ungroups - Shift+C toggles the selection between construction (dashed) and normal lines",
@@ -309,6 +312,9 @@ export const TOOL_HINTS: Record<ToolId, string> = {
   offset: "Type the distance, click a line, arc, circle or polyline, then click the side the parallel copy goes on",
   zoom: "Click two corners of the area to zoom into - Shift+Z goes back to the previous view",
   divide: "Type the number of parts (or a spacing with a unit, e.g. 25mm), then click a line, arc, circle or polyline - point entities mark the divisions",
+  align: "Select, then click a source point and where it goes, a second source point and where it goes - the selection moves and rotates to match (Ctrl-click the last point to scale too)",
+  lengthen: "Type +5 / -5 (change), 40 (new total length) or 150% - then click a line or arc near the end to change",
+  match: "Click the source entity, then every entity that should take its layer, colour and construction flag",
 };
 
 export type StraightenAxis = "horizontal" | "vertical";

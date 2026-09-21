@@ -38,6 +38,9 @@ npm run desktop    # native desktop window via Tauri (needs Rust toolchain)
 | Join / Explode | `J` chains the selected lines and arcs into one polyline (closed when the ends meet); `Ctrl+E` explodes selected polylines back into lines and arcs |
 | Divide | Divide tool: type a count (or a spacing like `25mm`), click an entity — points mark the divisions |
 | Zoom window / previous | `Z` then two corners / `Shift+Z` |
+| Grips | with something selected, drag a square handle: ends and vertices stretch, hollow midpoint/center handles move, a circle's quadrant sets the radius |
+| Properties panel | `Ctrl+1` — edit the selection's layer, colour, construction flag, and (for one entity) every coordinate, radius, angle, text or vertex numerically |
+| Align / Lengthen / Match | `Shift+A` two source points → two targets (Ctrl-click the last to scale) · `Shift+L` type `+5`, `-5`, `40` or `150%` then click near an end · Match: click a source, then the entities that should take its layer/colour |
 
 Snapping is automatic, in priority order: **the origin**, endpoints, centers,
 quadrants, **intersections** (any two curves), nodes, and — measured from the

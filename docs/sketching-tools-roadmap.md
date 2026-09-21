@@ -10,6 +10,7 @@ Status as of 2026-09-11 (`main` @ v0.14.4).
 
 | Date | Items | Notes |
 |---|---|---|
+| 2026-09-21 | **T-27** grips, **T-28** properties, **T-24** align, **T-23** lengthen, **T-26** match | `packages/core/src/grips.ts` (tested): `gripsOf` / `applyGrip` — end and vertex grips stretch, mid/center/insert grips move, quadrant sets radius, arc end changes its angle, image corners resize; the select tool drags them with snapping (the entity itself excluded) and a dashed preview, one `update-entity`. **Properties panel** (`properties/PropertiesPanel.tsx`, Ctrl+1): layer / colour / construction for any selection; for one entity every geometric field editable in the display unit plus read-only length / area / circumference / sweep; polyline vertices editable. `alignLengthen.ts` (tested): **Align** tool (two source → two target points, Ctrl scales), **Lengthen** tool (`+5`, `-5`, `40`, `150%`), **Match** tool (layer / colour / construction). |
 | 2026-09-21 | **T-22** join/explode, **T-19** divide, **T-29** (part) | `packages/core/src/joinExplode.ts` (tested): `joinEntities` chains lines/arcs/open polylines end-to-end (either orientation) into polylines with bulged legs, closing when the ends meet; `explodePolyline` back to lines/arcs; `pointsAlong` for divide/measure. `J` joins the selection, `Ctrl+E` explodes it. **Divide** tool: type a count or a spacing, click the entity → point entities. `Ctrl+A` select all, `Ctrl+I` invert, `Z` zoom window (two corners), `Shift+Z` zoom previous (20-deep history). *Open from T-29:* select similar / by layer, lasso, fence, selection cycling, layer lock. |
 | 2026-09-21 | **T-02**, **T-04**, **T-05**, **T-06** | `packages/core/src/shapes.ts` (tested): `circleFrom2Points/3Points`, `circleTangentToTwo` (TTR via the intersection lib's offset loci, side by the picks), `rectFromCenter`, `rectFrom3Points`, `regularPolygon` (inscribed/circumscribed) + `regularPolygonByEdge`, `straightSlot`, `arcSlot` (closed polylines with bulged caps). Circle tool: Tab cycles center-radius / center-diameter / 2-point / 3-point / tangent-tangent-radius (typed radius, click two entities). Rectangle tool: Tab cycles corners / center / 3-point. New **Polygon** (type sides, Tab: inscribed / circumscribed / by edge) and **Slot** (straight or arc, width typed or picked) tools. T-07 XLINE still open. |
 | 2026-09-21 | **T-11** clipboard, **T-10** nudge | `packages/core/src/clipboard.ts` (tested): the selection serialises as sketch code **plus** a `# sketchor {json}` line that keeps layers/colours/bulges/images/groups; paste reads the JSON when present, else parses plain code (an AI's or an editor's). Fully-contained groups paste as new groups. `Ctrl+C` / `Ctrl+X` / `Ctrl+V` (at the cursor, bottom-left of the copy under it) / `Ctrl+Shift+V` (in place) / `Ctrl+D` (duplicate one grid step away); an in-app copy backs up the system clipboard when reading it is refused. Arrow keys nudge the selection by a grid step, Shift ×10. |
@@ -266,11 +267,11 @@ Pick two entities (lines, arcs, circles, or two adjacent polyline segments), rad
 
 ## 5. Phase 3 — Precision editing and remaining tools
 
-### T-27 · Grips — **P1, M**
+### T-27 · Grips — **P1, M** — 🟡 2026-09-21 (drag grips done; multifunction vertex menu open)
 
 **Ref:** AutoCAD. When one or a few entities are selected, draw small squares at endpoints, midpoint, center, quadrants, polyline vertices, arc ends/mid, text insertion, image corners. Drag an endpoint grip → move only that point (`update-entity`); drag a midpoint grip → move the whole entity; drag a circle's quadrant → change radius; polyline midpoint grip (AutoCAD's ▭ multifunction grip) → hover menu: *Stretch / Add vertex / Convert to arc / Remove vertex*. Grips participate in snapping (dragging an endpoint onto another endpoint is the manual "coincident"). This replaces most of LibreCAD's polyline sub-tools in one gesture.
 
-### T-28 · Properties panel — **P1, M**
+### T-28 · Properties panel — **P1, M** — ✅ 2026-09-21
 
 Right-side panel (sibling of Layers/Code) showing the selection: common section (layer, colour, linetype, lineweight, construction), then per-type fields: line `a.x a.y b.x b.y length angle`, circle `cx cy r d circumference area`, arc `+ start end sweep length`, polyline `vertex count closed length area`, text `content height rotation`. Every field editable → `update-entity` command; multi-select edits the common fields on all. Read-only computed fields (length/area) are the AutoCAD "Quick Properties" people miss most. *Match properties* (T-26): a tool that samples one entity and applies its common properties to clicked ones — trivial once this panel exists.
 
@@ -284,7 +285,7 @@ Right-side panel (sibling of Layers/Code) showing the selection: common section 
 
 Crossing box, then base → target: endpoints *inside* the box move, endpoints outside stay, entities entirely inside move whole. Arcs recompute from moved endpoints keeping the radius (AutoCAD keeps the center displacement — either is acceptable; document it). This is the AutoCAD tool that makes "lengthen this bracket by 20" a two-click job.
 
-### T-19 · Divide / Measure-points — **S** ✅ 2026-09-21 · T-22 · Join / Explode — **S** ✅ 2026-09-21 · T-23 · Lengthen — **S** · T-24 · Align — **S** · T-25 · Polyline edit — **M** · T-26 · Match properties — **S**
+### T-19 · Divide / Measure-points — **S** ✅ · T-22 · Join / Explode — **S** ✅ · T-23 Lengthen ✅ · T-24 Align ✅ · T-26 Match ✅ (all 2026-09-21) · T-23 · Lengthen — **S** · T-24 · Align — **S** · T-25 · Polyline edit — **M** · T-26 · Match properties — **S**
 
 - **Divide/Measure:** N equal points or a fixed spacing along a line/arc/circle/polyline (`pointAlong(entity, s)` helper on core). Optionally place blocks later (T-34).
 - **Join:** selected connected lines/arcs → one polyline (chain via `connectivity.ts`; `heal.ts` already joins collinear lines — generalise). **Explode:** polyline → lines + arcs; group → members; text → polylines (via `font.ts` strokes — that's how the DXF export already handles text).

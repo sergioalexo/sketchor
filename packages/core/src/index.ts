@@ -8,6 +8,7 @@ export * from "./clipboard";
 export * from "./shapes";
 export * from "./joinExplode";
 export * from "./grips";
+export * from "./alignLengthen";
 export * from "./entities";
 export * from "./groups";
 export * from "./constraints";

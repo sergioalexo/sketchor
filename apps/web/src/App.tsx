@@ -378,6 +378,43 @@ const TOOLS: { id: ToolId; label: string; keyHint: string; icon: JSX.Element; di
       </svg>
     ),
   },
+  {
+    id: "align",
+    label: "Align",
+    keyHint: "",
+    icon: (
+      <svg viewBox="0 0 24 24" width="20" height="20">
+        <path d="M4 18l6-8 4 3 6-9" {...S} opacity="0.5" />
+        <path d="M4 20h16" {...S} />
+        <circle cx="4" cy="18" r="1.6" fill="currentColor" />
+        <circle cx="20" cy="4" r="1.6" fill="currentColor" />
+      </svg>
+    ),
+  },
+  {
+    id: "lengthen",
+    label: "Lengthen",
+    keyHint: "",
+    icon: (
+      <svg viewBox="0 0 24 24" width="20" height="20">
+        <path d="M4 12h9" {...S} />
+        <path d="M13 12h7" {...S} strokeDasharray="3 2" />
+        <path d="M17 9l3 3-3 3" {...S} />
+      </svg>
+    ),
+  },
+  {
+    id: "match",
+    label: "Match",
+    keyHint: "",
+    icon: (
+      <svg viewBox="0 0 24 24" width="20" height="20">
+        <path d="M14 4l6 6-8 8-6-6z" {...S} />
+        <path d="M6 12l-2 2 4 4 2-2" {...S} />
+        <path d="M4 20h4" {...S} />
+      </svg>
+    ),
+  },
 ];
 
 /**

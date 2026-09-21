@@ -780,6 +780,12 @@ export function Viewport() {
         app.setTool("offset");
       } else if (matchesBinding(e, "tool.divide")) {
         app.setTool("divide");
+      } else if (matchesBinding(e, "tool.align")) {
+        app.setTool("align");
+      } else if (matchesBinding(e, "tool.lengthen")) {
+        app.setTool("lengthen");
+      } else if (matchesBinding(e, "tool.match")) {
+        app.setTool("match");
       } else if (matchesBinding(e, "tool.point")) {
         app.setTool("point");
       } else if (matchesBinding(e, "tool.image")) {
@@ -972,6 +978,9 @@ export function Viewport() {
       case "offset":
       case "zoom":
       case "divide":
+      case "align":
+      case "lengthen":
+      case "match":
         // On the tool framework; dispatched above.
         break;
       case "image": {

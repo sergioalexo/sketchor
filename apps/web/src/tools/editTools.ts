@@ -1,8 +1,11 @@
 import type { Command, Entity, LineEntity, Point, PolylineEntity } from "@sketchor/core";
 import {
+  alignTransform,
+  applyAlign,
   chamferLines,
   dist,
   extendTo,
+  lengthen,
   filletAllCorners,
   filletLines,
   filletPolylineCorner,
@@ -10,6 +13,7 @@ import {
   newEntityId,
   offsetEntity,
   pointsAlong,
+  transformed,
   splitAt,
   trimAt,
 } from "@sketchor/core";
@@ -498,6 +502,174 @@ export class DivideTool implements Tool {
   preview(): Entity[] {
     return [];
   }
+}
+
+/* ---------------------------------- align --------------------------------- */
+
+/**
+ * Align (T-24): with a selection, pick two source points and two target
+ * points; the selection is moved and rotated so the first pair coincide
+ * and the second source point lies toward the second target. Ctrl-click
+ * the last point to scale as well, so both pairs coincide exactly.
+ */
+export class AlignTool implements Tool {
+  readonly id = "align" as const;
+  private picks: Point[] = [];
+
+  prompt(ctx: ToolContext): string {
+    if (ctx.selection().length === 0) return "Align: select what to align first (click an object)";
+    const n = this.picks.length;
+    return [
+      "Align: specify the first source point (on the selection)",
+      "Specify its destination",
+      "Specify the second source point",
+      "Specify its destination (Ctrl-click to scale so both pairs match exactly)",
+    ][n];
+  }
+  busy(): boolean {
+    return this.picks.length > 0;
+  }
+  anchor(): Point | null {
+    // Destination picks measure from their source point (typed @dx,dy moves it by that).
+    return this.picks.length % 2 === 1 ? this.picks[this.picks.length - 1] : null;
+  }
+  cancel(): void {
+    this.picks = [];
+  }
+  pick(ctx: ToolContext, p: Pick): void {
+    if (ctx.selection().length === 0) {
+      const hit = ctx.hitTest(p.world);
+      if (hit.length > 0) ctx.setSelection(hit);
+      return;
+    }
+    this.picks.push(p.point);
+    if (this.picks.length < 4) return;
+    const [s1, t1, s2, t2] = this.picks;
+    const t = alignTransform(s1, s2, t1, t2, p.ctrlKey);
+    this.picks = [];
+    if (!t) return;
+    ctx.execute({ type: "transform-entities", ids: ctx.selection(), pivot: t.pivot, dx: t.dx, dy: t.dy, rotation: t.rotation, scale: t.scale });
+  }
+  preview(ctx: ToolContext, cursor: Point | null): Entity[] {
+    if (!cursor || this.picks.length === 0) return [];
+    const guide = (a: Point, b: Point): Entity => ({ id: "preview-guide", type: "line", a, b });
+    const [s1, t1, s2] = this.picks;
+    if (this.picks.length === 1) return [guide(s1, cursor)];
+    if (this.picks.length === 2) return [guide(s1, t1)];
+    if (this.picks.length === 3) {
+      const t = alignTransform(s1, s2, t1, cursor, false);
+      if (!t) return [guide(s1, t1), guide(s2, cursor)];
+      const ids = new Set(ctx.selection());
+      return [guide(s1, t1), guide(s2, cursor), ...ctx.doc.all().filter((e) => ids.has(e.id)).map((e) => transformed(e, t.pivot, t.dx, t.dy, t.rotation, t.scale))];
+    }
+    return [];
+  }
+}
+
+/* -------------------------------- lengthen -------------------------------- */
+
+/**
+ * Lengthen (T-23): type how much — `+5` / `-5` (delta), `40` (new total
+ * length), `150%` — then click a line or arc near the end to change.
+ */
+export class LengthenTool implements Tool {
+  readonly id = "lengthen" as const;
+  private mode: { kind: "delta" | "total" | "percent"; value: number } = { kind: "delta", value: 10 };
+  private message: string | null = null;
+
+  prompt(): string {
+    if (this.message) return this.message;
+    const m = this.mode;
+    const how = m.kind === "percent" ? `to ${m.value}%` : m.kind === "total" ? `to ${fmt(m.value)} total` : `by ${m.value >= 0 ? "+" : ""}${fmt(m.value)}`;
+    return `Lengthen (${how}): type +delta, -delta, a total length or a percentage, then click a line or arc near the end to change`;
+  }
+  busy(): boolean {
+    return false;
+  }
+  anchor(): Point | null {
+    return null;
+  }
+  cancel(): void {
+    this.message = null;
+  }
+  typed(ctx: ToolContext, text: string): boolean {
+    const t = text.trim();
+    if (t.endsWith("%")) {
+      const v = Number(t.slice(0, -1));
+      if (!Number.isFinite(v) || v <= 0) return false;
+      this.mode = { kind: "percent", value: v };
+      return true;
+    }
+    const signed = t.startsWith("+") || t.startsWith("-");
+    const v = parseLength(signed ? t.slice(1) : t, ctx.displayUnit());
+    if (v === null || v <= 0) return false;
+    this.mode = signed ? { kind: "delta", value: t.startsWith("-") ? -v : v } : { kind: "total", value: v };
+    this.message = null;
+    return true;
+  }
+  pick(ctx: ToolContext, p: Pick): void {
+    this.message = null;
+    const target = entityAt(ctx, p.world);
+    if (!target) return;
+    const out = lengthen(target, this.mode, p.world);
+    if (!out) {
+      this.message = "Can't lengthen that: closed shape, or the change would remove it entirely";
+      return;
+    }
+    ctx.execute({ type: "update-entity", entity: out });
+  }
+  preview(): Entity[] {
+    return [];
+  }
+}
+
+/* ----------------------------- match properties ---------------------------- */
+
+/** Match properties (T-26): click a source entity, then every entity that should take its layer, colour and construction flag. */
+export class MatchTool implements Tool {
+  readonly id = "match" as const;
+  private source: Entity | null = null;
+
+  prompt(): string {
+    return this.source
+      ? `Match: click the entities that should take ${describeProps(this.source)} (Esc when done)`
+      : "Match properties: click the source entity";
+  }
+  busy(): boolean {
+    return this.source !== null;
+  }
+  anchor(): Point | null {
+    return null;
+  }
+  cancel(): void {
+    this.source = null;
+  }
+  pick(ctx: ToolContext, p: Pick): void {
+    const target = entityAt(ctx, p.world);
+    if (!target) return;
+    if (!this.source) {
+      this.source = target;
+      return;
+    }
+    if (target.id === this.source.id) return;
+    const next = { ...target } as unknown as Record<string, unknown>;
+    for (const key of ["layer", "color", "dashed"] as const) {
+      const v = (this.source as unknown as Record<string, unknown>)[key];
+      if (v === undefined) delete next[key];
+      else next[key] = v;
+    }
+    ctx.execute({ type: "update-entity", entity: next as unknown as Entity });
+  }
+  preview(): Entity[] {
+    return [];
+  }
+}
+
+function describeProps(e: Entity): string {
+  const parts = [`layer ${layerOf(e)}`];
+  if (e.color) parts.push(`colour ${e.color}`);
+  if (e.dashed) parts.push("construction");
+  return parts.join(", ");
 }
 
 function fmt(v: number): string {
