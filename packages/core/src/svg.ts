@@ -87,6 +87,7 @@ export function entitiesToSvgDocument(entities: Entity[], opts: SvgExportOptions
 
   const byLayer = new Map<string, Entity[]>();
   for (const e of entities) {
+    if (e.type === "line" && e.infinite) continue; // construction aid, not geometry
     const l = layerOf(e);
     if (!byLayer.has(l)) byLayer.set(l, []);
     byLayer.get(l)!.push(e);

@@ -9,6 +9,7 @@ export * from "./shapes";
 export * from "./joinExplode";
 export * from "./grips";
 export * from "./alignLengthen";
+export * from "./stretch";
 export * from "./entities";
 export * from "./groups";
 export * from "./constraints";

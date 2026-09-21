@@ -458,16 +458,16 @@ export function diffToCommands(doc: SketchDocument, parsed: ParsedEntity[]): Com
       if (!sameGeometry(existing, p) || existing.name !== p.name) {
         // Preserve the entity's layer (and a polyline's bulges, or an image's
         // pixel data) — sketch code doesn't express any of those.
-        commands.push({
-          type: "update-entity",
-          entity: toEntity(
-            p,
-            existing.id,
-            existing.layer,
-            existing.type === "polyline" ? existing.bulges : undefined,
-            existing.type === "image" ? existing.dataUrl : undefined,
-          ),
-        });
+        const updated = toEntity(
+          p,
+          existing.id,
+          existing.layer,
+          existing.type === "polyline" ? existing.bulges : undefined,
+          existing.type === "image" ? existing.dataUrl : undefined,
+        );
+        // Sketch code has no word for a construction line's infinite flag; keep it.
+        if (existing.type === "line" && existing.infinite && updated.type === "line") updated.infinite = true;
+        commands.push({ type: "update-entity", entity: updated });
       }
     } else if (p.type !== "image") {
       // An image can't be created from sketch code — it has no way to author

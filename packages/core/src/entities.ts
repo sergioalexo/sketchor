@@ -22,6 +22,12 @@ export interface LineEntity {
   dashed?: boolean;
   a: Point;
   b: Point;
+  /**
+   * An infinite construction line (AutoCAD XLINE, roadmap T-07): `a` and
+   * `b` only fix its direction. Drawn clipped to the viewport, always
+   * dashed, never exported to DXF/SVG, and it snaps like any line.
+   */
+  infinite?: boolean;
 }
 
 export interface CircleEntity {

@@ -208,6 +208,9 @@ which tier each gap sits in. Update its status when you close one out.
   `commands.test.ts`. That table drives the execute/undo/redo round-trip across
   every command type, and a command missing from it is a command whose inverse
   nothing checks — the one failure mode that corrupts a drawing silently.
+- **A new entity field** (e.g. `LineEntity.infinite`) has to be considered in
+  `renderer.ts`, `intersect.ts`'s `pathOf`, both exporters, and `sketchtext.ts`'s
+  `diffToCommands` (the DSL can't express it, so an edit must carry it over).
 - **A new entity type** needs `translated`/`rotated`/`transformed` preserving
   id/name/layer/colour/fill, a sketch-code round-trip (`toCode` -> `parseCode` ->
   `diffToCommands` updating in place with the same id), and DXF + SVG round-trips.

@@ -13,6 +13,7 @@ import {
   newEntityId,
   offsetEntity,
   pointsAlong,
+  stretchEntities,
   transformed,
   splitAt,
   trimAt,
@@ -621,6 +622,69 @@ export class LengthenTool implements Tool {
   preview(): Entity[] {
     return [];
   }
+}
+
+/* --------------------------------- stretch -------------------------------- */
+
+/**
+ * Stretch (T-18): two corners of a crossing box, then a base point and a
+ * destination (or a typed @dx,dy). Every defining point inside the box
+ * moves; the rest stay — the two-click "make this bracket 20 longer".
+ */
+export class StretchTool implements Tool {
+  readonly id = "stretch" as const;
+  private picks: Point[] = [];
+
+  prompt(): string {
+    return [
+      "Stretch: specify the first corner of the crossing box (around the ends to move)",
+      "Specify the opposite corner",
+      "Specify the base point",
+      "Specify the destination — or type @dx,dy / a distance",
+    ][this.picks.length];
+  }
+  busy(): boolean {
+    return this.picks.length > 0;
+  }
+  anchor(): Point | null {
+    return this.picks.length === 3 ? this.picks[2] : null;
+  }
+  cancel(): void {
+    this.picks = [];
+  }
+  pick(ctx: ToolContext, p: Pick): void {
+    if (this.picks.length < 2) {
+      this.picks.push(p.world);
+      return;
+    }
+    this.picks.push(p.point);
+    if (this.picks.length < 4) return;
+    const [c1, c2, base, to] = this.picks;
+    this.picks = [];
+    const dx = to.x - base.x;
+    const dy = to.y - base.y;
+    if (dx === 0 && dy === 0) return;
+    const changed = stretchEntities(visible(ctx), this.box(c1, c2), dx, dy);
+    if (changed.length === 0) return;
+    ctx.commit(changed.map((entity): Command => ({ type: "update-entity", entity })));
+  }
+  preview(ctx: ToolContext, cursor: Point | null): Entity[] {
+    if (!cursor || this.picks.length === 0) return [];
+    const [c1, c2, base] = this.picks;
+    if (this.picks.length === 1) return [rectPreview(c1, cursor)];
+    const box = rectPreview(c1, c2);
+    if (this.picks.length === 2) return [box];
+    const dx = cursor.x - base.x;
+    const dy = cursor.y - base.y;
+    return [box, ...stretchEntities(visible(ctx), this.box(c1, c2), dx, dy).map((e) => ({ ...e, id: `preview-${e.id}` }))];
+  }
+  private box(a: Point, b: Point) {
+    return { minX: Math.min(a.x, b.x), minY: Math.min(a.y, b.y), maxX: Math.max(a.x, b.x), maxY: Math.max(a.y, b.y) };
+  }
+}
+
+function rectPreview(a: Point, b: Point): Entity {
+  return { id: "preview-box", type: "polyline", points: [a, { x: b.x, y: a.y }, b, { x: a.x, y: b.y }], closed: true };
 }
 
 /* ----------------------------- match properties ---------------------------- */

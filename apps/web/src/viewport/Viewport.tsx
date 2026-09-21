@@ -786,6 +786,8 @@ export function Viewport() {
         app.setTool("lengthen");
       } else if (matchesBinding(e, "tool.match")) {
         app.setTool("match");
+      } else if (matchesBinding(e, "tool.stretch")) {
+        app.setTool("stretch");
       } else if (matchesBinding(e, "tool.point")) {
         app.setTool("point");
       } else if (matchesBinding(e, "tool.image")) {
@@ -981,6 +983,7 @@ export function Viewport() {
       case "align":
       case "lengthen":
       case "match":
+      case "stretch":
         // On the tool framework; dispatched above.
         break;
       case "image": {

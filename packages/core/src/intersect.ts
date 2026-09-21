@@ -38,8 +38,17 @@ const TAU = Math.PI * 2;
 /** The entity as a path of curves, or null for entity types with no stroke (text, image, point). */
 export function pathOf(entity: Entity): Path | null {
   switch (entity.type) {
-    case "line":
-      return { curves: [{ kind: "segment", a: entity.a, b: entity.b }], closed: false };
+    case "line": {
+      if (!entity.infinite) return { curves: [{ kind: "segment", a: entity.a, b: entity.b }], closed: false };
+      // A construction line: a segment long enough to stand in for the whole line.
+      const dx = entity.b.x - entity.a.x;
+      const dy = entity.b.y - entity.a.y;
+      const l = Math.hypot(dx, dy) || 1;
+      const reach = 1e7;
+      const a = { x: entity.a.x - (dx / l) * reach, y: entity.a.y - (dy / l) * reach };
+      const b = { x: entity.b.x + (dx / l) * reach, y: entity.b.y + (dy / l) * reach };
+      return { curves: [{ kind: "segment", a, b }], closed: false };
+    }
     case "circle":
       return {
         curves: [{ kind: "arc", center: entity.center, radius: entity.radius, startAngle: 0, endAngle: TAU, ccw: true, full: true }],

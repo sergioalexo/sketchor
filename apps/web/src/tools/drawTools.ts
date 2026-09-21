@@ -33,13 +33,26 @@ const PREVIEW = "preview";
 
 /* --------------------------------- line ---------------------------------- */
 
-/** Chained lines: each click ends one segment and starts the next. */
+/**
+ * Chained lines: each click ends one segment and starts the next. Tab
+ * switches to construction-line mode (T-07): two points fix an infinite
+ * dashed line that snaps like geometry but never exports.
+ */
 export class LineTool implements Tool {
   readonly id = "line" as const;
+  infinite = false;
   private start: Point | null = null;
 
   prompt(): string {
-    return this.start ? "Specify next point (Esc to finish)" : "Specify first point";
+    if (this.infinite) return this.start ? "Construction line: specify a second point on it (Tab for normal lines)" : "Construction line: specify a point on it (Tab for normal lines)";
+    return this.start ? "Specify next point (Esc to finish)" : "Specify first point (Tab for an infinite construction line)";
+  }
+  key(ctx: ToolContext, e: KeyboardEvent): boolean {
+    if (e.key !== "Tab" || e.ctrlKey || e.metaKey || e.altKey) return false;
+    this.infinite = !this.infinite;
+    this.start = null;
+    ctx.redraw();
+    return true;
   }
   busy(): boolean {
     return this.start !== null;
@@ -61,14 +74,18 @@ export class LineTool implements Tool {
           ...layerProp(ctx.activeLayer()),
           a: this.start,
           b: p.point,
+          ...(this.infinite ? { infinite: true } : {}),
         },
       });
+      // A construction line is one shot; ordinary lines chain.
+      this.start = this.infinite ? null : p.point;
+      return;
     }
     this.start = p.point;
   }
   preview(_ctx: ToolContext, cursor: Point | null): Entity[] {
     if (!this.start || !cursor) return [];
-    return [{ id: PREVIEW, type: "line", a: this.start, b: cursor }];
+    return [{ id: PREVIEW, type: "line", a: this.start, b: cursor, ...(this.infinite ? { infinite: true } : {}) }];
   }
 }
 

@@ -10,6 +10,7 @@ Status as of 2026-09-11 (`main` @ v0.14.4).
 
 | Date | Items | Notes |
 |---|---|---|
+| 2026-09-21 | **T-18** stretch, **T-07** construction line | `packages/core/src/stretch.ts` (tested): every defining point inside the crossing box moves, the rest stay; circles/text/images move with their insertion point; an arc with one end inside keeps its radius and gets a new center. **Stretch** tool (`Shift+E`): two box corners, base, destination (typed `@dx,dy` works). `LineEntity.infinite` (T-07): the line tool's Tab mode draws an infinite dashed construction line — clipped to the viewport, snaps and trims like the whole line, skipped by DXF/SVG export, flag kept through sketch-code edits. |
 | 2026-09-21 | **T-27** grips, **T-28** properties, **T-24** align, **T-23** lengthen, **T-26** match | `packages/core/src/grips.ts` (tested): `gripsOf` / `applyGrip` — end and vertex grips stretch, mid/center/insert grips move, quadrant sets radius, arc end changes its angle, image corners resize; the select tool drags them with snapping (the entity itself excluded) and a dashed preview, one `update-entity`. **Properties panel** (`properties/PropertiesPanel.tsx`, Ctrl+1): layer / colour / construction for any selection; for one entity every geometric field editable in the display unit plus read-only length / area / circumference / sweep; polyline vertices editable. `alignLengthen.ts` (tested): **Align** tool (two source → two target points, Ctrl scales), **Lengthen** tool (`+5`, `-5`, `40`, `150%`), **Match** tool (layer / colour / construction). |
 | 2026-09-21 | **T-22** join/explode, **T-19** divide, **T-29** (part) | `packages/core/src/joinExplode.ts` (tested): `joinEntities` chains lines/arcs/open polylines end-to-end (either orientation) into polylines with bulged legs, closing when the ends meet; `explodePolyline` back to lines/arcs; `pointsAlong` for divide/measure. `J` joins the selection, `Ctrl+E` explodes it. **Divide** tool: type a count or a spacing, click the entity → point entities. `Ctrl+A` select all, `Ctrl+I` invert, `Z` zoom window (two corners), `Shift+Z` zoom previous (20-deep history). *Open from T-29:* select similar / by layer, lasso, fence, selection cycling, layer lock. |
 | 2026-09-21 | **T-02**, **T-04**, **T-05**, **T-06** | `packages/core/src/shapes.ts` (tested): `circleFrom2Points/3Points`, `circleTangentToTwo` (TTR via the intersection lib's offset loci, side by the picks), `rectFromCenter`, `rectFrom3Points`, `regularPolygon` (inscribed/circumscribed) + `regularPolygonByEdge`, `straightSlot`, `arcSlot` (closed polylines with bulged caps). Circle tool: Tab cycles center-radius / center-diameter / 2-point / 3-point / tangent-tangent-radius (typed radius, click two entities). Rectangle tool: Tab cycles corners / center / 3-point. New **Polygon** (type sides, Tab: inscribed / circumscribed / by edge) and **Slot** (straight or arc, width typed or picked) tools. T-07 XLINE still open. |
@@ -281,7 +282,7 @@ Right-side panel (sibling of Layers/Code) showing the selection: common section 
 - Zoom window (`Z` then drag), zoom selected, zoom previous (view history stack), middle-button double-click = fit.
 - Lock layers (existing layers panel: lock = non-selectable, drawn dimmed).
 
-### T-18 · Stretch — **P1, M**
+### T-18 · Stretch — **P1, M** — ✅ 2026-09-21
 
 Crossing box, then base → target: endpoints *inside* the box move, endpoints outside stay, entities entirely inside move whole. Arcs recompute from moved endpoints keeping the radius (AutoCAD keeps the center displacement — either is acceptable; document it). This is the AutoCAD tool that makes "lengthen this bracket by 20" a two-click job.
 
@@ -293,7 +294,7 @@ Crossing box, then base → target: endpoints *inside* the box move, endpoints o
 - **Align:** two source points → two target points = move + rotate (+ optional scale). Straighten becomes a special case.
 - **Polyline edit:** fold into grips (T-27) + a context menu: add/remove vertex, seg→arc/arc→seg, reverse direction, open/close, decurve, fit-arc-through-vertices. Don't build a PEDIT modal.
 
-### T-04 · Polygon, T-05 · Rectangle modes, T-06 · Slot, T-07 · Construction line — **S each** — 🟡 T-04/05/06 ✅ 2026-09-21; T-07 open
+### T-04 · Polygon, T-05 · Rectangle modes, T-06 · Slot, T-07 · Construction line — **S each** — ✅ all four 2026-09-21
 
 - Polygon: N sides, center + vertex (inscribed) or center + edge-midpoint (circumscribed), or edge–edge. Emits a closed polyline.
 - Rectangle: `center-point` mode and `3-point` (rotated) mode on the existing tool; typed `W×H` via T-08.

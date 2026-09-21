@@ -281,11 +281,12 @@ export type ToolId =
   | "divide"
   | "align"
   | "lengthen"
-  | "match";
+  | "match"
+  | "stretch";
 
 export const TOOL_HINTS: Record<ToolId, string> = {
   select: "Click to select (Shift adds) - drag left-to-right to window-select, right-to-left to crossing-select - drag to move - Del deletes - G groups - U ungroups - Shift+C toggles the selection between construction (dashed) and normal lines",
-  line: "Click start point, then click next points to chain - or type a length, 100<45, @dx,dy - F8 ortho, F10 polar - Esc finishes and returns to the select tool",
+  line: "Click start point, then click next points to chain - or type a length, 100<45, @dx,dy - F8 ortho, F10 polar - Tab draws an infinite construction line instead - Esc finishes and returns to the select tool",
   polyline: "Click each vertex - A switches to an arc leg (two clicks: through-point, end), T to a tangent arc, L back to lines - Enter or double-click to finish, C to close, Backspace undoes the last vertex",
   rectangle: "Click one corner, then the opposite corner - Tab cycles to center + corner and to three-point (rotated)",
   circle: "Click center, then a point on the circle or type the radius - Tab cycles to center-diameter, two-point, three-point, and tangent-tangent-radius (type the radius, click two entities)",
@@ -315,6 +316,7 @@ export const TOOL_HINTS: Record<ToolId, string> = {
   align: "Select, then click a source point and where it goes, a second source point and where it goes - the selection moves and rotates to match (Ctrl-click the last point to scale too)",
   lengthen: "Type +5 / -5 (change), 40 (new total length) or 150% - then click a line or arc near the end to change",
   match: "Click the source entity, then every entity that should take its layer, colour and construction flag",
+  stretch: "Drag a crossing box around the ends to move (two corners), then click a base point and a destination - endpoints inside the box move, the rest stay",
 };
 
 export type StraightenAxis = "horizontal" | "vertical";

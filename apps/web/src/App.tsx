@@ -404,6 +404,18 @@ const TOOLS: { id: ToolId; label: string; keyHint: string; icon: JSX.Element; di
     ),
   },
   {
+    id: "stretch",
+    label: "Stretch",
+    keyHint: "",
+    icon: (
+      <svg viewBox="0 0 24 24" width="20" height="20">
+        <path d="M4 8h10v8H4z" {...S} />
+        <path d="M14 8h4v8h-4" {...S} strokeDasharray="3 2" />
+        <path d="M18 12h3m-2-2l2 2-2 2" {...S} />
+      </svg>
+    ),
+  },
+  {
     id: "match",
     label: "Match",
     keyHint: "",

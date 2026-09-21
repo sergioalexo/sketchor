@@ -40,6 +40,8 @@ npm run desktop    # native desktop window via Tauri (needs Rust toolchain)
 | Zoom window / previous | `Z` then two corners / `Shift+Z` |
 | Grips | with something selected, drag a square handle: ends and vertices stretch, hollow midpoint/center handles move, a circle's quadrant sets the radius |
 | Properties panel | `Ctrl+1` — edit the selection's layer, colour, construction flag, and (for one entity) every coordinate, radius, angle, text or vertex numerically |
+| Stretch | `Shift+E` — two corners of a crossing box around the ends to move, then base point and destination: endpoints inside move, the rest stay |
+| Construction line | `L` then `Tab` — two points fix an infinite dashed line that snaps and trims like geometry but never exports |
 | Align / Lengthen / Match | `Shift+A` two source points → two targets (Ctrl-click the last to scale) · `Shift+L` type `+5`, `-5`, `40` or `150%` then click near an end · Match: click a source, then the entities that should take its layer/colour |
 
 Snapping is automatic, in priority order: **the origin**, endpoints, centers,

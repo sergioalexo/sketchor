@@ -174,7 +174,9 @@ export function entitiesToDxf(entities: Entity[], insUnits = 0, scale = 1): stri
 
   const tables = `0\nSECTION\n2\nTABLES\n${layerTable(layers)}0\nENDSEC\n`;
 
-  const entitiesSection = `0\nSECTION\n2\nENTITIES\n${scaled.map(entityDxf).join("")}0\nENDSEC\n`;
+  // Infinite construction lines are drawing aids, not geometry: they stay out of the file.
+  const exported = scaled.filter((e) => !(e.type === "line" && e.infinite));
+  const entitiesSection = `0\nSECTION\n2\nENTITIES\n${exported.map(entityDxf).join("")}0\nENDSEC\n`;
 
   return `${header}${tables}${entitiesSection}0\nEOF\n`;
 }

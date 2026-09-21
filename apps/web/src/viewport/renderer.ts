@@ -681,11 +681,22 @@ function drawEntity(
     return;
   }
 
-  ctx.setLineDash(entity.dashed ? [6, 4] : []);
+  ctx.setLineDash(entity.dashed || (entity.type === "line" && entity.infinite) ? [6, 4] : []);
   ctx.beginPath();
   if (entity.type === "line") {
-    const a = worldToScreen(view, entity.a);
-    const b = worldToScreen(view, entity.b);
+    let a = worldToScreen(view, entity.a);
+    let b = worldToScreen(view, entity.b);
+    if (entity.infinite) {
+      // Extend far past any screen the canvas could be; the browser clips the rest.
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      const l = Math.hypot(dx, dy) || 1;
+      const reach = 1e5;
+      const ux = (dx / l) * reach;
+      const uy = (dy / l) * reach;
+      a = { x: a.x - ux, y: a.y - uy };
+      b = { x: b.x + ux, y: b.y + uy };
+    }
     ctx.moveTo(a.x, a.y);
     ctx.lineTo(b.x, b.y);
   } else if (entity.type === "circle") {
