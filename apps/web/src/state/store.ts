@@ -257,6 +257,8 @@ export type ToolId =
   | "rectangle"
   | "circle"
   | "arc"
+  | "polygon"
+  | "slot"
   | "point"
   | "image"
   | "measure"
@@ -280,8 +282,10 @@ export const TOOL_HINTS: Record<ToolId, string> = {
   select: "Click to select (Shift adds) - drag left-to-right to window-select, right-to-left to crossing-select - drag to move - Del deletes - G groups - U ungroups - Shift+C toggles the selection between construction (dashed) and normal lines",
   line: "Click start point, then click next points to chain - or type a length, 100<45, @dx,dy - F8 ortho, F10 polar - Esc finishes and returns to the select tool",
   polyline: "Click each vertex - A switches to an arc leg (two clicks: through-point, end), T to a tangent arc, L back to lines - Enter or double-click to finish, C to close, Backspace undoes the last vertex",
-  rectangle: "Click one corner, then click the opposite corner",
-  circle: "Click center, then click a point on the circle - or type the radius",
+  rectangle: "Click one corner, then the opposite corner - Tab cycles to center + corner and to three-point (rotated)",
+  circle: "Click center, then a point on the circle or type the radius - Tab cycles to center-diameter, two-point, three-point, and tangent-tangent-radius (type the radius, click two entities)",
+  polygon: "Type the number of sides, click the center, then a vertex - Tab cycles to circumscribed (click an edge midpoint - across flats) and by edge",
+  slot: "Click the two centres, then type the width or pick a point at half the width from the centreline - Tab switches to an arc slot (center, start, end, width)",
   arc: "Three-point arc: click start, end, then a point on the arc - Tab cycles to center-start-end (Shift-click for clockwise) and tangent arc (click near the end of a line or arc, then the end point)",
   point: "Click to place a point",
   image: "Click where the image goes, then pick a picture file — drops back to the select tool once it's placed",

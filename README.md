@@ -16,7 +16,9 @@ npm run desktop    # native desktop window via Tauri (needs Rust toolchain)
 |---|---|
 | Line tool | `L` — click points to chain, `Esc` to finish |
 | Polyline tool | `W` — click each vertex; `A` makes the next leg an arc (through-point, then end), `T` a tangent arc, `L` back to straight; `Enter` or double-click finishes, `C` closes the shape, `Backspace` undoes a vertex |
-| Circle tool | `C` — click center, then a point on the circle (or type the radius) |
+| Circle tool | `C` — click center, then a point on the circle (or type the radius); `Tab` cycles center-diameter, two-point, three-point and tangent-tangent-radius (type the radius, click two entities) |
+| Rectangle tool | `R` — two corners; `Tab` cycles center + corner and three-point (rotated) |
+| Polygon / Slot tools | Polygon: type the number of sides, center + vertex (`Tab`: circumscribed — across flats — or by edge). Slot: two centres then the width, or `Tab` for an arc slot (center, start, end, width) |
 | Arc tool | `A` — three-point (start, end, point on the arc); `Tab` cycles to center-start-end and tangent-continuation |
 | Move / Copy / Rotate / Scale / Mirror | `Shift+M` / `Shift+D` / `Shift+R` / `Shift+S` / `Shift+I` — select first (or click the object), then follow the status-bar prompt: base point and destination, pivot and angle (typed or two directions), base and factor or reference length, two axis points. `Ctrl`-click the last point to copy instead of modify (mirror: to delete the source) |
 | Trim / Split | `Shift+T` click the piece to remove (everything visible cuts); `Shift`-click near an end to extend it to the next boundary · `Shift+B` click where to cut |

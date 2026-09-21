@@ -703,6 +703,10 @@ export function Viewport() {
         app.setTool("circle");
       } else if (matchesBinding(e, "tool.arc")) {
         app.setTool("arc");
+      } else if (matchesBinding(e, "tool.polygon")) {
+        app.setTool("polygon");
+      } else if (matchesBinding(e, "tool.slot")) {
+        app.setTool("slot");
       } else if (matchesBinding(e, "tool.move")) {
         app.setTool("move");
       } else if (matchesBinding(e, "tool.copy")) {
@@ -864,6 +868,8 @@ export function Viewport() {
       case "polyline":
       case "circle":
       case "arc":
+      case "polygon":
+      case "slot":
       case "rectangle":
       case "point":
       case "move":

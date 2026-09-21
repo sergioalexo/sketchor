@@ -114,6 +114,27 @@ const TOOLS: { id: ToolId; label: string; keyHint: string; icon: JSX.Element; di
     ),
   },
   {
+    id: "polygon",
+    label: "Polygon",
+    keyHint: "",
+    icon: (
+      <svg viewBox="0 0 24 24" width="20" height="20">
+        <path d="M12 3l7.8 5.7-3 9.3H7.2l-3-9.3z" {...S} />
+      </svg>
+    ),
+  },
+  {
+    id: "slot",
+    label: "Slot",
+    keyHint: "",
+    icon: (
+      <svg viewBox="0 0 24 24" width="20" height="20">
+        <path d="M8 8h8a4 4 0 010 8H8a4 4 0 010-8z" {...S} />
+        <path d="M8 12h.01M16 12h.01" {...S} strokeWidth="2.6" />
+      </svg>
+    ),
+  },
+  {
     id: "point",
     label: "Point",
     keyHint: "P",

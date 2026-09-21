@@ -1,5 +1,5 @@
 import type { ToolId } from "../state/store";
-import { ArcTool, CircleTool, LineTool, PointTool, PolylineTool, RectangleTool } from "./drawTools";
+import { ArcTool, CircleTool, LineTool, PointTool, PolygonTool, PolylineTool, RectangleTool, SlotTool } from "./drawTools";
 import { ChamferTool, FilletTool, OffsetTool, SplitTool, TrimTool } from "./editTools";
 import { CopyTool, MirrorTool, MoveTool, RotateTool, ScaleTool } from "./modifyTools";
 import type { Tool } from "./tool";
@@ -16,6 +16,8 @@ const TOOLS: Partial<Record<ToolId, Tool>> = {
   circle: new CircleTool(),
   point: new PointTool(),
   arc: new ArcTool(),
+  polygon: new PolygonTool(),
+  slot: new SlotTool(),
   move: new MoveTool(),
   copy: new CopyTool(),
   rotate: new RotateTool(),

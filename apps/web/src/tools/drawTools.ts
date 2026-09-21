@@ -3,13 +3,23 @@ import {
   arcFrom3Points,
   arcFromCenterStartEnd,
   arcPointAt,
+  arcSlot,
   bulgeFrom3Points,
   bulgeToArc,
+  circleFrom2Points,
+  circleFrom3Points,
+  circleTangentToTwo,
   dist,
   newEntityId,
   nextEntityName,
+  rectFrom3Points,
+  rectFromCenter,
+  regularPolygon,
+  regularPolygonByEdge,
+  straightSlot,
   tangentArc,
 } from "@sketchor/core";
+import { parseLength } from "./typedInput";
 import { layerProp, type Pick, type Tool, type ToolContext } from "./tool";
 
 /**
@@ -267,28 +277,52 @@ export function rectFromCorners(a: Point, b: Point): Point[] {
   ];
 }
 
+export type RectMode = "corners" | "center" | "3-point";
+
+/**
+ * Rectangle (T-05): two opposite corners (default), center + corner, or
+ * three points for a rotated one (edge start, edge end, width side). Tab
+ * cycles the mode.
+ */
 export class RectangleTool implements Tool {
   readonly id = "rectangle" as const;
-  private corner: Point | null = null;
+  mode: RectMode = "corners";
+  private picks: Point[] = [];
 
   prompt(): string {
-    return this.corner ? "Specify the opposite corner" : "Specify first corner";
+    const modes = "(Tab: corners / center / 3-point)";
+    const n = this.picks.length;
+    if (this.mode === "center") return n === 0 ? `Rectangle by center: specify the center ${modes}` : "Specify a corner";
+    if (this.mode === "3-point") {
+      return n === 0 ? `Rotated rectangle: specify the first corner ${modes}` : n === 1 ? "Specify the end of the first edge" : "Specify the width (a point on the far side)";
+    }
+    return n === 0 ? `Rectangle: specify first corner ${modes}` : "Specify the opposite corner";
   }
   busy(): boolean {
-    return this.corner !== null;
+    return this.picks.length > 0;
   }
   anchor(): Point | null {
-    return this.corner;
+    return this.picks[this.picks.length - 1] ?? null;
   }
   cancel(): void {
-    this.corner = null;
+    this.picks = [];
+  }
+  key(ctx: ToolContext, e: KeyboardEvent): boolean {
+    if (e.key !== "Tab" || e.ctrlKey || e.metaKey || e.altKey) return false;
+    const order: RectMode[] = ["corners", "center", "3-point"];
+    this.mode = order[(order.indexOf(this.mode) + (e.shiftKey ? 2 : 1)) % 3];
+    this.cancel();
+    ctx.redraw();
+    return true;
   }
   pick(ctx: ToolContext, p: Pick): void {
-    if (!this.corner) {
-      this.corner = p.point;
-      return;
-    }
-    if (dist(this.corner, p.point) > 0) {
+    const last = this.anchor();
+    if (last && dist(last, p.point) === 0) return;
+    this.picks.push(p.point);
+    const needed = this.mode === "3-point" ? 3 : 2;
+    if (this.picks.length < needed) return;
+    const points = this.resolve(this.picks);
+    if (points) {
       ctx.execute({
         type: "add-entity",
         entity: {
@@ -296,61 +330,160 @@ export class RectangleTool implements Tool {
           type: "polyline",
           name: nextEntityName(ctx.doc, "polyline"),
           ...layerProp(ctx.activeLayer()),
-          points: rectFromCorners(this.corner, p.point),
+          points,
           closed: true,
         },
       });
+      this.picks = [];
+    } else {
+      this.picks.pop();
     }
-    this.corner = null;
   }
   preview(_ctx: ToolContext, cursor: Point | null): Entity[] {
-    if (!this.corner || !cursor) return [];
-    return [{ id: PREVIEW, type: "polyline", points: rectFromCorners(this.corner, cursor), closed: true }];
+    if (this.picks.length === 0 || !cursor) return [];
+    const points = this.resolve([...this.picks, cursor]);
+    if (points) return [{ id: PREVIEW, type: "polyline", points, closed: true }];
+    if (this.mode === "3-point" && this.picks.length === 1) return [{ id: PREVIEW, type: "line", a: this.picks[0], b: cursor }];
+    return [];
+  }
+  private resolve(picks: Point[]): Point[] | null {
+    if (this.mode === "center") return picks.length >= 2 ? rectFromCenter(picks[0], picks[1]) : null;
+    if (this.mode === "3-point") return picks.length >= 3 ? rectFrom3Points(picks[0], picks[1], picks[2]) : null;
+    if (picks.length < 2 || dist(picks[0], picks[1]) === 0) return null;
+    return rectFromCorners(picks[0], picks[1]);
   }
 }
 
 /* --------------------------------- circle --------------------------------- */
 
+export type CircleMode = "center-radius" | "center-diameter" | "2-point" | "3-point" | "tan-tan-radius";
+
+/**
+ * Circle (T-02): center + radius (default; type the radius), center +
+ * diameter, two diameter ends, three points, or tangent to two entities
+ * with a typed radius (AutoCAD TTR — the picks say which side). Tab cycles.
+ */
 export class CircleTool implements Tool {
   readonly id = "circle" as const;
-  private center: Point | null = null;
+  mode: CircleMode = "center-radius";
+  /** Remembered TTR radius. */
+  ttrRadius = 0;
+  private picks: Point[] = [];
+  private tangents: Entity[] = [];
+  private message: string | null = null;
 
-  prompt(): string {
-    return this.center ? "Specify a point on the circle, or type the radius" : "Specify center";
+  prompt(ctx: ToolContext): string {
+    if (this.message) return this.message;
+    const modes = "(Tab: center-radius / center-diameter / 2-point / 3-point / tangent-tangent-radius)";
+    const n = this.picks.length;
+    switch (this.mode) {
+      case "center-diameter":
+        return n === 0 ? `Circle by diameter: specify center ${modes}` : "Specify a point at the diameter's distance, or type the diameter";
+      case "2-point":
+        return n === 0 ? `Circle by two points: specify one end of the diameter ${modes}` : "Specify the other end of the diameter";
+      case "3-point":
+        return n === 0 ? `Circle by three points: specify the first ${modes}` : n === 1 ? "Specify the second point" : "Specify the third point";
+      case "tan-tan-radius": {
+        const r = this.ttrRadius > 0 ? `radius ${this.ttrRadius}` : "type the radius first";
+        return this.tangents.length === 0 ? `Tangent circle (${r}): click the first line, arc or circle ${modes}` : "Click the second line, arc or circle";
+      }
+      default:
+        return n === 0 ? `Circle: specify center ${modes}` : "Specify a point on the circle, or type the radius";
+    }
   }
   busy(): boolean {
-    return this.center !== null;
+    return this.picks.length > 0 || this.tangents.length > 0;
   }
   anchor(): Point | null {
-    return this.center;
+    return this.picks[0] ?? null;
   }
   cancel(): void {
-    this.center = null;
+    this.picks = [];
+    this.tangents = [];
+    this.message = null;
+  }
+  key(ctx: ToolContext, e: KeyboardEvent): boolean {
+    if (e.key !== "Tab" || e.ctrlKey || e.metaKey || e.altKey) return false;
+    const order: CircleMode[] = ["center-radius", "center-diameter", "2-point", "3-point", "tan-tan-radius"];
+    this.mode = order[(order.indexOf(this.mode) + (e.shiftKey ? order.length - 1 : 1)) % order.length];
+    this.cancel();
+    ctx.redraw();
+    return true;
+  }
+  typed(ctx: ToolContext, text: string): boolean {
+    // A bare number is the radius / diameter for the modes where that's what's being asked.
+    const v = parseLength(text, ctx.displayUnit());
+    if (v === null || v <= 0) return false;
+    if (this.mode === "tan-tan-radius") {
+      this.ttrRadius = v;
+      this.message = null;
+      return true;
+    }
+    if (this.picks.length !== 1 || (this.mode !== "center-radius" && this.mode !== "center-diameter")) return false;
+    this.commit(ctx, this.picks[0], this.mode === "center-diameter" ? v / 2 : v);
+    return true;
   }
   pick(ctx: ToolContext, p: Pick): void {
-    if (!this.center) {
-      this.center = p.point;
+    this.message = null;
+    if (this.mode === "tan-tan-radius") {
+      if (this.ttrRadius <= 0) {
+        this.message = "Type the radius first, then click the two entities";
+        return;
+      }
+      const ids = ctx.hitTest(p.world);
+      const e = ids.map((id) => ctx.doc.get(id)).find((en): en is Entity => !!en && (en.type === "line" || en.type === "circle" || en.type === "arc"));
+      if (!e) return;
+      this.tangents.push(e);
+      this.picks.push(p.world);
+      if (this.tangents.length < 2) return;
+      const c = circleTangentToTwo(this.tangents[0], this.tangents[1], this.ttrRadius, this.picks[0], this.picks[1]);
+      if (c) this.commit(ctx, c.center, c.radius);
+      else this.message = "No circle of that radius touches both — try a bigger radius or other sides";
+      this.picks = [];
+      this.tangents = [];
       return;
     }
-    const radius = dist(this.center, p.point);
-    if (radius > 0) {
-      ctx.execute({
-        type: "add-entity",
-        entity: {
-          id: newEntityId(),
-          type: "circle",
-          name: nextEntityName(ctx.doc, "circle"),
-          ...layerProp(ctx.activeLayer()),
-          center: this.center,
-          radius,
-        },
-      });
-    }
-    this.center = null;
+    const last = this.picks[this.picks.length - 1];
+    if (last && dist(last, p.point) === 0) return;
+    this.picks.push(p.point);
+    const c = this.resolve(this.picks);
+    const needed = this.mode === "3-point" ? 3 : 2;
+    if (this.picks.length < needed) return;
+    if (c) this.commit(ctx, c.center, c.radius);
+    else this.picks.pop();
   }
   preview(_ctx: ToolContext, cursor: Point | null): Entity[] {
-    if (!this.center || !cursor) return [];
-    return [{ id: PREVIEW, type: "circle", center: this.center, radius: dist(this.center, cursor) }];
+    if (!cursor || this.picks.length === 0 || this.mode === "tan-tan-radius") return [];
+    const c = this.resolve([...this.picks, cursor]);
+    if (c) return [{ id: PREVIEW, type: "circle", center: c.center, radius: c.radius }];
+    if (this.mode === "3-point" && this.picks.length === 1) return [{ id: PREVIEW, type: "line", a: this.picks[0], b: cursor }];
+    return [];
+  }
+  private resolve(picks: Point[]): { center: Point; radius: number } | null {
+    switch (this.mode) {
+      case "center-radius": {
+        const r = picks.length >= 2 ? dist(picks[0], picks[1]) : 0;
+        return r > 0 ? { center: picks[0], radius: r } : null;
+      }
+      case "center-diameter": {
+        const d = picks.length >= 2 ? dist(picks[0], picks[1]) : 0;
+        return d > 0 ? { center: picks[0], radius: d / 2 } : null;
+      }
+      case "2-point":
+        return picks.length >= 2 ? circleFrom2Points(picks[0], picks[1]) : null;
+      case "3-point":
+        return picks.length >= 3 ? circleFrom3Points(picks[0], picks[1], picks[2]) : null;
+      default:
+        return null;
+    }
+  }
+  private commit(ctx: ToolContext, center: Point, radius: number): void {
+    ctx.execute({
+      type: "add-entity",
+      entity: { id: newEntityId(), type: "circle", name: nextEntityName(ctx.doc, "circle"), ...layerProp(ctx.activeLayer()), center, radius },
+    });
+    this.picks = [];
+    this.tangents = [];
   }
 }
 
@@ -382,6 +515,207 @@ export class PointTool implements Tool {
   }
   preview(): Entity[] {
     return [];
+  }
+}
+
+/* --------------------------------- polygon -------------------------------- */
+
+export type PolygonMode = "inscribed" | "circumscribed" | "edge";
+
+/**
+ * Regular polygon (T-04). Type the number of sides first (remembered),
+ * then center + vertex (inscribed, default), center + edge midpoint
+ * (circumscribed — across-flats), or two ends of one edge. Tab cycles.
+ */
+export class PolygonTool implements Tool {
+  readonly id = "polygon" as const;
+  sides = 6;
+  mode: PolygonMode = "inscribed";
+  private picks: Point[] = [];
+
+  prompt(): string {
+    const modes = "(Tab: inscribed / circumscribed / by edge)";
+    if (this.picks.length === 0) return `Polygon, ${this.sides} sides — type a number to change: specify ${this.mode === "edge" ? "one end of an edge" : "the center"} ${modes}`;
+    if (this.mode === "edge") return "Specify the other end of the edge";
+    return this.mode === "inscribed" ? "Specify a vertex (or type the radius)" : "Specify the middle of an edge (or type the distance)";
+  }
+  busy(): boolean {
+    return this.picks.length > 0;
+  }
+  anchor(): Point | null {
+    return this.picks[0] ?? null;
+  }
+  cancel(): void {
+    this.picks = [];
+  }
+  key(ctx: ToolContext, e: KeyboardEvent): boolean {
+    if (e.key !== "Tab" || e.ctrlKey || e.metaKey || e.altKey) return false;
+    const order: PolygonMode[] = ["inscribed", "circumscribed", "edge"];
+    this.mode = order[(order.indexOf(this.mode) + (e.shiftKey ? 2 : 1)) % 3];
+    this.cancel();
+    ctx.redraw();
+    return true;
+  }
+  typed(_ctx: ToolContext, text: string): boolean {
+    if (this.picks.length > 0) return false; // a length now → handled as a point along the cursor
+    const n = Number(text.trim());
+    if (!Number.isInteger(n) || n < 3 || n > 1024) return false;
+    this.sides = n;
+    return true;
+  }
+  pick(ctx: ToolContext, p: Pick): void {
+    const last = this.picks[this.picks.length - 1];
+    if (last && dist(last, p.point) === 0) return;
+    this.picks.push(p.point);
+    if (this.picks.length < 2) return;
+    const points = this.resolve(this.picks);
+    if (points) {
+      ctx.execute({
+        type: "add-entity",
+        entity: { id: newEntityId(), type: "polyline", name: nextEntityName(ctx.doc, "polyline"), ...layerProp(ctx.activeLayer()), points, closed: true },
+      });
+      this.picks = [];
+    } else {
+      this.picks.pop();
+    }
+  }
+  preview(_ctx: ToolContext, cursor: Point | null): Entity[] {
+    if (!cursor || this.picks.length === 0) return [];
+    const points = this.resolve([this.picks[0], cursor]);
+    return points ? [{ id: PREVIEW, type: "polyline", points, closed: true }] : [];
+  }
+  private resolve(picks: Point[]): Point[] | null {
+    if (this.mode === "edge") return regularPolygonByEdge(picks[0], picks[1], this.sides);
+    return regularPolygon(picks[0], picks[1], this.sides, this.mode === "inscribed");
+  }
+}
+
+/* ---------------------------------- slot ---------------------------------- */
+
+export type SlotMode = "straight" | "arc";
+
+/**
+ * Slot (T-06): straight — the two centres, then the width (typed, or a
+ * point at half the width from the centreline); arc — center, a point on
+ * the centreline arc, its end, then the width. One closed polyline with
+ * bulged caps. Tab cycles.
+ */
+export class SlotTool implements Tool {
+  readonly id = "slot" as const;
+  mode: SlotMode = "straight";
+  /** Remembered width; 0 = ask. */
+  width = 0;
+  private picks: Point[] = [];
+
+  prompt(): string {
+    const modes = "(Tab: straight / arc)";
+    const n = this.picks.length;
+    if (this.mode === "arc") {
+      if (n === 0) return `Arc slot: specify the arc's center ${modes}`;
+      if (n === 1) return "Specify the start of the centreline arc";
+      if (n === 2) return "Specify the end of the centreline arc (counterclockwise)";
+      return "Type the slot width, or pick a point at half the width from the centreline";
+    }
+    if (n === 0) return `Slot: specify the first centre ${modes}`;
+    if (n === 1) return "Specify the second centre";
+    return "Type the slot width, or pick a point at half the width from the centreline";
+  }
+  busy(): boolean {
+    return this.picks.length > 0;
+  }
+  anchor(): Point | null {
+    return this.picks[this.picks.length - 1] ?? null;
+  }
+  cancel(): void {
+    this.picks = [];
+  }
+  key(ctx: ToolContext, e: KeyboardEvent): boolean {
+    if (e.key !== "Tab" || e.ctrlKey || e.metaKey || e.altKey) return false;
+    this.mode = this.mode === "straight" ? "arc" : "straight";
+    this.cancel();
+    ctx.redraw();
+    return true;
+  }
+  typed(ctx: ToolContext, text: string): boolean {
+    const centres = this.mode === "arc" ? 3 : 2;
+    if (this.picks.length !== centres) return false;
+    const w = parseLength(text, ctx.displayUnit());
+    if (w === null || w <= 0) return false;
+    this.width = w;
+    this.commit(ctx, w);
+    return true;
+  }
+  pick(ctx: ToolContext, p: Pick): void {
+    const centres = this.mode === "arc" ? 3 : 2;
+    if (this.picks.length < centres) {
+      const last = this.picks[this.picks.length - 1];
+      if (last && dist(last, p.point) === 0) return;
+      this.picks.push(p.point);
+      return;
+    }
+    const w = this.widthFrom(p.point);
+    if (w > 0) {
+      this.width = w;
+      this.commit(ctx, w);
+    }
+  }
+  preview(_ctx: ToolContext, cursor: Point | null): Entity[] {
+    if (!cursor || this.picks.length === 0) return [];
+    const centres = this.mode === "arc" ? 3 : 2;
+    if (this.picks.length < centres) {
+      // Centreline so far.
+      if (this.mode === "arc" && this.picks.length === 2) {
+        const a = this.centreArc([this.picks[0], this.picks[1], cursor]);
+        return a ? [{ id: PREVIEW, type: "arc", ...a }] : [];
+      }
+      return [{ id: PREVIEW, type: "line", a: this.picks[this.picks.length - 1], b: cursor }];
+    }
+    const w = this.width > 0 && dist(cursor, this.picks[this.picks.length - 1]) === 0 ? this.width : this.widthFrom(cursor);
+    const shape = this.build(w > 0 ? w : this.width);
+    return shape ? [{ id: PREVIEW, type: "polyline", points: shape.points, bulges: shape.bulges, closed: true }] : [];
+  }
+  /** Twice the cursor's distance from the centreline. */
+  private widthFrom(p: Point): number {
+    if (this.mode === "arc") {
+      const a = this.centreArc(this.picks);
+      return a ? 2 * Math.abs(dist(p, a.center) - a.radius) : 0;
+    }
+    const [a, b] = this.picks;
+    const l = dist(a, b);
+    if (l < 1e-9) return 0;
+    return 2 * Math.abs((-(b.y - a.y) * (p.x - a.x) + (b.x - a.x) * (p.y - a.y)) / l);
+  }
+  private centreArc(picks: Point[]): { center: Point; radius: number; startAngle: number; endAngle: number; ccw: boolean } | null {
+    if (picks.length < 3) return null;
+    const [c, s, e] = picks;
+    const radius = dist(c, s);
+    if (radius < 1e-9 || dist(c, e) < 1e-9) return null;
+    return { center: c, radius, startAngle: Math.atan2(s.y - c.y, s.x - c.x), endAngle: Math.atan2(e.y - c.y, e.x - c.x), ccw: true };
+  }
+  private build(width: number): { points: Point[]; bulges: number[] } | null {
+    if (width <= 0) return null;
+    if (this.mode === "arc") {
+      const a = this.centreArc(this.picks);
+      return a ? arcSlot(a.center, a.radius, a.startAngle, a.endAngle, width) : null;
+    }
+    return straightSlot(this.picks[0], this.picks[1], width);
+  }
+  private commit(ctx: ToolContext, width: number): void {
+    const shape = this.build(width);
+    if (!shape) return;
+    ctx.execute({
+      type: "add-entity",
+      entity: {
+        id: newEntityId(),
+        type: "polyline",
+        name: nextEntityName(ctx.doc, "polyline"),
+        ...layerProp(ctx.activeLayer()),
+        points: shape.points,
+        closed: true,
+        bulges: shape.bulges,
+      },
+    });
+    this.picks = [];
   }
 }
 
