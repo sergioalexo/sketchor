@@ -9,6 +9,7 @@ import {
   layerOf,
   newEntityId,
   offsetEntity,
+  pointsAlong,
   splitAt,
   trimAt,
 } from "@sketchor/core";
@@ -402,6 +403,100 @@ export class OffsetTool implements Tool {
     if (!this.target || !cursor) return [];
     const copy = offsetEntity(this.target, this.distance, cursor);
     return copy ? [{ ...copy, id: "preview" }] : [];
+  }
+}
+
+/* ------------------------------ zoom window ------------------------------ */
+
+/** Zoom window (T-29): two corners, then back to the select tool. */
+export class ZoomWindowTool implements Tool {
+  readonly id = "zoom" as const;
+  private first: Point | null = null;
+  prompt(): string {
+    return this.first ? "Specify the opposite corner of the area to zoom into" : "Zoom window: specify the first corner";
+  }
+  busy(): boolean {
+    return this.first !== null;
+  }
+  anchor(): Point | null {
+    return null;
+  }
+  cancel(): void {
+    this.first = null;
+  }
+  pick(ctx: ToolContext, p: Pick): void {
+    if (!this.first) {
+      this.first = p.world;
+      return;
+    }
+    const a = this.first;
+    const b = p.world;
+    this.first = null;
+    if (Math.abs(a.x - b.x) < 1e-9 || Math.abs(a.y - b.y) < 1e-9) return;
+    ctx.zoomTo(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.max(a.x, b.x), Math.max(a.y, b.y));
+    ctx.setTool("select");
+  }
+  preview(_ctx: ToolContext, cursor: Point | null): Entity[] {
+    if (!this.first || !cursor) return [];
+    const a = this.first;
+    return [{ id: "preview", type: "polyline", points: [a, { x: cursor.x, y: a.y }, cursor, { x: a.x, y: cursor.y }], closed: true }];
+  }
+}
+
+/* --------------------------------- divide -------------------------------- */
+
+/**
+ * Divide / measure (T-19): type how many equal parts (a plain integer) or a
+ * spacing (a length with a unit, or a decimal), then click the entity;
+ * point entities mark the divisions, on the entity's layer.
+ */
+export class DivideTool implements Tool {
+  readonly id = "divide" as const;
+  private divisions = 2;
+  private spacing = 0;
+  private message: string | null = null;
+  prompt(): string {
+    if (this.message) return this.message;
+    const how = this.spacing > 0 ? `every ${fmt(this.spacing)}` : `${this.divisions} equal parts`;
+    return `Divide (${how}): type a count or a spacing, then click a line, arc, circle or polyline`;
+  }
+  busy(): boolean {
+    return false;
+  }
+  anchor(): Point | null {
+    return null;
+  }
+  cancel(): void {
+    this.message = null;
+  }
+  typed(ctx: ToolContext, text: string): boolean {
+    const t = text.trim();
+    if (/^\d+$/.test(t)) {
+      const n = Number(t);
+      if (n < 2 || n > 10000) return false;
+      this.divisions = n;
+      this.spacing = 0;
+      return true;
+    }
+    const d = parseLength(t, ctx.displayUnit());
+    if (d === null || d <= 0) return false;
+    this.spacing = d;
+    return true;
+  }
+  pick(ctx: ToolContext, p: Pick): void {
+    this.message = null;
+    const target = entityAt(ctx, p.world);
+    if (!target) return;
+    const points = pointsAlong(target, this.spacing > 0 ? { spacing: this.spacing } : { divisions: this.divisions });
+    if (points.length === 0) {
+      this.message = "Nothing to divide here";
+      return;
+    }
+    const layer = target.layer !== undefined ? { layer: target.layer } : {};
+    ctx.commit(points.map((pt): Command => ({ type: "add-entity", entity: { id: newEntityId(), type: "point", ...layer, p: pt } })));
+  }
+  preview(): Entity[] {
+    return [];
   }
 }
 

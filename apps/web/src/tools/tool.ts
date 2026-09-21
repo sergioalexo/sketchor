@@ -41,6 +41,8 @@ export interface ToolContext {
   hitTest(world: Point): EntityId[];
   /** The tab's display unit, for tools that interpret a typed number themselves. */
   displayUnit(): DisplayUnit;
+  /** Frames a world-space box (the zoom-window tool). */
+  zoomTo(minX: number, minY: number, maxX: number, maxY: number): void;
 }
 
 /** One resolved pick: where the user clicked/tapped/typed, after snapping and tracking. */

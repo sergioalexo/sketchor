@@ -366,6 +366,17 @@ const TOOLS: { id: ToolId; label: string; keyHint: string; icon: JSX.Element; di
       </svg>
     ),
   },
+  {
+    id: "divide",
+    label: "Divide",
+    keyHint: "",
+    icon: (
+      <svg viewBox="0 0 24 24" width="20" height="20">
+        <path d="M3 12h18" {...S} />
+        <path d="M8 9v6M12 9v6M16 9v6" {...S} strokeWidth="1.6" />
+      </svg>
+    ),
+  },
 ];
 
 /**

@@ -276,7 +276,9 @@ export type ToolId =
   | "split"
   | "fillet"
   | "chamfer"
-  | "offset";
+  | "offset"
+  | "zoom"
+  | "divide";
 
 export const TOOL_HINTS: Record<ToolId, string> = {
   select: "Click to select (Shift adds) - drag left-to-right to window-select, right-to-left to crossing-select - drag to move - Del deletes - G groups - U ungroups - Shift+C toggles the selection between construction (dashed) and normal lines",
@@ -305,6 +307,8 @@ export const TOOL_HINTS: Record<ToolId, string> = {
   fillet: "Type a radius (0 = sharp corner join), then click two lines on the halves to keep - or click a polyline corner to round it, Enter rounds every corner of the selected polylines",
   chamfer: "Type a distance, then click two lines on the halves to keep - the corner is bevelled at that distance along each",
   offset: "Type the distance, click a line, arc, circle or polyline, then click the side the parallel copy goes on",
+  zoom: "Click two corners of the area to zoom into - Shift+Z goes back to the previous view",
+  divide: "Type the number of parts (or a spacing with a unit, e.g. 25mm), then click a line, arc, circle or polyline - point entities mark the divisions",
 };
 
 export type StraightenAxis = "horizontal" | "vertical";

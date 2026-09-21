@@ -3,6 +3,8 @@ import type { BoxSelectMode, ClosedRegion, Command, Entity, EntityId, Point, Tex
 import {
   arcSweep,
   boundsOf,
+  explodeCommands,
+  joinCommands,
   bulgeToArc,
   dist,
   distToArc,
@@ -384,6 +386,14 @@ export function Viewport() {
         return hit ? resolveSelection(doc, hit, useApp.getState().enteredGroupId) : [];
       },
       displayUnit: () => useApp.getState().displayUnit,
+      zoomTo: (minX, minY, maxX, maxY) => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        rememberView();
+        viewRef.current = fitToBounds({ minX, minY, maxX, maxY }, canvas.clientWidth, canvas.clientHeight, 0.02);
+        useApp.getState().setZoom(viewRef.current.scale);
+        redraw();
+      },
     };
   }
   const toolCtx = toolCtxRef.current;
@@ -566,6 +576,21 @@ export function Viewport() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [duplicateFocus]);
 
+  /** Views before each zoom-extents / zoom-window, for "zoom previous" (T-29). */
+  const viewHistoryRef = useRef<View[]>([]);
+  const rememberView = () => {
+    const h = viewHistoryRef.current;
+    h.push({ ...viewRef.current });
+    if (h.length > 20) h.shift();
+  };
+  const zoomPrevious = () => {
+    const prev = viewHistoryRef.current.pop();
+    if (!prev) return;
+    viewRef.current = prev;
+    useApp.getState().setZoom(prev.scale);
+    redraw();
+  };
+
   /** Zoom-extents: frames `ids` if given and non-empty, else every visible entity. */
   const fitView = (ids?: EntityId[]) => {
     const canvas = canvasRef.current;
@@ -575,6 +600,7 @@ export function Viewport() {
     const targets = ids && ids.length ? visible.filter((e) => ids.includes(e.id)) : visible;
     const bb = boundsOf(targets);
     if (!bb) return;
+    rememberView();
     viewRef.current = fitToBounds(bb, canvas.clientWidth, canvas.clientHeight);
     useApp.getState().setZoom(viewRef.current.scale);
     redraw();
@@ -727,6 +753,8 @@ export function Viewport() {
         app.setTool("chamfer");
       } else if (matchesBinding(e, "tool.offset")) {
         app.setTool("offset");
+      } else if (matchesBinding(e, "tool.divide")) {
+        app.setTool("divide");
       } else if (matchesBinding(e, "tool.point")) {
         app.setTool("point");
       } else if (matchesBinding(e, "tool.image")) {
@@ -735,6 +763,34 @@ export function Viewport() {
         app.setTool("measure");
       } else if (matchesBinding(e, "view.fit")) {
         fitView(app.selection.length ? app.selection : undefined);
+      } else if (matchesBinding(e, "view.zoomPrevious")) {
+        e.preventDefault();
+        zoomPrevious();
+      } else if (matchesBinding(e, "view.zoomWindow")) {
+        app.setTool("zoom");
+      } else if (matchesBinding(e, "edit.selectAll")) {
+        e.preventDefault();
+        const hidden = hiddenLayerSet();
+        app.setSelection(doc.all().filter((en) => !hidden.has(layerOf(en))).map((en) => en.id));
+      } else if (matchesBinding(e, "edit.invertSelection")) {
+        e.preventDefault();
+        const hidden = hiddenLayerSet();
+        const cur = new Set(app.selection);
+        app.setSelection(doc.all().filter((en) => !hidden.has(layerOf(en)) && !cur.has(en.id)).map((en) => en.id));
+      } else if (matchesBinding(e, "edit.join")) {
+        e.preventDefault();
+        const commands = joinCommands(app.selection.map((id) => doc.get(id)).filter((en): en is Entity => !!en));
+        if (commands.length > 0) {
+          bus.execute({ type: "batch", commands });
+          app.setSelection(commands.filter((c) => c.type === "add-entity").map((c) => (c as { entity: Entity }).entity.id));
+        }
+      } else if (matchesBinding(e, "edit.explode")) {
+        e.preventDefault();
+        const commands = explodeCommands(app.selection.map((id) => doc.get(id)).filter((en): en is Entity => !!en));
+        if (commands.length > 0) {
+          bus.execute({ type: "batch", commands });
+          app.setSelection(commands.filter((c) => c.type === "add-entity").map((c) => (c as { entity: Entity }).entity.id));
+        }
       } else if (matchesBinding(e, "tool.straighten")) {
         app.setTool("straighten");
       } else if (matchesBinding(e, "tool.fill")) {
@@ -882,6 +938,8 @@ export function Viewport() {
       case "fillet":
       case "chamfer":
       case "offset":
+      case "zoom":
+      case "divide":
         // On the tool framework; dispatched above.
         break;
       case "image": {
