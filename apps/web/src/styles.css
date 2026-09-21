@@ -2530,3 +2530,60 @@ kbd.shortcut-key-fixed {
   align-self: stretch;
   margin: 6px 2px;
 }
+
+/* ---------- object snap popover ---------- */
+
+.snap-popover-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.snap-popover {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 20;
+  min-width: 200px;
+  padding: 8px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.snap-popover-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-bottom: 6px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.snap-popover-head span {
+  flex: 1;
+}
+
+.snap-popover-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 4px;
+  border-radius: 4px;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.snap-popover-row:hover {
+  background: var(--border);
+}
+
+.app.touch .snap-popover-row {
+  min-height: 36px;
+  font-size: 14px;
+}

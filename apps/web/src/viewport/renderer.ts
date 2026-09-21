@@ -764,6 +764,33 @@ function drawSnapMarker(ctx: CanvasRenderingContext2D, view: View, snap: Snap): 
       ctx.moveTo(s.x, s.y - 4);
       ctx.lineTo(s.x, s.y + 4);
       break;
+    case "node":
+      ctx.arc(s.x, s.y, 4, 0, Math.PI * 2);
+      ctx.moveTo(s.x - 6, s.y);
+      ctx.lineTo(s.x + 6, s.y);
+      ctx.moveTo(s.x, s.y - 6);
+      ctx.lineTo(s.x, s.y + 6);
+      break;
+    case "perpendicular":
+      // AutoCAD's ⟂: a corner mark.
+      ctx.moveTo(s.x - 6, s.y - 6);
+      ctx.lineTo(s.x - 6, s.y + 6);
+      ctx.lineTo(s.x + 6, s.y + 6);
+      ctx.moveTo(s.x - 6, s.y);
+      ctx.lineTo(s.x, s.y);
+      ctx.lineTo(s.x, s.y + 6);
+      break;
+    case "tangent":
+      // A circle with a tangent bar on top.
+      ctx.arc(s.x, s.y + 1, 5, 0, Math.PI * 2);
+      ctx.moveTo(s.x - 7, s.y - 5);
+      ctx.lineTo(s.x + 7, s.y - 5);
+      break;
+    case "extension":
+      // A short dashed tick; the guide ray is drawn separately.
+      ctx.moveTo(s.x - 5, s.y + 5);
+      ctx.lineTo(s.x + 5, s.y - 5);
+      break;
     case "tracking":
       // A diamond: the point is on a guide, not on geometry.
       ctx.moveTo(s.x, s.y - 6);
@@ -774,6 +801,17 @@ function drawSnapMarker(ctx: CanvasRenderingContext2D, view: View, snap: Snap): 
       break;
   }
   ctx.stroke();
+  if (snap.kind === "extension" && snap.guideFrom) {
+    const g = worldToScreen(view, snap.guideFrom);
+    ctx.save();
+    ctx.globalAlpha = 0.55;
+    ctx.setLineDash([2, 4]);
+    ctx.beginPath();
+    ctx.moveTo(g.x, g.y);
+    ctx.lineTo(s.x, s.y);
+    ctx.stroke();
+    ctx.restore();
+  }
 }
 
 /**

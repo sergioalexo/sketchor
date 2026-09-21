@@ -1,31 +1,75 @@
 import type { Point, SketchDocument } from "@sketchor/core";
-import { arcPointAt, arcSweep, bulgeToArc, closestPointOnSegment, dist, imageCorners, mid, polylineSegments } from "@sketchor/core";
+import {
+  arcPointAt,
+  arcSweep,
+  bulgeToArc,
+  closestParam,
+  closestPointOnSegment,
+  dist,
+  imageCorners,
+  intersectCurves,
+  mid,
+  pathOf,
+  polylineSegments,
+  type Curve,
+} from "@sketchor/core";
 import { gridStep, type View } from "./view";
 
-/** "tracking" is not found by findSnap: the viewport produces it when ortho/polar projected the cursor (tools/tracking.ts). */
-export type SnapKind = "origin" | "endpoint" | "midpoint" | "center" | "quadrant" | "intersection" | "on-line" | "grid" | "tracking";
+/**
+ * Snap kinds (roadmap T-21). Tiered: feature points beat midpoints beat
+ * on-curve beat extension beat the grid — see findSnap. "perpendicular"
+ * and "tangent" need an anchor (the tool's last pick) and only appear when
+ * one is given. "tracking" is not found here: the viewport produces it
+ * when ortho/polar projected the cursor (tools/tracking.ts).
+ */
+export type SnapKind =
+  | "origin"
+  | "endpoint"
+  | "midpoint"
+  | "center"
+  | "quadrant"
+  | "intersection"
+  | "node"
+  | "perpendicular"
+  | "tangent"
+  | "on-line"
+  | "extension"
+  | "grid"
+  | "tracking";
 
 export interface Snap {
   point: Point;
   kind: SnapKind;
+  /** For an extension snap: the endpoint the guide ray is drawn from. */
+  guideFrom?: Point;
+}
+
+/** Which snap kinds are on (T-21's per-kind switches). Persisted; see snapSettings.ts. */
+export type SnapSettings = Record<Exclude<SnapKind, "origin" | "tracking">, boolean>;
+
+export const ALL_SNAPS_ON: SnapSettings = {
+  endpoint: true,
+  midpoint: true,
+  center: true,
+  quadrant: true,
+  intersection: true,
+  node: true,
+  perpendicular: true,
+  tangent: true,
+  "on-line": true,
+  extension: true,
+  grid: true,
+};
+
+export interface SnapOptions {
+  /** Entities that must not act as targets (a selection being dragged). */
+  exclude?: readonly string[];
+  /** The tool's previous pick — what perpendicular and tangent snaps are measured from. */
+  anchor?: Point | null;
+  settings?: SnapSettings;
 }
 
 const SNAP_PX = 10;
-
-/** Two segments' crossing point, or null if they're parallel or don't actually cross within both spans. */
-function segmentIntersection(a1: Point, a2: Point, b1: Point, b2: Point): Point | null {
-  const rX = a2.x - a1.x;
-  const rY = a2.y - a1.y;
-  const sX = b2.x - b1.x;
-  const sY = b2.y - b1.y;
-  const denom = rX * sY - rY * sX;
-  if (Math.abs(denom) < 1e-12) return null; // parallel/collinear — no single crossing point
-  const t = ((b1.x - a1.x) * sY - (b1.y - a1.y) * sX) / denom;
-  const u = ((b1.x - a1.x) * rY - (b1.y - a1.y) * rX) / denom;
-  const eps = 1e-9;
-  if (t < -eps || t > 1 + eps || u < -eps || u > 1 + eps) return null;
-  return { x: a1.x + t * rX, y: a1.y + t * rY };
-}
 
 /**
  * Finds the best snap near a world-space cursor position, in priority tiers:
@@ -36,16 +80,20 @@ function segmentIntersection(a1: Point, a2: Point, b1: Point, b2: Point): Point 
  * feature point sitting further along the same line, making corners and
  * centers effectively unreachable.
  */
-export function findSnap(doc: SketchDocument, view: View, cursor: Point, excludeIds?: readonly string[]): Snap {
+export function findSnap(doc: SketchDocument, view: View, cursor: Point, options: SnapOptions | readonly string[] = {}): Snap {
+  const opts: SnapOptions = Array.isArray(options) ? { exclude: options as readonly string[] } : (options as SnapOptions);
+  const on = opts.settings ?? ALL_SNAPS_ON;
+  const excludeIds = opts.exclude;
   const tol = SNAP_PX / view.scale;
   // While dragging a selection, its own geometry must not act as a snap target
   // — it moves with the cursor, so it would snap to itself and pin the drag.
   const entities = excludeIds?.length ? doc.all().filter((e) => !excludeIds.includes(e.id)) : doc.all();
 
-  const bestOf = (candidates: { point: Point; kind: SnapKind }[]): Snap | null => {
+  const bestOf = (candidates: Snap[]): Snap | null => {
     let best: Snap | null = null;
     let bestDist = tol;
     for (const c of candidates) {
+      if (c.kind !== "origin" && !on[c.kind as keyof SnapSettings]) continue;
       const d = dist(c.point, cursor);
       if (d <= bestDist) {
         best = c;
@@ -57,9 +105,10 @@ export function findSnap(doc: SketchDocument, view: View, cursor: Point, exclude
 
   // The world origin is always snappable, even in an empty drawing — it's the
   // one reference point that exists before any geometry does.
-  const featurePoints: { point: Point; kind: SnapKind }[] = [{ point: { x: 0, y: 0 }, kind: "origin" }];
-  const midpoints: { point: Point; kind: SnapKind }[] = [];
-  const onCurve: { point: Point; kind: SnapKind }[] = [];
+  const featurePoints: Snap[] = [{ point: { x: 0, y: 0 }, kind: "origin" }];
+  const midpoints: Snap[] = [];
+  const onCurve: Snap[] = [];
+  const extensions: Snap[] = [];
 
   for (const e of entities) {
     if (e.type === "line") {
@@ -76,7 +125,7 @@ export function findSnap(doc: SketchDocument, view: View, cursor: Point, exclude
         { point: { x: c.x, y: c.y - r }, kind: "quadrant" },
       );
     } else if (e.type === "point") {
-      featurePoints.push({ point: e.p, kind: "endpoint" });
+      featurePoints.push({ point: e.p, kind: "node" });
     } else if (e.type === "text") {
       featurePoints.push({ point: e.at, kind: "endpoint" });
     } else if (e.type === "arc") {
@@ -111,36 +160,55 @@ export function findSnap(doc: SketchDocument, view: View, cursor: Point, exclude
     }
   }
 
-  // Intersections between straight segments — from loose lines and from
-  // polyline segments alike. Only segments whose bounding box is already near
-  // the cursor are tested against each other, so this stays cheap even on
-  // large drawings.
-  const straight: { a: Point; b: Point }[] = [];
+  // Curve-level snaps: intersections (any pair of segments/arcs/circles),
+  // the nearest point on arcs and circles, perpendicular/tangent from the
+  // anchor, and line extensions. Only curves whose bounding box is near the
+  // cursor take part, so this stays cheap on a large drawing.
+  const nearby: Curve[] = [];
+  const lines: { a: Point; b: Point }[] = [];
   for (const e of entities) {
-    if (e.type === "line") straight.push({ a: e.a, b: e.b });
-    else if (e.type === "polyline") {
-      for (const seg of polylineSegments(e)) {
-        if (Math.abs(seg.bulge) < 1e-9) straight.push({ a: seg.a, b: seg.b });
-      }
+    const path = pathOf(e);
+    if (!path) continue;
+    for (const c of path.curves) {
+      if (curveNear(c, cursor, tol)) nearby.push(c);
+      if (c.kind === "segment") lines.push({ a: c.a, b: c.b });
     }
   }
-  const nearby = straight.filter((s) => {
-    const minX = Math.min(s.a.x, s.b.x) - tol;
-    const maxX = Math.max(s.a.x, s.b.x) + tol;
-    const minY = Math.min(s.a.y, s.b.y) - tol;
-    const maxY = Math.max(s.a.y, s.b.y) + tol;
-    return cursor.x >= minX && cursor.x <= maxX && cursor.y >= minY && cursor.y <= maxY;
-  });
   for (let i = 0; i < nearby.length; i++) {
     for (let j = i + 1; j < nearby.length; j++) {
-      const hit = segmentIntersection(nearby[i].a, nearby[i].b, nearby[j].a, nearby[j].b);
-      if (hit) featurePoints.push({ point: hit, kind: "intersection" });
+      for (const hit of intersectCurves(nearby[i], nearby[j])) featurePoints.push({ point: hit.point, kind: "intersection" });
     }
   }
+  for (const c of nearby) {
+    if (c.kind === "arc") onCurve.push({ point: closestParam(c, cursor).point, kind: "on-line" });
+  }
+  const anchor = opts.anchor ?? null;
+  if (anchor) {
+    for (const c of nearby) {
+      for (const p of perpendicularFeet(c, anchor)) featurePoints.push({ point: p, kind: "perpendicular" });
+      for (const p of tangentPoints(c, anchor)) featurePoints.push({ point: p, kind: "tangent" });
+    }
+  }
+  // A line's extension: the foot of the cursor on its infinite line, when
+  // that foot lies past one of its ends — with the guide drawn from that end.
+  for (const l of lines) {
+    const dx = l.b.x - l.a.x;
+    const dy = l.b.y - l.a.y;
+    const len2 = dx * dx + dy * dy;
+    if (len2 < 1e-18) continue;
+    const t = ((cursor.x - l.a.x) * dx + (cursor.y - l.a.y) * dy) / len2;
+    if (t >= 0 && t <= 1) continue;
+    const foot = { x: l.a.x + dx * t, y: l.a.y + dy * t };
+    if (dist(foot, cursor) > tol) continue;
+    // Not unboundedly far: within three lengths of the line, as AutoCAD's aperture in practice.
+    if (t < -3 || t > 4) continue;
+    extensions.push({ point: foot, kind: "extension", guideFrom: t < 0 ? l.a : l.b });
+  }
 
-  const snap = bestOf(featurePoints) ?? bestOf(midpoints) ?? bestOf(onCurve);
+  const snap = bestOf(featurePoints) ?? bestOf(midpoints) ?? bestOf(onCurve) ?? bestOf(extensions);
   if (snap) return snap;
 
+  if (!on.grid) return { point: cursor, kind: "grid" };
   const step = gridStep(view.scale);
   return {
     point: {
@@ -149,6 +217,58 @@ export function findSnap(doc: SketchDocument, view: View, cursor: Point, exclude
     },
     kind: "grid",
   };
+}
+
+/** Cheap bounding-box test: is any part of the curve within `tol` of the cursor? */
+function curveNear(c: Curve, cursor: Point, tol: number): boolean {
+  if (c.kind === "segment") {
+    return (
+      cursor.x >= Math.min(c.a.x, c.b.x) - tol &&
+      cursor.x <= Math.max(c.a.x, c.b.x) + tol &&
+      cursor.y >= Math.min(c.a.y, c.b.y) - tol &&
+      cursor.y <= Math.max(c.a.y, c.b.y) + tol
+    );
+  }
+  return Math.abs(dist(cursor, c.center) - c.radius) <= tol * 1.5;
+}
+
+/** Feet of the perpendicular from `from` onto the curve (within its extent). */
+export function perpendicularFeet(c: Curve, from: Point): Point[] {
+  if (c.kind === "segment") {
+    const foot = closestPointOnSegment(from, c.a, c.b);
+    // Only a true foot (not clamped to an end) is a perpendicular snap.
+    const dx = c.b.x - c.a.x;
+    const dy = c.b.y - c.a.y;
+    const len2 = dx * dx + dy * dy;
+    if (len2 < 1e-18) return [];
+    const t = ((from.x - c.a.x) * dx + (from.y - c.a.y) * dy) / len2;
+    return t > 1e-9 && t < 1 - 1e-9 ? [foot] : [];
+  }
+  const d = dist(from, c.center);
+  if (d < 1e-9) return [];
+  const ux = (from.x - c.center.x) / d;
+  const uy = (from.y - c.center.y) / d;
+  const out: Point[] = [];
+  for (const sgn of [1, -1]) {
+    const p = { x: c.center.x + ux * c.radius * sgn, y: c.center.y + uy * c.radius * sgn };
+    if (closestParam(c, p).distance < 1e-6) out.push(p);
+  }
+  return out;
+}
+
+/** Points on a circle/arc where a line from `from` is tangent to it (none for a segment, or from inside the circle). */
+export function tangentPoints(c: Curve, from: Point): Point[] {
+  if (c.kind !== "arc") return [];
+  const d = dist(from, c.center);
+  if (d <= c.radius + 1e-9) return [];
+  const base = Math.atan2(from.y - c.center.y, from.x - c.center.x);
+  const alpha = Math.acos(c.radius / d);
+  const out: Point[] = [];
+  for (const a of [base + alpha, base - alpha]) {
+    const p = arcPointAt(c.center, c.radius, a);
+    if (closestParam(c, p).distance < 1e-6) out.push(p);
+  }
+  return out;
 }
 
 /** 45° in radians — the step a rotate-drag snaps to. */

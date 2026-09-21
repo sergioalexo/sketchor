@@ -32,8 +32,11 @@ npm run desktop    # native desktop window via Tauri (needs Rust toolchain)
 | Undo / Redo | `Ctrl+Z` / `Ctrl+Y` |
 
 Snapping is automatic, in priority order: **the origin**, endpoints, centers,
-quadrants and **intersections**, then midpoints, then the nearest point
-**along** a line/segment, then the grid.
+quadrants, **intersections** (any two curves), nodes, and — measured from the
+point you just placed — **perpendicular** feet and **tangent** points; then
+midpoints; then the nearest point **along** a line, arc or circle; then a
+line's **extension** past its end (with a dashed guide); then the grid. The
+**SNAP** button in the status bar switches kinds on and off.
 
 The world origin is drawn as a crosshair with labelled +X / +Y stubs (and a
 muted marker clamped to the edge when it's panned off-screen), so `0, 0` is

@@ -83,7 +83,17 @@ function settingsOf(s: TrackingSettings): TrackingSettings {
 }
 
 /** Snap kinds that were found by touching a feature; tracking never overrides these. */
-const FEATURE_SNAPS = new Set<Snap["kind"]>(["origin", "endpoint", "midpoint", "center", "quadrant", "intersection"]);
+const FEATURE_SNAPS = new Set<Snap["kind"]>([
+  "origin",
+  "endpoint",
+  "midpoint",
+  "center",
+  "quadrant",
+  "intersection",
+  "node",
+  "perpendicular",
+  "tangent",
+]);
 
 export interface TrackingResult {
   point: Point;

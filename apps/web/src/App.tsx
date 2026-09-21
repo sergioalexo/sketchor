@@ -2,6 +2,7 @@ import { Fragment, lazy, Suspense, useEffect, useState } from "react";
 import { freeEndpointEntityIds } from "@sketchor/core";
 import { bus, doc, getSessions, isModelSession, measurementText, TOOL_HINTS, useApp, type ToolId } from "./state/store";
 import { useTouchMode } from "./touchMode";
+import { SnapPopover } from "./SnapPopover";
 import { POLAR_INCREMENTS, useTracking } from "./tools/tracking";
 import { activeSaveTarget, openDrawing, overlayDrawing, saveCurrent, saveDrawing } from "./io/drawingFile";
 import { DISPLAY_UNITS, formatLength, type DisplayUnit } from "./units";
@@ -1109,6 +1110,7 @@ export function App() {
             >
               POLAR
             </button>
+            <SnapPopover />
             {polar && (
               <select
                 className="unit-select"

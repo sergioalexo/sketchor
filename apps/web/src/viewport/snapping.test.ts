@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { SketchDocument, entityPoints, type Entity } from "@sketchor/core";
-import { snapMovingSelection, snapRotation } from "./snapping";
+import { ALL_SNAPS_ON, findSnap, snapMovingSelection, snapRotation } from "./snapping";
 import type { View } from "./view";
 
 const view: View = { scale: 1, ox: 0, oy: 0 }; // 1 px = 1 world unit → snap tol = 10
@@ -106,5 +106,72 @@ describe("snapRotation", () => {
   });
   it("passes the angle through untouched when free (Ctrl held)", () => {
     expect(snapRotation(deg(37), true)).toBeCloseTo(deg(37));
+  });
+});
+
+/**
+ * Object snaps (T-21): what a click near geometry lands on. A missed
+ * intersection or perpendicular foot means a line that almost meets — the
+ * gap that later breaks a closed-region check or a laser toolpath.
+ */
+describe("findSnap object snaps", () => {
+  const line = (id: string, ax: number, ay: number, bx: number, by: number): Entity => ({ id, type: "line", a: { x: ax, y: ay }, b: { x: bx, y: by } });
+  const circle = (id: string, cx: number, cy: number, r: number): Entity => ({ id, type: "circle", center: { x: cx, y: cy }, radius: r });
+
+  it("finds the intersection of a line and a circle, and of two arcs", () => {
+    const d = doc(line("l", -100, 0, 100, 0), circle("c", 0, 0, 50));
+    const s = findSnap(d, view, { x: 48, y: 3 });
+    expect(s.kind).toBe("intersection");
+    expect(s.point.x).toBeCloseTo(50, 9);
+    expect(s.point.y).toBeCloseTo(0, 9);
+    const two = doc(circle("a", 0, 0, 50), circle("b", 60, 0, 50));
+    const t = findSnap(two, view, { x: 30, y: 38 });
+    expect(t.kind).toBe("intersection");
+    expect(t.point.x).toBeCloseTo(30, 9);
+    expect(t.point.y).toBeCloseTo(40, 9);
+  });
+
+  it("snaps to the nearest point on a circle when nothing better is close", () => {
+    const s = findSnap(doc(circle("c", 0, 0, 50)), view, { x: 33, y: 33 });
+    expect(s.kind).toBe("on-line");
+    expect(Math.hypot(s.point.x, s.point.y)).toBeCloseTo(50, 9);
+  });
+
+  it("offers the perpendicular foot and tangent points from the anchor", () => {
+    const d = doc(line("l", 0, 0, 100, 0));
+    const perp = findSnap(d, view, { x: 41, y: 4 }, { anchor: { x: 40, y: 30 } });
+    expect(perp.kind).toBe("perpendicular");
+    expect(perp.point).toEqual({ x: 40, y: 0 });
+    // From (0, 100) the tangents to a radius-50 circle at the origin touch at (±... ) — one of them is near (43.3, 25).
+    const c = doc(circle("c", 0, 0, 50));
+    const tan = findSnap(c, view, { x: 43, y: 26 }, { anchor: { x: 0, y: 100 } });
+    expect(tan.kind).toBe("tangent");
+    expect(Math.hypot(tan.point.x, tan.point.y)).toBeCloseTo(50, 9);
+    // The tangent line from the anchor really is perpendicular to the radius there.
+    const dot = tan.point.x * (tan.point.x - 0) + tan.point.y * (tan.point.y - 100);
+    expect(dot).toBeCloseTo(0, 6);
+  });
+
+  it("snaps along a line's extension past its end, with the guide from that end", () => {
+    const s = findSnap(doc(line("l", 0, 0, 100, 0)), view, { x: 150, y: 3 });
+    expect(s.kind).toBe("extension");
+    expect(s.point).toEqual({ x: 150, y: 0 });
+    expect(s.guideFrom).toEqual({ x: 100, y: 0 });
+  });
+
+  it("honours the per-kind switches", () => {
+    const d = doc(line("l", 0, 0, 100, 0));
+    const off = { ...ALL_SNAPS_ON, endpoint: false, extension: false, grid: false };
+    expect(findSnap(d, view, { x: 3, y: 2 }).kind).toBe("endpoint");
+    const s = findSnap(d, view, { x: 3, y: 2 }, { settings: off });
+    expect(s.kind).not.toBe("endpoint");
+    const far = findSnap(d, view, { x: 500, y: 500 }, { settings: off });
+    expect(far.kind).toBe("grid");
+    expect(far.point).toEqual({ x: 500, y: 500 }); // grid off: the raw cursor
+  });
+
+  it("marks point entities as nodes", () => {
+    const s = findSnap(doc({ id: "p", type: "point", p: { x: 10, y: 10 } }), view, { x: 12, y: 9 });
+    expect(s.kind).toBe("node");
   });
 });

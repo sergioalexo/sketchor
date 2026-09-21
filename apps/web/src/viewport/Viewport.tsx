@@ -49,6 +49,7 @@ import { findSnap, snapMovingSelection, snapRotation, type Snap } from "./snappi
 import { fitToBounds, screenToWorld, worldToScreen, zoomAt, type View } from "./view";
 import { getTool, type Pick, type ToolContext } from "../tools";
 import { applyTracking, trackingIncrement, useTracking } from "../tools/tracking";
+import { useSnapSettings } from "../tools/snapSettings";
 import { parseTypedInput, resolveTypedInput, startsTypedInput } from "../tools/typedInput";
 
 /**
@@ -401,9 +402,9 @@ export function Viewport() {
    */
   const resolvePick = (world: Point, shiftKey: boolean): { snap: Snap; ray: typeof trackingRayRef.current } => {
     const view = viewRef.current;
-    const raw = findSnap(doc, view, world);
     const app = useApp.getState();
     const t = getTool(app.tool);
+    const raw = findSnap(doc, view, world, { anchor: t?.anchor() ?? null, settings: useSnapSettings.getState().settings });
     if (!t) return { snap: raw, ray: null };
     const tracked = applyTracking(t.anchor(), world, raw, trackingIncrement(useTracking.getState(), shiftKey));
     if (!tracked.ray) return { snap: raw, ray: null };
@@ -823,7 +824,7 @@ export function Viewport() {
       return;
     }
 
-    const snapped = findSnap(doc, view, world).point;
+    const snapped = findSnap(doc, view, world, { settings: useSnapSettings.getState().settings }).point;
     const interaction = interactionRef.current;
 
     switch (app.tool) {
