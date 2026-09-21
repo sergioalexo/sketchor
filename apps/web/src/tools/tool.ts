@@ -1,5 +1,6 @@
-import type { Command, Entity, Point, SketchDocument } from "@sketchor/core";
+import type { Command, Entity, EntityId, Point, SketchDocument } from "@sketchor/core";
 import type { ToolId } from "../state/store";
+import type { DisplayUnit } from "../units";
 import type { Snap } from "../viewport/snapping";
 
 /**
@@ -33,6 +34,13 @@ export interface ToolContext {
   /** Asks the viewport to repaint (previews changed). */
   redraw(): void;
   setTool(id: ToolId): void;
+  /** Current selection (entity ids), for the modify tools. */
+  selection(): EntityId[];
+  setSelection(ids: EntityId[]): void;
+  /** What a click at a world point would select: the entity under it, expanded to its whole group ([] for nothing). */
+  hitTest(world: Point): EntityId[];
+  /** The tab's display unit, for tools that interpret a typed number themselves. */
+  displayUnit(): DisplayUnit;
 }
 
 /** One resolved pick: where the user clicked/tapped/typed, after snapping and tracking. */
@@ -50,7 +58,7 @@ export interface Pick {
 export interface Tool {
   id: ToolId;
   /** Status-bar prompt for the current state, e.g. "Specify next point". */
-  prompt(): string;
+  prompt(ctx: ToolContext): string;
   /** True while a multi-click sequence is in progress (Esc cancels it before leaving the tool). */
   busy(): boolean;
   /** The anchor for relative typed input and ortho/polar tracking — usually the last placed point. */
@@ -63,6 +71,13 @@ export interface Tool {
   doubleClick?(ctx: ToolContext, pick: Pick): boolean;
   /** Keys while the tool is active (not typed coordinates). Return true when consumed. */
   key?(ctx: ToolContext, e: KeyboardEvent): boolean;
+  /**
+   * First look at a committed typed-input string, for tools where a bare
+   * number isn't a length toward the cursor (an angle for rotate, a factor
+   * for scale). Return true when consumed; otherwise the viewport resolves
+   * it as a coordinate and calls `pick`.
+   */
+  typed?(ctx: ToolContext, text: string): boolean;
   /**
    * Entities to draw dashed as the live preview, given the current cursor
    * (already snapped/tracked), or null when the pointer isn't over the canvas.

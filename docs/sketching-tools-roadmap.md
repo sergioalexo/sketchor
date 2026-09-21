@@ -10,6 +10,7 @@ Status as of 2026-09-11 (`main` @ v0.14.4).
 
 | Date | Items | Notes |
 |---|---|---|
+| 2026-09-21 | **T-10**, **T-11** (tool only), **T-12**, **T-13**, **T-14** | `apps/web/src/tools/modifyTools.ts` on the framework: Move (base → destination or typed `@dx,dy`/distance, Ctrl-click copies), Copy (repeats until Enter/Esc), Rotate (pivot → reference direction → new direction, or a typed angle after the pivot; Ctrl copies), Scale (typed factor, or reference length → new length picked or typed; Ctrl copies), Mirror (two axis points, Shift/F8 for H/V; Ctrl-click deletes the source). With nothing selected, the first click selects. Core: `packages/core/src/mirror.ts` (`mirrored`, tested) — arcs flip sweep, bulges negate, text/images move by position only. Not done from T-11: Ctrl+C/X/V clipboard via sketch code, Ctrl+D duplicate, group-aware copies; from T-10: arrow-key nudge. Copies come back ungrouped. |
 | 2026-09-18 | **T-00** (partial), **T-08** (core), **T-09**, **T-01**, **T-03** | Tool framework in `apps/web/src/tools/` (`tool.ts` interface, `index.ts` registry, `drawTools.ts`); line/polyline/rectangle/circle/point migrated, select/measure/text/image/fill/straighten/dim/pan still on the legacy switch in `Viewport.tsx`. Typed input: floating box (digits/`@`/`-`/`.` open it), grammar `100`, `100<45`, `x,y`, `@dx,dy`, unit suffixes and feet-inches (`typedInput.ts`, tested); no docked command line, no post-commit quick-edit, no relative-zero yet. Ortho/polar: F8/F10, Shift = temporary ortho, status-bar toggles, dashed guide + angle (`tracking.ts`, tested). Arc tool: 3-point / center-start-end / tangent, Tab cycles (`packages/core/src/arcs.ts`, tested). Polyline `A`/`T`/`L` arc legs stored as bulges. T-21 not started. |
 
 ---
@@ -211,25 +212,25 @@ Modes: center–radius (typed radius via T-08), center–diameter, 2-point (diam
 
 In the polyline tool, `A` switches to arc mode (tangent-continuation, or 3-point via a second key), `L` back to line. Stores as `bulges[]` on the existing `PolylineEntity` — no model change. This is how AutoCAD PLINE works and it's what makes slots/rounded outlines drawable in one entity.
 
-### T-10 · Move — **P0, S**
+### T-10 · Move — **P0, S** — ✅ 2026-09-21
 
 Base point → second point (or typed displacement `@dx,dy`). Emits existing `move-entity` commands in a batch. `Ctrl` while placing = copy instead (AutoCAD habit). Also: **nudge** (arrow keys move selection by 1 grid step; Shift = ×10) — implemented here since it's the same command.
 
-### T-11 · Copy / clipboard — **P0, S**
+### T-11 · Copy / clipboard — **P0, S** — 🟡 copy tool 2026-09-21; clipboard/duplicate/groups open
 
 - **Copy-with-base-point** tool (AutoCAD COPY, repeats until Esc; `M` = multiple mode by default).
 - `Ctrl+C` / `Ctrl+X` / `Ctrl+V`: serialize the selection with the **sketch-code DSL** (`toCode` on a sub-document) onto the system clipboard as `text/plain`. Paste parses with `parseCode`, re-ids, offsets to cursor, works across tabs and even into a text editor/AI chat. `Ctrl+Shift+V` = paste in place. `Ctrl+D` = duplicate offset by one grid step.
 - Fix: groups copy as groups (copy the group registry entries too).
 
-### T-12 · Rotate — **P0, S**
+### T-12 · Rotate — **P0, S** — ✅ 2026-09-21
 
 Base point, then angle by cursor or typed; `R` = reference mode (pick two points defining the current angle, then the new angle — how you square up an imported drawing); `C` = copy. Core: existing `rotated()` on entities. Straighten stays as the shortcut it is.
 
-### T-13 · Scale — **P0, S**
+### T-13 · Scale — **P0, S** — ✅ 2026-09-21
 
 Base point + factor or `R` reference (pick a known length, type what it should be — the standard way to fix a DXF imported in the wrong unit). Core: existing `transformed()`. Non-uniform scale is *not* supported (circles/arcs can't express it — same rule as the DXF INSERT importer).
 
-### T-14 · Mirror — **P0, S**
+### T-14 · Mirror — **P0, S** — ✅ 2026-09-21
 
 Two points define the axis (with ortho/polar from T-09 for H/V axes); option keep/delete source (default keep, as AutoCAD `MIRROR`). Text is mirrored by position only, never mirrored as glyphs (AutoCAD `MIRRTEXT=0`). Core: `mirrored(entity, p1, p2)` in `entities.ts` — for arcs, swap `ccw` and reflect start/end; for polylines negate bulges (same trick `dxf.ts` uses for negative INSERT scale — reuse it).
 

@@ -2505,3 +2505,28 @@ kbd.shortcut-key-fixed {
   padding: 8px 10px;
   font-size: 16px;
 }
+
+/* Tool rail: divider between the draw and modify tools; scroll when the window is short. */
+.toolrail {
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.toolrail::-webkit-scrollbar {
+  display: none;
+}
+
+.toolrail-sep {
+  display: block;
+  height: 1px;
+  margin: 2px 4px;
+  background: var(--border);
+  flex: 0 0 auto;
+}
+
+.toolrail.bottom .toolrail-sep {
+  width: 1px;
+  height: auto;
+  align-self: stretch;
+  margin: 6px 2px;
+}

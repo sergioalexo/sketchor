@@ -375,6 +375,13 @@ export function Viewport() {
       activeLayer: () => useApp.getState().activeLayer,
       redraw: () => redraw(),
       setTool: (id) => useApp.getState().setTool(id),
+      selection: () => useApp.getState().selection,
+      setSelection: (ids) => useApp.getState().setSelection(ids),
+      hitTest: (world) => {
+        const hit = hitTest(viewRef.current, world);
+        return hit ? resolveSelection(doc, hit, useApp.getState().enteredGroupId) : [];
+      },
+      displayUnit: () => useApp.getState().displayUnit,
     };
   }
   const toolCtx = toolCtxRef.current;
@@ -383,7 +390,7 @@ export function Viewport() {
   const syncPrompt = () => {
     const app = useApp.getState();
     const t = getTool(app.tool);
-    app.setPrompt(t ? t.prompt() : "");
+    app.setPrompt(t ? t.prompt(toolCtx) : "");
   };
 
   /**
@@ -663,6 +670,16 @@ export function Viewport() {
         app.setTool("circle");
       } else if (matchesBinding(e, "tool.arc")) {
         app.setTool("arc");
+      } else if (matchesBinding(e, "tool.move")) {
+        app.setTool("move");
+      } else if (matchesBinding(e, "tool.copy")) {
+        app.setTool("copy");
+      } else if (matchesBinding(e, "tool.rotate")) {
+        app.setTool("rotate");
+      } else if (matchesBinding(e, "tool.scale")) {
+        app.setTool("scale");
+      } else if (matchesBinding(e, "tool.mirror")) {
+        app.setTool("mirror");
       } else if (matchesBinding(e, "tool.point")) {
         app.setTool("point");
       } else if (matchesBinding(e, "tool.image")) {
@@ -806,6 +823,11 @@ export function Viewport() {
       case "arc":
       case "rectangle":
       case "point":
+      case "move":
+      case "copy":
+      case "rotate":
+      case "scale":
+      case "mirror":
         // On the tool framework; dispatched above.
         break;
       case "image": {
@@ -1376,6 +1398,12 @@ export function Viewport() {
           onCommit={(text) => {
             const app = useApp.getState();
             const t = getTool(app.tool);
+            if (t?.typed?.(toolCtx, text)) {
+              setTyped(null);
+              syncPrompt();
+              redraw();
+              return true;
+            }
             const parsed = parseTypedInput(text, app.displayUnit);
             const cursor = lastScreenRef.current ? screenToWorld(viewRef.current, lastScreenRef.current) : null;
             const point = t && parsed ? resolveTypedInput(parsed, t.anchor(), cursor) : null;

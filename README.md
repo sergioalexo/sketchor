@@ -18,6 +18,7 @@ npm run desktop    # native desktop window via Tauri (needs Rust toolchain)
 | Polyline tool | `W` — click each vertex; `A` makes the next leg an arc (through-point, then end), `T` a tangent arc, `L` back to straight; `Enter` or double-click finishes, `C` closes the shape, `Backspace` undoes a vertex |
 | Circle tool | `C` — click center, then a point on the circle (or type the radius) |
 | Arc tool | `A` — three-point (start, end, point on the arc); `Tab` cycles to center-start-end and tangent-continuation |
+| Move / Copy / Rotate / Scale / Mirror | `Shift+M` / `Shift+D` / `Shift+R` / `Shift+S` / `Shift+I` — select first (or click the object), then follow the status-bar prompt: base point and destination, pivot and angle (typed or two directions), base and factor or reference length, two axis points. `Ctrl`-click the last point to copy instead of modify (mirror: to delete the source) |
 | Typed coordinates | while drawing, type `100` (length toward the cursor), `100<45`, `50,20`, `@50,20` — units like `4in`, `2'6"` accepted |
 | Ortho / polar | `F8` / `F10` (or the status-bar toggles); `Shift` held is temporary ortho |
 | Select tool | `V` — click (Shift adds), drag to move, `Del` deletes |

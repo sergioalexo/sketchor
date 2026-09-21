@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { Fragment, lazy, Suspense, useEffect, useState } from "react";
 import { freeEndpointEntityIds } from "@sketchor/core";
 import { bus, doc, getSessions, isModelSession, measurementText, TOOL_HINTS, useApp, type ToolId } from "./state/store";
 import { useTouchMode } from "./touchMode";
@@ -38,7 +38,10 @@ import { openExternal } from "./update/updateService";
  */
 const SKETCHOR_SITE = "https://sketchor.sergioalexo.com/";
 
-const TOOLS: { id: ToolId; label: string; keyHint: string; icon: JSX.Element }[] = [
+const S = { stroke: "currentColor", strokeWidth: 2, fill: "none", strokeLinecap: "round", strokeLinejoin: "round" } as const;
+
+/** `divider: true` draws a separator before the entry (draw tools | modify tools | view). */
+const TOOLS: { id: ToolId; label: string; keyHint: string; icon: JSX.Element; divider?: boolean }[] = [
   {
     id: "select",
     label: "Select",
@@ -227,6 +230,62 @@ const TOOLS: { id: ToolId; label: string; keyHint: string; icon: JSX.Element }[]
       </svg>
     ),
   },
+  {
+    id: "move",
+    label: "Move",
+    keyHint: "",
+    divider: true,
+    icon: (
+      <svg viewBox="0 0 24 24" width="20" height="20">
+        <path d="M12 3v18M3 12h18M12 3l-3 3M12 3l3 3M12 21l-3-3M12 21l3-3M3 12l3-3M3 12l3 3M21 12l-3-3M21 12l-3 3" {...S} />
+      </svg>
+    ),
+  },
+  {
+    id: "copy",
+    label: "Copy",
+    keyHint: "",
+    icon: (
+      <svg viewBox="0 0 24 24" width="20" height="20">
+        <rect x="3" y="3" width="12" height="12" rx="1.5" {...S} />
+        <path d="M9 21h10a2 2 0 002-2V9" {...S} strokeDasharray="3 2" />
+      </svg>
+    ),
+  },
+  {
+    id: "rotate",
+    label: "Rotate",
+    keyHint: "",
+    icon: (
+      <svg viewBox="0 0 24 24" width="20" height="20">
+        <path d="M20 12a8 8 0 11-2.3-5.7" {...S} />
+        <path d="M20 3v5h-5" {...S} />
+        <circle cx="12" cy="12" r="1.4" fill="currentColor" />
+      </svg>
+    ),
+  },
+  {
+    id: "scale",
+    label: "Scale",
+    keyHint: "",
+    icon: (
+      <svg viewBox="0 0 24 24" width="20" height="20">
+        <rect x="3" y="11" width="10" height="10" rx="1" {...S} />
+        <path d="M13 11L21 3M21 3h-6M21 3v6" {...S} />
+      </svg>
+    ),
+  },
+  {
+    id: "mirror",
+    label: "Mirror",
+    keyHint: "",
+    icon: (
+      <svg viewBox="0 0 24 24" width="20" height="20">
+        <path d="M12 2v20" {...S} strokeDasharray="3 2" />
+        <path d="M9 6L3 18h6zM15 6l6 12h-6z" {...S} />
+      </svg>
+    ),
+  },
 ];
 
 /**
@@ -249,21 +308,23 @@ function ToolRail({
       {TOOLS.map((t) => {
         const bound = bindingLabel(keyBindings[`tool.${t.id}`]);
         return (
-          <button
-            key={t.id}
-            className={`tool ${tool === t.id ? "active" : ""}`}
-            title={`${t.label}${bound ? ` (${bound})` : ""} — right-click to change shortcut`}
-            data-testid={`tool-${t.id}`}
-            onClick={() => setTool(t.id)}
-            onContextMenu={rebind(`tool.${t.id}`)}
-          >
-            {t.icon}
-            {layout === "bottom" ? (
-              <span className="tool-label">{t.label}</span>
-            ) : (
-              <span className="keyhint">{bound || t.keyHint}</span>
-            )}
-          </button>
+          <Fragment key={t.id}>
+            {t.divider && <span className="toolrail-sep" />}
+            <button
+              className={`tool ${tool === t.id ? "active" : ""}`}
+              title={`${t.label}${bound ? ` (${bound})` : ""} — right-click to change shortcut`}
+              data-testid={`tool-${t.id}`}
+              onClick={() => setTool(t.id)}
+              onContextMenu={rebind(`tool.${t.id}`)}
+            >
+              {t.icon}
+              {layout === "bottom" ? (
+                <span className="tool-label">{t.label}</span>
+              ) : (
+                <span className="keyhint">{bound || t.keyHint}</span>
+              )}
+            </button>
+          </Fragment>
         );
       })}
     </nav>

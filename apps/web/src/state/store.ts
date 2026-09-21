@@ -264,7 +264,12 @@ export type ToolId =
   | "fill"
   | "text"
   | "dim"
-  | "pan";
+  | "pan"
+  | "move"
+  | "copy"
+  | "rotate"
+  | "scale"
+  | "mirror";
 
 export const TOOL_HINTS: Record<ToolId, string> = {
   select: "Click to select (Shift adds) - drag left-to-right to window-select, right-to-left to crossing-select - drag to move - Del deletes - G groups - U ungroups - Shift+C toggles the selection between construction (dashed) and normal lines",
@@ -281,6 +286,11 @@ export const TOOL_HINTS: Record<ToolId, string> = {
   text: "Click where the text goes and type - Enter places it, Esc cancels - double-click existing text to edit it",
   dim: "Click two points to place a linear dimension on the Dimensions layer, in the current display unit",
   pan: "Drag to pan the view - pinch with two fingers to zoom - double-tap to fit the drawing",
+  move: "Select, then click a base point and a destination - or type @dx,dy or a distance - Ctrl-click the destination to copy instead",
+  copy: "Select, then click a base point; every further click places another copy - Enter or Esc stops",
+  rotate: "Select, then click the pivot, a reference direction and the new direction - or type the angle in degrees after the pivot - Ctrl-click copies",
+  scale: "Select, then click the base point and type the factor - or pick a reference length and then its new length (pick or type) - Ctrl-click copies",
+  mirror: "Select, then click two points of the mirror line (Shift or F8 for a horizontal/vertical axis) - Ctrl-click the second point to delete the original",
 };
 
 export type StraightenAxis = "horizontal" | "vertical";
