@@ -2698,3 +2698,22 @@ kbd.shortcut-key-fixed {
 .app.touch .propspanel-row {
   min-height: 40px;
 }
+
+.propspanel-actions {
+  gap: 6px;
+}
+
+.propspanel-vertex {
+  display: flex;
+  flex-direction: column;
+}
+
+.propspanel-vertex-actions {
+  display: flex;
+  gap: 4px;
+  padding: 0 12px 4px 108px;
+}
+
+.propspanel-vertex-actions .btn {
+  min-width: 28px;
+}

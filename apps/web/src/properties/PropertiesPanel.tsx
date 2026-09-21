@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Command, Entity, PolylineEntity } from "@sketchor/core";
-import { arcPointAt, arcSweep, dist, findClosedRegions, layerOf, polylineLength } from "@sketchor/core";
+import { arcPointAt, arcSweep, bulgeToArc, dist, findClosedRegions, layerOf, polylineLength } from "@sketchor/core";
 import { bus, doc, useApp } from "../state/store";
 import { parseLength } from "../tools/typedInput";
 import { factorFromMm, formatArea, formatLength, type DisplayUnit } from "../units";
@@ -233,22 +233,121 @@ function PolylineGeometry({ entity, unit }: { entity: PolylineEntity; unit: Disp
       </Row>
       <ReadRow label="Length" value={formatLength(polylineLength(entity), unit)} />
       {area !== null && <ReadRow label="Area" value={formatArea(area, unit)} />}
-      <button className="btn ghost sm propspanel-toggle" onClick={() => setShowVertices((v) => !v)} data-testid="prop-vertices-toggle">
-        {showVertices ? "Hide vertices" : `Edit vertices (${entity.points.length})`}
-      </button>
+      <div className="propspanel-row propspanel-actions">
+        <button className="btn ghost sm" onClick={() => setShowVertices((v) => !v)} data-testid="prop-vertices-toggle">
+          {showVertices ? "Hide vertices" : `Vertices (${entity.points.length})`}
+        </button>
+        <button
+          className="btn ghost sm"
+          title="Reverse the vertex order (flips the direction offset and arc legs follow)"
+          data-testid="prop-reverse"
+          onClick={() => update(reversePolyline(entity))}
+        >
+          Reverse
+        </button>
+      </div>
       {showVertices &&
         entity.points.map((p, i) => (
-          <PointRow
-            key={i}
-            label={`#${i + 1}`}
-            p={p}
-            unit={unit}
-            testId={`prop-vertex-${i}`}
-            onCommit={(np) => update({ ...entity, points: entity.points.map((q, j) => (j === i ? np : q)) })}
-          />
+          <div key={i} className="propspanel-vertex">
+            <PointRow
+              label={`#${i + 1}`}
+              p={p}
+              unit={unit}
+              testId={`prop-vertex-${i}`}
+              onCommit={(np) => update({ ...entity, points: entity.points.map((q, j) => (j === i ? np : q)) })}
+            />
+            <div className="propspanel-vertex-actions">
+              <button
+                className="btn ghost sm"
+                title="Insert a vertex after this one, at the middle of the next leg"
+                data-testid={`prop-vertex-add-${i}`}
+                onClick={() => update(insertVertexAfter(entity, i))}
+              >
+                +
+              </button>
+              <button
+                className="btn ghost sm"
+                title={(entity.bulges?.[i] ?? 0) !== 0 ? "Make the next leg straight" : "Make the next leg an arc (a slight bulge you can then grip)"}
+                data-testid={`prop-vertex-arc-${i}`}
+                disabled={!entity.closed && i === entity.points.length - 1}
+                onClick={() => update(toggleLegArc(entity, i))}
+              >
+                {(entity.bulges?.[i] ?? 0) !== 0 ? "—" : "⌒"}
+              </button>
+              <button
+                className="btn ghost sm"
+                title="Remove this vertex"
+                data-testid={`prop-vertex-remove-${i}`}
+                disabled={entity.points.length <= 2}
+                onClick={() => update(removeVertex(entity, i))}
+              >
+                ×
+              </button>
+            </div>
+          </div>
         ))}
     </Section>
   );
+}
+
+/* ---------------------------- polyline editing ---------------------------- */
+
+const legCount = (pl: PolylineEntity) => (pl.closed ? pl.points.length : pl.points.length - 1);
+const bulgesOf = (pl: PolylineEntity) => Array.from({ length: legCount(pl) }, (_, i) => pl.bulges?.[i] ?? 0);
+const withBulges = (pl: PolylineEntity, bulges: number[]): PolylineEntity =>
+  bulges.some((b) => b !== 0) ? { ...pl, bulges } : (({ bulges: _b, ...rest }) => rest)(pl);
+
+/** Reversed vertex order; each bulge moves to its leg's new index and flips sign. */
+function reversePolyline(pl: PolylineEntity): PolylineEntity {
+  const n = pl.points.length;
+  const points = [...pl.points].reverse();
+  const old = bulgesOf(pl);
+  const bulges: number[] = [];
+  for (let i = 0; i < legCount(pl); i++) {
+    // New leg i runs from new point i to i+1 = old points (n-1-i) → (n-2-i), i.e. old leg (n-2-i) backwards.
+    const oldLeg = ((n - 2 - i) % n + n) % n;
+    bulges.push(-old[oldLeg]);
+  }
+  return withBulges({ ...pl, points }, bulges);
+}
+
+/** A new vertex at the middle of leg i (straight legs only keep the bulge split; an arc leg is split into two arcs of half the sweep). */
+function insertVertexAfter(pl: PolylineEntity, i: number): PolylineEntity {
+  const n = pl.points.length;
+  const a = pl.points[i];
+  const b = pl.points[(i + 1) % n];
+  if (!pl.closed && i === n - 1) return { ...pl, points: [...pl.points, { x: a.x + 10, y: a.y }] };
+  const old = bulgesOf(pl);
+  const bulge = old[i] ?? 0;
+  let mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  let half = 0;
+  if (bulge !== 0) {
+    const arc = bulgeToArc(a, b, bulge);
+    if (arc) {
+      const sweep = arcSweep(arc.startAngle, arc.endAngle, arc.ccw);
+      const midAngle = arc.ccw ? arc.startAngle + sweep / 2 : arc.startAngle - sweep / 2;
+      mid = arcPointAt(arc.center, arc.radius, midAngle);
+      half = Math.tan(sweep / 8) * Math.sign(bulge);
+    }
+  }
+  const points = [...pl.points.slice(0, i + 1), mid, ...pl.points.slice(i + 1)];
+  const bulges = [...old.slice(0, i), half, half, ...old.slice(i + 1)];
+  return withBulges({ ...pl, points }, bulges);
+}
+
+function removeVertex(pl: PolylineEntity, i: number): PolylineEntity {
+  const points = pl.points.filter((_, j) => j !== i);
+  const old = bulgesOf(pl);
+  // The leg into the removed vertex and the leg out of it merge into one straight leg.
+  const bulges = old.filter((_, j) => j !== i);
+  if (i > 0 && i - 1 < bulges.length) bulges[i - 1] = 0;
+  return withBulges({ ...pl, points }, bulges.slice(0, pl.closed ? points.length : points.length - 1));
+}
+
+function toggleLegArc(pl: PolylineEntity, i: number): PolylineEntity {
+  const bulges = bulgesOf(pl);
+  bulges[i] = bulges[i] !== 0 ? 0 : 0.3;
+  return withBulges(pl, bulges);
 }
 
 /* --------------------------------- fields -------------------------------- */
