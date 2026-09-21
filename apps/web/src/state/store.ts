@@ -269,7 +269,12 @@ export type ToolId =
   | "copy"
   | "rotate"
   | "scale"
-  | "mirror";
+  | "mirror"
+  | "trim"
+  | "split"
+  | "fillet"
+  | "chamfer"
+  | "offset";
 
 export const TOOL_HINTS: Record<ToolId, string> = {
   select: "Click to select (Shift adds) - drag left-to-right to window-select, right-to-left to crossing-select - drag to move - Del deletes - G groups - U ungroups - Shift+C toggles the selection between construction (dashed) and normal lines",
@@ -291,6 +296,11 @@ export const TOOL_HINTS: Record<ToolId, string> = {
   rotate: "Select, then click the pivot, a reference direction and the new direction - or type the angle in degrees after the pivot - Ctrl-click copies",
   scale: "Select, then click the base point and type the factor - or pick a reference length and then its new length (pick or type) - Ctrl-click copies",
   mirror: "Select, then click two points of the mirror line (Shift or F8 for a horizontal/vertical axis) - Ctrl-click the second point to delete the original",
+  trim: "Click the piece of a line, arc, circle or polyline to remove - everything visible acts as a cutting edge - Shift-click near an end to extend it to the next boundary instead",
+  split: "Click a point on a line, arc, circle or polyline to cut it there into two",
+  fillet: "Type a radius (0 = sharp corner join), then click two lines on the halves to keep - or click a polyline corner to round it, Enter rounds every corner of the selected polylines",
+  chamfer: "Type a distance, then click two lines on the halves to keep - the corner is bevelled at that distance along each",
+  offset: "Type the distance, click a line, arc, circle or polyline, then click the side the parallel copy goes on",
 };
 
 export type StraightenAxis = "horizontal" | "vertical";

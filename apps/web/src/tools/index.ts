@@ -1,5 +1,6 @@
 import type { ToolId } from "../state/store";
 import { ArcTool, CircleTool, LineTool, PointTool, PolylineTool, RectangleTool } from "./drawTools";
+import { ChamferTool, FilletTool, OffsetTool, SplitTool, TrimTool } from "./editTools";
 import { CopyTool, MirrorTool, MoveTool, RotateTool, ScaleTool } from "./modifyTools";
 import type { Tool } from "./tool";
 
@@ -20,6 +21,11 @@ const TOOLS: Partial<Record<ToolId, Tool>> = {
   rotate: new RotateTool(),
   scale: new ScaleTool(),
   mirror: new MirrorTool(),
+  trim: new TrimTool(),
+  split: new SplitTool(),
+  fillet: new FilletTool(),
+  chamfer: new ChamferTool(),
+  offset: new OffsetTool(),
 };
 
 export function getTool(id: ToolId): Tool | null {

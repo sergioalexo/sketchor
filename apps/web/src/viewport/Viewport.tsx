@@ -680,6 +680,16 @@ export function Viewport() {
         app.setTool("scale");
       } else if (matchesBinding(e, "tool.mirror")) {
         app.setTool("mirror");
+      } else if (matchesBinding(e, "tool.trim")) {
+        app.setTool("trim");
+      } else if (matchesBinding(e, "tool.split")) {
+        app.setTool("split");
+      } else if (matchesBinding(e, "tool.fillet")) {
+        app.setTool("fillet");
+      } else if (matchesBinding(e, "tool.chamfer")) {
+        app.setTool("chamfer");
+      } else if (matchesBinding(e, "tool.offset")) {
+        app.setTool("offset");
       } else if (matchesBinding(e, "tool.point")) {
         app.setTool("point");
       } else if (matchesBinding(e, "tool.image")) {
@@ -828,6 +838,11 @@ export function Viewport() {
       case "rotate":
       case "scale":
       case "mirror":
+      case "trim":
+      case "split":
+      case "fillet":
+      case "chamfer":
+      case "offset":
         // On the tool framework; dispatched above.
         break;
       case "image": {

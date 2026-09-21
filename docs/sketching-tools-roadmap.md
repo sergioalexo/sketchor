@@ -10,6 +10,7 @@ Status as of 2026-09-11 (`main` @ v0.14.4).
 
 | Date | Items | Notes |
 |---|---|---|
+| 2026-09-21 | **T-16** (trim / extend / split), **T-17** (fillet / chamfer), **T-15** (offset) | Intersection library `packages/core/src/intersect.ts`: every entity as a `Path` of segment/arc curves, `intersectCurves` (seg/seg, seg/arc, arc/arc, with unbounded variants), `cutParams`, `trimAt`, `splitAt`, `extendTo`, `entityFromPath` (lone segment → line, lone arc → arc, full turn → circle, else polyline with bulges). `fillet.ts`: `filletLines` (radius 0 = corner join; the clicked halves stay), `chamferLines`, `filletPolylineCorner` / `filletAllCorners` (bulges in place). `offset.ts`: signed left-offset per curve, neighbours re-joined at their intersection, round join where offset arcs don't reach, inverted legs and swallowed slot walls dropped, collinear seams merged. Tools in `apps/web/src/tools/editTools.ts`: **Trim** (quick trim, everything visible cuts; Shift-click extends), **Split**, **Fillet** (typed radius remembered; polyline corner click; Enter rounds all corners of selected polylines), **Chamfer** (one typed distance), **Offset** (typed distance, entity, side — live preview). Bindings Shift+T / Shift+B / Shift+F / — / Shift+O. *Not done:* fillet between arcs/circles, trim fence-drag, offset "through point", `OFFSETGAPTYPE=1` (round) as an option. |
 | 2026-09-21 | **T-10**, **T-11** (tool only), **T-12**, **T-13**, **T-14** | `apps/web/src/tools/modifyTools.ts` on the framework: Move (base → destination or typed `@dx,dy`/distance, Ctrl-click copies), Copy (repeats until Enter/Esc), Rotate (pivot → reference direction → new direction, or a typed angle after the pivot; Ctrl copies), Scale (typed factor, or reference length → new length picked or typed; Ctrl copies), Mirror (two axis points, Shift/F8 for H/V; Ctrl-click deletes the source). With nothing selected, the first click selects. Core: `packages/core/src/mirror.ts` (`mirrored`, tested) — arcs flip sweep, bulges negate, text/images move by position only. Not done from T-11: Ctrl+C/X/V clipboard via sketch code, Ctrl+D duplicate, group-aware copies; from T-10: arrow-key nudge. Copies come back ungrouped. |
 | 2026-09-18 | **T-00** (partial), **T-08** (core), **T-09**, **T-01**, **T-03** | Tool framework in `apps/web/src/tools/` (`tool.ts` interface, `index.ts` registry, `drawTools.ts`); line/polyline/rectangle/circle/point migrated, select/measure/text/image/fill/straighten/dim/pan still on the legacy switch in `Viewport.tsx`. Typed input: floating box (digits/`@`/`-`/`.` open it), grammar `100`, `100<45`, `x,y`, `@dx,dy`, unit suffixes and feet-inches (`typedInput.ts`, tested); no docked command line, no post-commit quick-edit, no relative-zero yet. Ortho/polar: F8/F10, Shift = temporary ortho, status-bar toggles, dashed guide + angle (`tracking.ts`, tested). Arc tool: 3-point / center-start-end / tangent, Tab cycles (`packages/core/src/arcs.ts`, tested). Polyline `A`/`T`/`L` arc legs stored as bulges. T-21 not started. |
 
@@ -234,14 +235,14 @@ Base point + factor or `R` reference (pick a known length, type what it should b
 
 Two points define the axis (with ortho/polar from T-09 for H/V axes); option keep/delete source (default keep, as AutoCAD `MIRROR`). Text is mirrored by position only, never mirrored as glyphs (AutoCAD `MIRRTEXT=0`). Core: `mirrored(entity, p1, p2)` in `entities.ts` — for arcs, swap `ccw` and reflect start/end; for polylines negate bulges (same trick `dxf.ts` uses for negative INSERT scale — reuse it).
 
-### T-15 · Offset — **P0, M**
+### T-15 · Offset — **P0, M** — 🟡 2026-09-21 (distance mode; through-point and round-gap option open)
 
 Distance (typed) or **through point**; then click entities, side by cursor; repeats until Esc. Core `offsetEntity(entity, d, side)`:
 - line → parallel line; circle/arc → concentric (reject if `r+d ≤ 0`);
 - polyline → offset each segment (line or bulge arc), then join consecutive offsets: intersect adjacent line/line, insert a bulge arc at convex corners (AutoCAD `OFFSETGAPTYPE=1` behaviour is round; 0 = extend to intersection — offer both, default extend), and **drop segments that invert** (this is the hard part — a simple "remove segments whose direction flipped + re-intersect neighbours" pass covers 95 % of real outlines). Tests on a rectangle, a rounded rectangle, a concave L-shape, and a closed outline where inner offset collapses a short edge.
 - Closed polyline result stays closed. Layer/colour copied from source.
 
-### T-16 · Trim / Extend / Split — **P0, L**
+### T-16 · Trim / Extend / Split — **P0, L** — 🟡 2026-09-21 (click trim, Shift extend, split; fence drag open)
 
 **Ref:** AutoCAD 2021+ *quick trim* mode (no boundary selection — just click or drag across the pieces to remove) plus Shift = extend; Onshape `Split`.
 
@@ -253,7 +254,7 @@ Needs the **intersection library** first (`packages/core/src/intersect.ts`): pai
 - **Break at point / Break** (AutoCAD): thin wrappers over split.
 - All emit `delete-entity` + `add-entity` in one batch. Preserve `name`? — no: new pieces get new names; the DSL diff treats it as replace.
 
-### T-17 · Fillet / Chamfer — **P0, M**
+### T-17 · Fillet / Chamfer — **P0, M** — 🟡 2026-09-21 (lines + polyline corners; arcs/circles open)
 
 Pick two entities (lines, arcs, circles, or two adjacent polyline segments), radius typed or remembered. Core `fillet(e1, e2, r)`: offset both by `r` on the side of the click points, intersect the offsets → center, drop perpendiculars/radial points → tangent points, trim/extend both inputs to the tangent points, add the arc. **Radius 0 = corner join** (extends/trims two lines to their intersection — hugely useful for cleaning DXFs; AutoCAD users do this constantly). Polyline mode: fillet *all* corners of a closed polyline at once (`P` option) — writes bulges into the polyline instead of adding arcs. Chamfer: same flow with two distances or distance+angle. Onshape adds a tangent constraint here; do that in T-46 when the solver exists.
 

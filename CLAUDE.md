@@ -142,6 +142,14 @@ fill, straighten, dim, pan) still run as `case`s in `Viewport.tsx`'s
 pointer handlers — `getTool()` returns null for those. Migrating one means
 moving its case into a class and deleting its `interaction` kind.
 
+Geometry the editing tools stand on, all in `packages/core` and tested:
+`intersect.ts` (entity → `Path` of segment/arc curves, `intersectCurves`,
+`trimAt`/`splitAt`/`extendTo`, `entityFromPath`), `fillet.ts`, `offset.ts`
+(signed left-offset per curve + re-joining; the join heuristics — drop
+inverted legs, drop anti-parallel slot walls, bridge collinear seams —
+are the 95 % case, not a full self-intersection cleanup). Tools in
+`tools/editTools.ts` only pick and commit `delete + add` batches.
+
 Rules for a new tool (roadmap T-00):
 1. Geometry math is a pure function in `packages/core` with a test
    (`arcs.ts` is the model). The tool only collects picks and calls it.

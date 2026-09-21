@@ -286,6 +286,64 @@ const TOOLS: { id: ToolId; label: string; keyHint: string; icon: JSX.Element; di
       </svg>
     ),
   },
+  {
+    id: "trim",
+    label: "Trim",
+    keyHint: "",
+    divider: true,
+    icon: (
+      <svg viewBox="0 0 24 24" width="20" height="20">
+        <path d="M3 8h18M3 16h18" {...S} />
+        <path d="M12 3v5M12 16v5" {...S} />
+        <path d="M12 8v8" {...S} strokeDasharray="2 2" opacity="0.5" />
+        <path d="M9 10l6 4M15 10l-6 4" {...S} strokeWidth="1.5" />
+      </svg>
+    ),
+  },
+  {
+    id: "split",
+    label: "Split",
+    keyHint: "",
+    icon: (
+      <svg viewBox="0 0 24 24" width="20" height="20">
+        <path d="M3 12h7M14 12h7" {...S} />
+        <path d="M12 6v12" {...S} strokeDasharray="2 2" />
+        <circle cx="12" cy="12" r="1.6" fill="currentColor" />
+      </svg>
+    ),
+  },
+  {
+    id: "fillet",
+    label: "Fillet",
+    keyHint: "",
+    icon: (
+      <svg viewBox="0 0 24 24" width="20" height="20">
+        <path d="M4 20V11a7 7 0 017-7h9" {...S} />
+        <path d="M4 6V4h2M18 20h2v-2" {...S} strokeWidth="1.4" opacity="0.5" />
+      </svg>
+    ),
+  },
+  {
+    id: "chamfer",
+    label: "Chamfer",
+    keyHint: "",
+    icon: (
+      <svg viewBox="0 0 24 24" width="20" height="20">
+        <path d="M4 20V11l7-7h9" {...S} />
+      </svg>
+    ),
+  },
+  {
+    id: "offset",
+    label: "Offset",
+    keyHint: "",
+    icon: (
+      <svg viewBox="0 0 24 24" width="20" height="20">
+        <path d="M4 20V8a4 4 0 014-4h12" {...S} />
+        <path d="M9 20v-9a2 2 0 012-2h9" {...S} strokeDasharray="3 2" />
+      </svg>
+    ),
+  },
 ];
 
 /**

@@ -19,6 +19,8 @@ npm run desktop    # native desktop window via Tauri (needs Rust toolchain)
 | Circle tool | `C` — click center, then a point on the circle (or type the radius) |
 | Arc tool | `A` — three-point (start, end, point on the arc); `Tab` cycles to center-start-end and tangent-continuation |
 | Move / Copy / Rotate / Scale / Mirror | `Shift+M` / `Shift+D` / `Shift+R` / `Shift+S` / `Shift+I` — select first (or click the object), then follow the status-bar prompt: base point and destination, pivot and angle (typed or two directions), base and factor or reference length, two axis points. `Ctrl`-click the last point to copy instead of modify (mirror: to delete the source) |
+| Trim / Split | `Shift+T` click the piece to remove (everything visible cuts); `Shift`-click near an end to extend it to the next boundary · `Shift+B` click where to cut |
+| Fillet / Chamfer / Offset | `Shift+F` type a radius (0 = sharp corner join), click two lines on the halves to keep, or click a polyline corner (`Enter` rounds every corner of the selected polylines) · Chamfer: type a distance, two lines · `Shift+O` type a distance, click the entity, click the side |
 | Typed coordinates | while drawing, type `100` (length toward the cursor), `100<45`, `50,20`, `@50,20` — units like `4in`, `2'6"` accepted |
 | Ortho / polar | `F8` / `F10` (or the status-bar toggles); `Shift` held is temporary ortho |
 | Select tool | `V` — click (Shift adds), drag to move, `Del` deletes |
