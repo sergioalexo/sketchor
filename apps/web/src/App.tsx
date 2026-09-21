@@ -13,6 +13,7 @@ import { DiagnosticsPanel } from "./heal/DiagnosticsPanel";
 import { DuplicatesPanel } from "./heal/DuplicatesPanel";
 import { ImportReportBanner } from "./dxf/ImportReportBanner";
 import { LayerPanel } from "./layers/LayerPanel";
+import { PropertiesPanel } from "./properties/PropertiesPanel";
 import { PatternPanel } from "./pattern/PatternPanel";
 import { FillPanel } from "./fill/FillPanel";
 import { TextPanel } from "./text/TextPanel";
@@ -469,6 +470,7 @@ export function App() {
   }, [saveNotice, setSaveNotice]);
   const [showCode, setShowCode] = useState(false);
   const [showLayers, setShowLayers] = useState(true);
+  const [showProps, setShowProps] = useState(false);
   const [showDiag, setShowDiag] = useState(false);
   const [showDup, setShowDup] = useState(false);
   const [showPattern, setShowPattern] = useState(false);
@@ -519,6 +521,9 @@ export function App() {
       if (matchesBinding(e, "app.commandPalette")) {
         e.preventDefault();
         setShowPalette((v) => !v);
+      } else if (matchesBinding(e, "app.toggleProperties")) {
+        e.preventDefault();
+        setShowProps((v) => !v);
       } else if (matchesBinding(e, "app.toggleLayers")) {
         e.preventDefault();
         setShowLayers((v) => !v);
@@ -813,6 +818,18 @@ export function App() {
           />
           <div className="action-sep" />
           <button
+            className={`action ${showProps ? "toggled" : ""}`}
+            title={withKey("Toggle properties panel — edit the selection's coordinates, radius, angles, text, layer and colour — right-click to add a shortcut", "app.toggleProperties")}
+            data-testid="toggle-properties"
+            onClick={() => setShowProps((v) => !v)}
+            onContextMenu={rebind("app.toggleProperties")}
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18">
+              <path d="M4 6h16M4 12h10M4 18h13" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" />
+              <path d="M17 11l3 1-3 1z" fill="currentColor" />
+            </svg>
+          </button>
+          <button
             className={`action ${showLayers ? "toggled" : ""}`}
             title={withKey("Toggle layers panel — right-click to add a shortcut", "app.toggleLayers")}
             data-testid="toggle-layers"
@@ -1097,6 +1114,7 @@ export function App() {
         {showDup && <DuplicatesPanel onClose={() => setShowDup(false)} />}
         {showPattern && <PatternPanel onClose={() => setShowPattern(false)} />}
         {showCode && <CodePanel />}
+        {showProps && !modelTab && <PropertiesPanel onClose={() => setShowProps(false)} />}
         {/* Layers is always the rightmost panel. */}
         {showLayers && <LayerPanel />}
       </div>

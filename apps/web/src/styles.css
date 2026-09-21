@@ -2587,3 +2587,114 @@ kbd.shortcut-key-fixed {
   min-height: 36px;
   font-size: 14px;
 }
+
+/* ---------- properties panel (T-28) ---------- */
+
+.propspanel {
+  display: flex;
+  flex-direction: column;
+  width: 260px;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.propspanel-empty {
+  padding: 14px 12px;
+  color: var(--text-dim);
+}
+
+.propspanel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding-bottom: 12px;
+}
+
+.propspanel-summary {
+  padding: 8px 12px;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+}
+
+.propspanel-section {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.propspanel-section-title {
+  padding: 4px 12px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.propspanel-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 12px;
+  min-height: 28px;
+}
+
+.propspanel-label {
+  flex: 0 0 96px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.propspanel-field {
+  flex: 1;
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+}
+
+.propspanel-read {
+  flex: 1;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.propspanel-input {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.propspanel-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.propspanel-swatch {
+  width: 28px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: transparent;
+}
+
+.propspanel-toggle {
+  margin: 4px 12px;
+}
+
+.app.touch .propspanel-input {
+  padding: 8px;
+  font-size: 14px;
+}
+
+.app.touch .propspanel-row {
+  min-height: 40px;
+}
