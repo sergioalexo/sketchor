@@ -374,7 +374,7 @@ function sameGeometry(existing: Entity, parsed: ParsedEntity): boolean {
  * existing image must carry its `dataUrl` forward from the entity being
  * replaced. Never called to *create* a new image (see diffToCommands).
  */
-function toEntity(parsed: ParsedEntity, id: EntityId, layer?: string, bulges?: number[], imageDataUrl?: string): Entity {
+export function toEntity(parsed: ParsedEntity, id: EntityId, layer?: string, bulges?: number[], imageDataUrl?: string): Entity {
   const layerProp = layer ? { layer } : {};
   switch (parsed.type) {
     case "line":

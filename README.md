@@ -30,6 +30,8 @@ npm run desktop    # native desktop window via Tauri (needs Rust toolchain)
 | Save / Save As | `Ctrl+S` overwrites the tab's own file; the Save menu names that file and offers Save As / Save a Copy |
 | Close tab | `Ctrl+W` (desktop only — browsers reserve it for their own tab) |
 | Undo / Redo | `Ctrl+Z` / `Ctrl+Y` |
+| Copy / Cut / Paste | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` (at the cursor) / `Ctrl+Shift+V` (in place) / `Ctrl+D` (duplicate) — the clipboard holds readable sketch code, so a copy pastes into a chat or editor too |
+| Nudge | arrow keys move the selection one grid step; `Shift` = ten |
 
 Snapping is automatic, in priority order: **the origin**, endpoints, centers,
 quadrants, **intersections** (any two curves), nodes, and — measured from the

@@ -4,6 +4,7 @@ export * from "./mirror";
 export * from "./intersect";
 export * from "./fillet";
 export * from "./offset";
+export * from "./clipboard";
 export * from "./entities";
 export * from "./groups";
 export * from "./constraints";

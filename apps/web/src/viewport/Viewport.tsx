@@ -46,8 +46,9 @@ import { formatArea, formatLength } from "../units";
 import { render } from "./renderer";
 import { setImageDecodeCallback } from "./imageCache";
 import { findSnap, snapMovingSelection, snapRotation, type Snap } from "./snapping";
-import { fitToBounds, screenToWorld, worldToScreen, zoomAt, type View } from "./view";
+import { fitToBounds, gridStep, screenToWorld, worldToScreen, zoomAt, type View } from "./view";
 import { getTool, type Pick, type ToolContext } from "../tools";
+import { copySelectionToClipboard, pasteFromClipboard } from "../io/clipboard";
 import { applyTracking, trackingIncrement, useTracking } from "../tools/tracking";
 import { useSnapSettings } from "../tools/snapSettings";
 import { parseTypedInput, resolveTypedInput, startsTypedInput } from "../tools/typedInput";
@@ -624,6 +625,37 @@ export function Viewport() {
       } else if (matchesBinding(e, "edit.redo")) {
         bus.redo();
         e.preventDefault();
+      } else if (matchesBinding(e, "edit.copy") || matchesBinding(e, "edit.cut")) {
+        if (app.selection.length > 0) {
+          e.preventDefault();
+          void copySelectionToClipboard(app.selection, matchesBinding(e, "edit.cut"));
+        }
+      } else if (matchesBinding(e, "edit.paste") || matchesBinding(e, "edit.pasteInPlace")) {
+        e.preventDefault();
+        const inPlace = matchesBinding(e, "edit.pasteInPlace");
+        const at = !inPlace && lastScreenRef.current ? (snapRef.current?.point ?? screenToWorld(viewRef.current, lastScreenRef.current)) : null;
+        void pasteFromClipboard(at).then((ids) => {
+          if (ids.length > 0) {
+            app.setSelection(ids);
+            app.setTool("select");
+          }
+        });
+      } else if (matchesBinding(e, "edit.duplicate")) {
+        if (app.selection.length > 0) {
+          e.preventDefault();
+          const step = gridStep(viewRef.current.scale);
+          void copySelectionToClipboard(app.selection, false, { internalOnly: true }).then(() =>
+            pasteFromClipboard(null, { x: step, y: step }).then((ids) => {
+              if (ids.length > 0) app.setSelection(ids);
+            }),
+          );
+        }
+      } else if ((e.key === "ArrowLeft" || e.key === "ArrowRight" || e.key === "ArrowUp" || e.key === "ArrowDown") && app.selection.length > 0 && !getTool(app.tool)?.busy()) {
+        e.preventDefault();
+        const step = gridStep(viewRef.current.scale) * (e.shiftKey ? 10 : 1);
+        const dx = e.key === "ArrowLeft" ? -step : e.key === "ArrowRight" ? step : 0;
+        const dy = e.key === "ArrowDown" ? -step : e.key === "ArrowUp" ? step : 0;
+        bus.execute({ type: "move-entities", ids: app.selection, dx, dy });
       } else if (matchesBinding(e, "view.ortho")) {
         e.preventDefault();
         useTracking.getState().toggleOrtho();
