@@ -177,24 +177,42 @@ elsewhere. Opening a file that's already open in a tab switches to that tab
 Opening a `.step`/`.stp` (or `.iges`/`.igs`) file gives a 3D viewer tab
 instead of a drawing: shaded parts in the colours the file carries, B-rep
 edges drawn as dark outlines, orbit with the left mouse button, pan with the
-right or middle, wheel to zoom toward the cursor. Click a part to select it
-(its name shows in the corner readout), double-click to frame it, `H` hides
-the selected part and `Shift+H` shows everything again; `E` toggles edges,
-`F` fits, and `1`–`4` jump to isometric / top / front / right. The **Parts**
-button opens the assembly tree, with a filter and per-part hide/show. With
-a part selected, the readout shows its bounding-box size.
+right or middle, wheel to zoom toward the cursor. Double-click frames what
+is under the cursor, `H` hides the selected part and `Shift+H` shows
+everything again; `E` toggles edges, `F` fits, and `1`–`4` jump to
+isometric / top / front / right.
 
-**Measure** (`M`, or the toolbar button): click or tap two points on the
-model to get the straight-line distance plus ΔX / ΔY / ΔZ. Each point snaps
-to the nearest corner (B-rep vertex) or edge under the cursor, so aiming
-roughly at a corner measures the corner; the readout says which kind of
-point each end landed on. The measurement stays attached to the geometry
-while you orbit; `Esc` clears it, then leaves the tool.
+**Clicking picks geometry, the way Onshape does** — the vertex, edge or
+face under the cursor, in that order of preference, so aiming at a corner
+gets the corner and not the edge it sits on. The bottom-right readout says
+what it measures:
+
+| You picked | You get |
+| --- | --- |
+| A vertex | X / Y / Z |
+| A straight edge | Length, ΔX ΔY ΔZ |
+| A circle or arc | Diameter, radius, centre, arc angle |
+| A face | Area, perimeter, normal (and diameter, for a cylindrical one) |
+| A part (from the Structure panel) | Size, surface area, volume, face and edge counts |
+| Two of anything | Distance — and the angle, where one means something |
+
+Shift- or Ctrl-click adds to the selection (up to eight); `Esc` or a click
+on empty space clears it. The panel on the right is the **Structure** tree
+for a model tab — the assembly hierarchy, with a filter, per-part hide/show
+and double-click to frame — in the slot layers occupy for a drawing.
+
+**Measure** (`M`, or the toolbar button) is the free-point version, for a
+distance between two places that aren't a vertex, edge or face: click or tap
+two points to get the straight-line distance plus ΔX / ΔY / ΔZ. Each point
+snaps to the nearest corner or edge under the cursor, and the readout says
+which kind of point each end landed on. The measurement stays attached to
+the geometry while you orbit; `Esc` clears it, then leaves the tool.
 
 On a touch screen: one finger orbits, two fingers pinch-zoom and pan, tap
-selects, double-tap frames, and a long-press hides the part under your
-finger (Show all brings it back). Buttons grow to finger size, and on a
-narrow stage the parts tree docks as a bottom sheet.
+picks (with a wider aperture, so fingers can still hit an edge), double-tap
+frames, and a long-press hides the part under your finger (Show all brings
+it back). Buttons grow to finger size, and the readout moves clear of the
+bottom toolbar.
 
 ### Touch mode
 

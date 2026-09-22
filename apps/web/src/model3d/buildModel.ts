@@ -1,11 +1,14 @@
-import type { Bounds3, Model3D, ModelFormat, ModelNode, ModelPart, OcctMesh, OcctNode, OcctResult } from "./types";
+import type { Bounds3, EdgeTable, FaceTable, MeshTopology, Model3D, ModelFormat, ModelNode, ModelPart, OcctMesh, OcctNode, OcctResult, VertexTable } from "./types";
+import { extractTopology, NO_FACE } from "./topology";
 
 /**
  * Flattens an occt-import-js result into a `Model3D`: one merged buffer set
- * with a part table, per-vertex colours baked in, and the B-rep edges
- * extracted. Pure and synchronous — it runs inside the import worker, right
- * after tessellation, so the main thread never touches the per-mesh JS
- * arrays OpenCascade produces (millions of boxed numbers on a big assembly).
+ * with a part table, per-vertex colours baked in, and the B-rep topology
+ * (faces, edges, vertices — see topology.ts) recovered and merged into
+ * model-wide tables. Pure and synchronous — it runs inside the import
+ * worker, right after tessellation, so the main thread never touches the
+ * per-mesh JS arrays OpenCascade produces (millions of boxed numbers on a
+ * big assembly).
  *
  * Tolerant by design: a mesh with a missing or truncated attribute is
  * skipped, never thrown on. A file that tessellates to nothing yields an
@@ -23,7 +26,7 @@ interface PreparedMesh {
   normals: Float32Array;
   colors: Uint8Array;
   indices: Uint32Array;
-  edges: Float32Array;
+  topo: MeshTopology;
   bounds: Bounds3;
 }
 
@@ -43,10 +46,16 @@ export function buildModel(result: OcctResult, name: string, hash: string, forma
   let vertexTotal = 0;
   let indexTotal = 0;
   let edgeTotal = 0;
+  let faceTotal = 0;
+  let edgeRefTotal = 0;
+  let nodeTotal = 0;
   for (const m of prepared) {
     vertexTotal += m.positions.length / 3;
     indexTotal += m.indices.length;
-    edgeTotal += m.edges.length;
+    edgeTotal += m.topo.edges.length;
+    faceTotal += m.topo.faceTriStart.length;
+    edgeRefTotal += m.topo.edgeLength.length;
+    nodeTotal += m.topo.vertices.length / 3;
   }
 
   const positions = new Float32Array(vertexTotal * 3);
@@ -54,32 +63,95 @@ export function buildModel(result: OcctResult, name: string, hash: string, forma
   const colors = new Uint8Array(vertexTotal * 3);
   const indices = new Uint32Array(indexTotal);
   const edges = new Float32Array(edgeTotal);
+  const faceOfTriangle = new Uint32Array(indexTotal / 3);
+  const edgeOfSegment = new Uint32Array(edgeTotal / 6);
+  const faces = emptyFaceTable(faceTotal);
+  const edgeTable = emptyEdgeTable(edgeRefTotal);
+  const nodes: VertexTable = { part: new Uint32Array(nodeTotal), xyz: new Float32Array(nodeTotal * 3) };
   const parts: ModelPart[] = [];
 
   let v = 0;
   let ix = 0;
   let ed = 0;
-  for (const m of prepared) {
+  let fi = 0;
+  let ei = 0;
+  let ni = 0;
+  prepared.forEach((m, part) => {
+    const t = m.topo;
     const vertexCount = m.positions.length / 3;
+    const triStart = ix / 3;
+    const segStart = ed / 6;
+    const faceStart = fi;
     positions.set(m.positions, v * 3);
     normals.set(m.normals, v * 3);
     colors.set(m.colors, v * 3);
     for (let k = 0; k < m.indices.length; k++) indices[ix + k] = m.indices[k] + v;
-    edges.set(m.edges, ed);
+    edges.set(t.edges, ed);
+
+    // Faces: the mesh's triangle runs shifted into the merged index buffer.
+    for (let f = 0; f < t.faceTriStart.length; f++, fi++) {
+      faces.part[fi] = part;
+      faces.triStart[fi] = triStart + t.faceTriStart[f];
+      faces.triCount[fi] = t.faceTriCount[f];
+      faces.area[fi] = t.faceArea[f];
+      faces.planar[fi] = t.facePlanar[f];
+      copy3(faces.centroid, fi, t.faceCentroid, f);
+      copy3(faces.normal, fi, t.faceNormal, f);
+    }
+    for (let k = 0; k < t.faceOfTriangle.length; k++) faceOfTriangle[triStart + k] = faceStart + t.faceOfTriangle[k];
+
+    // Edges: segment runs shifted, adjacent faces re-based, and each edge's
+    // length added to the perimeter of the faces it bounds.
+    for (let e = 0; e < t.edgeLength.length; e++, ei++) {
+      edgeTable.part[ei] = part;
+      edgeTable.segStart[ei] = segStart + t.edgeSegStart[e];
+      edgeTable.segCount[ei] = t.edgeSegCount[e];
+      edgeTable.length[ei] = t.edgeLength[e];
+      edgeTable.kind[ei] = t.edgeKind[e];
+      edgeTable.radius[ei] = t.edgeRadius[e];
+      copy3(edgeTable.a, ei, t.edgeA, e);
+      copy3(edgeTable.b, ei, t.edgeB, e);
+      copy3(edgeTable.center, ei, t.edgeCenter, e);
+      copy3(edgeTable.normal, ei, t.edgeNormal, e);
+      const fa = t.edgeFaceA[e];
+      const fb = t.edgeFaceB[e];
+      edgeTable.faceA[ei] = fa === NO_FACE ? NO_FACE : faceStart + fa;
+      edgeTable.faceB[ei] = fb === NO_FACE ? NO_FACE : faceStart + fb;
+      if (fa !== NO_FACE) faces.perimeter[faceStart + fa] += t.edgeLength[e];
+      if (fb !== NO_FACE) faces.perimeter[faceStart + fb] += t.edgeLength[e];
+      for (let k = 0; k < t.edgeSegCount[e]; k++) edgeOfSegment[segStart + t.edgeSegStart[e] + k] = ei;
+    }
+
+    const nodeStart = ni;
+    for (let k = 0; k < t.vertices.length / 3; k++, ni++) {
+      nodes.part[ni] = part;
+      nodes.xyz[ni * 3] = t.vertices[k * 3];
+      nodes.xyz[ni * 3 + 1] = t.vertices[k * 3 + 1];
+      nodes.xyz[ni * 3 + 2] = t.vertices[k * 3 + 2];
+    }
+
     parts.push({
       name: m.name,
       vertexStart: v,
       vertexCount,
       indexStart: ix,
       indexCount: m.indices.length,
-      edgeStart: ed / 6,
-      edgeCount: m.edges.length / 6,
+      edgeStart: segStart,
+      edgeCount: t.edges.length / 6,
+      faceStart,
+      faceCount: t.faceTriStart.length,
+      edgeRefStart: ei - t.edgeLength.length,
+      edgeRefCount: t.edgeLength.length,
+      nodeStart,
+      nodeCount: t.vertices.length / 3,
+      area: t.area,
+      volume: t.volume,
       bounds: m.bounds,
     });
     v += vertexCount;
     ix += m.indices.length;
-    ed += m.edges.length;
-  }
+    ed += t.edges.length;
+  });
 
   return {
     name,
@@ -90,10 +162,51 @@ export function buildModel(result: OcctResult, name: string, hash: string, forma
     colors,
     indices,
     edges,
+    faces,
+    edgeTable,
+    nodes,
+    faceOfTriangle,
+    edgeOfSegment,
     parts,
     tree: buildTree(result?.root, partIndexOf, parts, name),
     bounds: unionBounds(parts.map((p) => p.bounds)),
     triangleCount: indexTotal / 3,
+  };
+}
+
+function copy3(target: Float32Array, ti: number, source: Float32Array, si: number): void {
+  target[ti * 3] = source[si * 3];
+  target[ti * 3 + 1] = source[si * 3 + 1];
+  target[ti * 3 + 2] = source[si * 3 + 2];
+}
+
+function emptyFaceTable(n: number): FaceTable {
+  return {
+    part: new Uint32Array(n),
+    triStart: new Uint32Array(n),
+    triCount: new Uint32Array(n),
+    area: new Float32Array(n),
+    perimeter: new Float32Array(n),
+    centroid: new Float32Array(n * 3),
+    normal: new Float32Array(n * 3),
+    planar: new Uint8Array(n),
+  };
+}
+
+function emptyEdgeTable(n: number): EdgeTable {
+  return {
+    part: new Uint32Array(n),
+    segStart: new Uint32Array(n),
+    segCount: new Uint32Array(n),
+    length: new Float32Array(n),
+    kind: new Uint8Array(n),
+    a: new Float32Array(n * 3),
+    b: new Float32Array(n * 3),
+    center: new Float32Array(n * 3),
+    radius: new Float32Array(n),
+    normal: new Float32Array(n * 3),
+    faceA: new Uint32Array(n),
+    faceB: new Uint32Array(n),
   };
 }
 
@@ -175,7 +288,7 @@ function prepareMesh(mesh: OcctMesh | undefined): PreparedMesh | null {
     normals,
     colors,
     indices: keptIndices,
-    edges: extractEdges(positions, keptIndices, faceOfTri, bounds),
+    topo: extractTopology(positions, keptIndices, faceOfTri, Math.max(1, faces.length), bounds),
     bounds,
   };
 }
@@ -217,76 +330,6 @@ function computeNormals(positions: Float32Array, indices: Uint32Array): Float32A
     n[i + 2] /= len;
   }
   return n;
-}
-
-/**
- * B-rep edges: triangle edges shared by two triangles of *different* faces,
- * plus open boundaries (an edge with only one triangle — sheet bodies).
- *
- * Adjacent faces don't share vertex indices (each face is tessellated on
- * its own), so vertices are first welded by quantised position; the maps
- * are per mesh and therefore small even on a huge assembly.
- */
-function extractEdges(positions: Float32Array, indices: Uint32Array, faceOfTri: Int32Array, bounds: Bounds3): Float32Array {
-  const vertexCount = positions.length / 3;
-  const diag = Math.hypot(
-    bounds.max[0] - bounds.min[0],
-    bounds.max[1] - bounds.min[1],
-    bounds.max[2] - bounds.min[2],
-  );
-  const inv = 1 / (diag > 0 ? diag * 1e-6 : 1e-6);
-
-  const weld = new Uint32Array(vertexCount);
-  const byKey = new Map<string, number>();
-  let welded = 0;
-  for (let i = 0; i < vertexCount; i++) {
-    const key = `${Math.round(positions[i * 3] * inv)},${Math.round(positions[i * 3 + 1] * inv)},${Math.round(positions[i * 3 + 2] * inv)}`;
-    let id = byKey.get(key);
-    if (id === undefined) {
-      id = welded++;
-      byKey.set(key, id);
-    }
-    weld[i] = id;
-  }
-
-  // key -> face id of first triangle seen; -1 = interior (same face twice),
-  // -2 = crease (two faces). Third+ occurrences (non-manifold) are ignored.
-  const seen = new Map<number, number>();
-  // A representative original vertex per welded id, for output coordinates.
-  const rep = new Uint32Array(welded);
-  for (let i = vertexCount - 1; i >= 0; i--) rep[weld[i]] = i;
-
-  const triCount = indices.length / 3;
-  for (let tri = 0; tri < triCount; tri++) {
-    const face = faceOfTri[tri];
-    const a = weld[indices[tri * 3]];
-    const b = weld[indices[tri * 3 + 1]];
-    const c = weld[indices[tri * 3 + 2]];
-    visitEdge(seen, welded, a, b, face);
-    visitEdge(seen, welded, b, c, face);
-    visitEdge(seen, welded, c, a, face);
-  }
-
-  const out: number[] = [];
-  for (const [key, state] of seen) {
-    if (state === -1) continue;
-    const u = Math.floor(key / welded);
-    const w = key - u * welded;
-    if (u === w) continue;
-    const pu = rep[u] * 3;
-    const pw = rep[w] * 3;
-    out.push(positions[pu], positions[pu + 1], positions[pu + 2], positions[pw], positions[pw + 1], positions[pw + 2]);
-  }
-  return Float32Array.from(out);
-}
-
-function visitEdge(seen: Map<number, number>, welded: number, a: number, b: number, face: number): void {
-  const lo = a < b ? a : b;
-  const hi = a < b ? b : a;
-  const key = lo * welded + hi;
-  const prev = seen.get(key);
-  if (prev === undefined) seen.set(key, face);
-  else if (prev >= 0) seen.set(key, prev === face ? -1 : -2);
 }
 
 /* ------------------------------ hierarchy ------------------------------- */

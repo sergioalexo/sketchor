@@ -1,0 +1,83 @@
+import { create } from "zustand";
+import type { SelRef } from "./measure";
+import { sameRef } from "./measure";
+
+/**
+ * What is selected, hovered and hidden in the model tab — shared state
+ * because two views drive it: the 3D canvas (click a face, an edge, a
+ * vertex) and the Structure panel beside it (click a part in the tree).
+ *
+ * Selection is a list of references, newest last: the measurement readout
+ * reads the last two, the way Onshape's measure box does.
+ */
+
+const MAX_SELECTION = 8;
+
+interface ViewerState {
+  /** Hash of the model this state belongs to; a different model resets it. */
+  modelHash: string | null;
+  selection: SelRef[];
+  hover: SelRef | null;
+  /** Part indices hidden from the view. */
+  hidden: Set<number>;
+  /** Bumped to ask the viewer to frame a part (the panel can't drive the camera itself). */
+  frameRequest: { part: number; n: number } | null;
+
+  useModel(hash: string): void;
+  setSelection(selection: SelRef[]): void;
+  /** Click semantics: plain replaces, additive toggles. */
+  pick(ref: SelRef | null, additive: boolean): void;
+  setHover(ref: SelRef | null): void;
+  hide(part: number): void;
+  toggleHidden(part: number): void;
+  showAll(): void;
+  requestFrame(part: number): void;
+}
+
+export const useViewer = create<ViewerState>((set, get) => ({
+  modelHash: null,
+  selection: [],
+  hover: null,
+  hidden: new Set(),
+  frameRequest: null,
+
+  useModel: (hash) => {
+    if (get().modelHash === hash) return;
+    set({ modelHash: hash, selection: [], hover: null, hidden: new Set(), frameRequest: null });
+  },
+  setSelection: (selection) => set({ selection: selection.slice(-MAX_SELECTION) }),
+  pick: (ref, additive) => {
+    if (!ref) {
+      // A plain click on empty space clears; an additive one missed the thing
+      // it was aiming at, and throwing the selection away for that is cruel.
+      if (!additive) set({ selection: [] });
+      return;
+    }
+    const current = get().selection;
+    if (!additive) {
+      set({ selection: [ref] });
+      return;
+    }
+    const without = current.filter((r) => !sameRef(r, ref));
+    set({ selection: (without.length === current.length ? [...current, ref] : without).slice(-MAX_SELECTION) });
+  },
+  setHover: (ref) => {
+    const prev = get().hover;
+    if (prev === ref || (prev && ref && sameRef(prev, ref))) return;
+    set({ hover: ref });
+  },
+  hide: (part) =>
+    set((s) => ({
+      hidden: new Set(s.hidden).add(part),
+      selection: s.selection.filter((r) => r.kind === "part" && r.index === part ? false : true),
+    })),
+  toggleHidden: (part) =>
+    set((s) => {
+      const next = new Set(s.hidden);
+      if (next.has(part)) next.delete(part);
+      else next.add(part);
+      return { hidden: next };
+    }),
+  showAll: () => set({ hidden: new Set() }),
+  requestFrame: (part) => set((s) => ({ frameRequest: { part, n: (s.frameRequest?.n ?? 0) + 1 } })),
+}));

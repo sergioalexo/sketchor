@@ -42,6 +42,11 @@ export function formatArea(worldValueSquared: number, unit: DisplayUnit): string
   return `${round(worldValueSquared * factor, 3)}${unit}²`;
 }
 
+export function formatVolume(worldValueCubed: number, unit: DisplayUnit): string {
+  const factor = FACTOR_FROM_MM[unit] ** 3;
+  return `${round(worldValueCubed * factor, 3)}${unit}³`;
+}
+
 /**
  * DXF `$INSUNITS` codes this app can represent as a DisplayUnit (the spec
  * defines more — miles, mils, angstroms, US survey units, ... — which have

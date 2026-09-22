@@ -1947,30 +1947,62 @@ kbd.shortcut-key-fixed {
   color: var(--text);
 }
 
-.model-parts {
+.model-measure-panel {
   position: absolute;
-  top: 10px;
-  right: 10px;
+  right: 12px;
   bottom: 10px;
-  width: 260px;
-  display: flex;
-  flex-direction: column;
-  background: color-mix(in srgb, var(--panel) 94%, transparent);
+  min-width: 190px;
+  max-width: 300px;
+  padding: 6px 10px 8px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  overflow: hidden;
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
-.model-parts-header {
+.model-measure-panel-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 6px 6px 6px 12px;
+  gap: 8px;
+  margin-bottom: 4px;
+  padding-bottom: 4px;
   border-bottom: 1px solid var(--border);
+}
+
+.model-measure-panel-title {
+  color: var(--text-dim);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.model-measure-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 1px 0;
+}
+
+.model-measure-key {
+  color: var(--text-dim);
+}
+
+.model-measure-value {
+  color: var(--text);
   font-weight: 600;
 }
 
-.model-parts .filexplorer-search {
+/* Touch: fingers need a bigger readout, and the bottom toolbar needs the room. */
+.app.touch .model-measure-panel {
+  bottom: 96px;
+  font-size: 14px;
+}
+
+.layerpanel .filexplorer-search {
   flex: none;
   margin: 6px 8px;
 }
@@ -2011,6 +2043,10 @@ kbd.shortcut-key-fixed {
 .model-parts-row.selected {
   background: var(--accent-soft);
   color: #fff;
+}
+
+.model-parts-row.hovered:not(.selected) {
+  background: color-mix(in srgb, var(--accent-soft) 40%, transparent);
 }
 
 .model-parts-row.hidden .model-parts-name {
@@ -2110,11 +2146,7 @@ kbd.shortcut-key-fixed {
     height: 24px;
   }
 
-  .model-parts {
-    width: min(320px, calc(100% - 20px));
-  }
-
-  .model-parts .filexplorer-search {
+  .layerpanel .filexplorer-search {
     padding: 8px 10px;
     font-size: 14px;
   }
@@ -2133,32 +2165,27 @@ kbd.shortcut-key-fixed {
     font-size: 14px;
   }
 
-  .model-parts-header .btn.sm {
-    min-height: 36px;
-    min-width: 36px;
-  }
-
   .model-status {
     font-size: 13px;
-    /* Keep clear of the wrapped toolbar's shadow and the parts panel on narrow screens. */
+    /* Keep clear of the wrapped toolbar's shadow on narrow screens. */
     max-width: calc(100% - 24px);
     flex-wrap: wrap;
     row-gap: 2px;
   }
+
+  .model-measure-panel {
+    font-size: 13px;
+  }
 }
 
-/* Narrow stage: the parts tree becomes a bottom sheet instead of covering the model. */
+/* Narrow stage: the readout spans the width instead of crowding the corner. */
 @container (max-width: 640px) {
-  .model-parts {
-    top: auto;
-    left: 10px;
-    right: 10px;
-    bottom: 10px;
-    width: auto;
-    height: 45%;
+  .model-measure-panel {
+    left: 12px;
+    max-width: none;
   }
 
-  .model-stage:has(.model-parts) .model-status {
+  .model-stage:has(.model-measure-panel) .model-status {
     display: none;
   }
 }
@@ -2342,17 +2369,6 @@ kbd.shortcut-key-fixed {
   top: 10px;
   bottom: auto;
   font-size: 14px;
-}
-
-.app.touch .model-parts {
-  bottom: 96px;
-}
-
-@container (max-width: 640px) {
-  .app.touch .model-parts {
-    bottom: 96px;
-    height: 40%;
-  }
 }
 
 /* ---------- 3D measure tool ---------- */
@@ -2716,4 +2732,12 @@ kbd.shortcut-key-fixed {
 
 .propspanel-vertex-actions .btn {
   min-width: 28px;
+}
+
+/* Structure panel (3D tabs use it where a drawing shows layers). */
+.structure-footer {
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 11px;
 }

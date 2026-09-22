@@ -2,6 +2,7 @@ import occtimportjs from "../../vendor/occt-import-js/occt-import-js.mjs";
 import wasmUrl from "../../vendor/occt-import-js/occt-import-js.wasm?url";
 import { buildModel } from "./buildModel";
 import { getCachedModel, putCachedModel } from "./modelCache";
+import { modelArrays } from "./types";
 import type { Model3D, ModelFormat, OcctResult } from "./types";
 
 /**
@@ -67,7 +68,9 @@ function post(msg: ParseResponse, transfer?: Transferable[]): void {
 }
 
 function transferables(m: Model3D): Transferable[] {
-  return [m.positions.buffer, m.normals.buffer, m.colors.buffer, m.indices.buffer, m.edges.buffer];
+  // Every buffer, geometry and topology alike — a big assembly's face and
+  // edge tables are worth transferring rather than copying.
+  return [...new Set(modelArrays(m).map((a) => a.buffer))] as Transferable[];
 }
 
 async function handle(req: ParseRequest): Promise<void> {

@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { DocSession } from "../state/store";
 import { useApp } from "../state/store";
-import { formatLength } from "../units";
+import { formatArea, formatLength, formatVolume } from "../units";
 import {
   buildLights,
   buildModelObjects,
@@ -15,14 +15,21 @@ import {
   type ViewPreset,
 } from "./modelScene";
 import { measureBetween, snapToEdges, type MeasurePoint } from "./measure3d";
+import { measureSelection, partOf, refLabel, type SelRef } from "./measure";
+import { pickEdge, pickVertex, type Projector } from "./picking";
 import { useOpenLoads } from "./stepImport";
-import type { Model3D, ModelNode } from "./types";
+import type { Model3D } from "./types";
+import { useViewer } from "./viewerStore";
 
 /**
  * The 3D viewer that replaces the drawing canvas in a model tab.
  *
  * Mouse: left-drag orbits, right/middle-drag pans, wheel zooms toward the
- * cursor, click selects a part, double-click frames it. Touch: one finger
+ * cursor, double-click frames what is under it. Clicking picks **topology**,
+ * the way Onshape does — the vertex, edge or face under the cursor, in that
+ * order of preference — and the corner readout says what it measures:
+ * a length, a radius, an area, or the distance and angle between two picks.
+ * Shift-click adds to the selection; the Structure panel picks whole parts. Touch: one finger
  * orbits, two fingers pinch-zoom and pan, tap selects, double-tap frames,
  * long-press hides the part under the finger. Keys: F fits all,
  * H hides the selected part, Shift+H shows everything, E toggles edges,
@@ -102,6 +109,39 @@ function ModelError({ name, message }: { name: string; message: string }) {
   );
 }
 
+/* ------------------------------ highlighting ----------------------------- */
+
+const HIGHLIGHT_SELECT = (SELECT_COLOR[0] << 16) | (SELECT_COLOR[1] << 8) | SELECT_COLOR[2];
+/** Hover is the selection colour washed toward white, so the two read apart at a glance. */
+const HOVER_RGB: [number, number, number] = SELECT_COLOR.map((c) => Math.round(c + (255 - c) * 0.45)) as [number, number, number];
+const HIGHLIGHT_HOVER = (HOVER_RGB[0] << 16) | (HOVER_RGB[1] << 8) | HOVER_RGB[2];
+
+/** Push the edges and vertices of `refs` into the overlay line/point objects. */
+function setOverlay(lines: THREE.LineSegments, points: THREE.Points, model: Model3D, refs: readonly SelRef[]) {
+  const linePts: number[] = [];
+  const pointPts: number[] = [];
+  for (const r of refs) {
+    if (r.kind === "edge") {
+      const start = model.edgeTable.segStart[r.index];
+      const count = model.edgeTable.segCount[r.index];
+      for (let i = 0; i < count; i++) {
+        const o = (start + i) * 6;
+        for (let k = 0; k < 6; k++) linePts.push(model.edges[o + k]);
+      }
+    } else if (r.kind === "vertex") {
+      const o = r.index * 3;
+      pointPts.push(model.nodes.xyz[o], model.nodes.xyz[o + 1], model.nodes.xyz[o + 2]);
+    }
+  }
+  setPositions(lines.geometry, linePts);
+  setPositions(points.geometry, pointPts);
+}
+
+function setPositions(g: THREE.BufferGeometry, values: number[]) {
+  g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(values), 3));
+  g.computeBoundingSphere();
+}
+
 /* --------------------------------- viewer -------------------------------- */
 
 interface Scene {
@@ -112,6 +152,11 @@ interface Scene {
   objects: ModelObjects;
   raycaster: THREE.Raycaster;
   partBoxes: THREE.Box3[];
+  /** Selection/hover overlays: picked edges and vertices, drawn over the shaded model. */
+  selLines: THREE.LineSegments;
+  hoverLines: THREE.LineSegments;
+  selPoints: THREE.Points;
+  hoverPoints: THREE.Points;
   requestRender: () => void;
   /** Called after each frame with the camera settled — the measure overlay re-projects itself here. */
   afterRender: { current: (() => void) | null };
@@ -122,11 +167,16 @@ function Viewer({ model }: { model: Model3D }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sceneRef = useRef<Scene | null>(null);
-  const [selected, setSelected] = useState<number | null>(null);
-  const [hidden, setHidden] = useState<Set<number>>(() => new Set());
+  const selection = useViewer((v) => v.selection);
+  const hover = useViewer((v) => v.hover);
+  const hidden = useViewer((v) => v.hidden);
+  const frameRequest = useViewer((v) => v.frameRequest);
+  const pickInto = useViewer((v) => v.pick);
+  const setHover = useViewer((v) => v.setHover);
+  const hidePart = useViewer((v) => v.hide);
+  const showAllParts = useViewer((v) => v.showAll);
+  const useModel = useViewer((v) => v.useModel);
   const [showEdges, setShowEdges] = useState(true);
-  const [showParts, setShowParts] = useState(false);
-  const [hovered, setHovered] = useState<number | null>(null);
   const [measuring, setMeasuring] = useState(false);
   const [measure, setMeasure] = useState<{ a: MeasurePoint | null; b: MeasurePoint | null }>({ a: null, b: null });
   const measureRef = useRef(measure);
@@ -193,6 +243,30 @@ function Viewer({ model }: { model: Model3D }) {
     observer.observe(host);
     resize();
 
+    // Selection overlays. depthTest off so a picked edge stays visible when
+    // it sits a hair behind the surface it bounds — the same call Onshape makes.
+    const lineObject = (color: number) => {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(0), 3));
+      const o = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color, depthTest: false }));
+      o.renderOrder = 10;
+      o.frustumCulled = false;
+      return o;
+    };
+    const pointObject = (color: number, size: number) => {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(0), 3));
+      const o = new THREE.Points(g, new THREE.PointsMaterial({ color, size, sizeAttenuation: false, depthTest: false }));
+      o.renderOrder = 11;
+      o.frustumCulled = false;
+      return o;
+    };
+    const selLines = lineObject(HIGHLIGHT_SELECT);
+    const hoverLines = lineObject(HIGHLIGHT_HOVER);
+    const selPoints = pointObject(HIGHLIGHT_SELECT, 11);
+    const hoverPoints = pointObject(HIGHLIGHT_HOVER, 9);
+    scene.add(selLines, hoverLines, selPoints, hoverPoints);
+
     const partBoxes = model.parts.map((p) => toBox3(p.bounds));
     const s: Scene = {
       renderer,
@@ -202,12 +276,20 @@ function Viewer({ model }: { model: Model3D }) {
       objects,
       raycaster: new THREE.Raycaster(),
       partBoxes,
+      selLines,
+      hoverLines,
+      selPoints,
+      hoverPoints,
       requestRender,
       afterRender,
       dispose() {
         observer.disconnect();
         controls.dispose();
         objects.dispose();
+        for (const o of [selLines, hoverLines, selPoints, hoverPoints]) {
+          o.geometry.dispose();
+          (o.material as THREE.Material).dispose();
+        }
         renderer.dispose();
       },
     };
@@ -226,24 +308,55 @@ function Viewer({ model }: { model: Model3D }) {
     s.requestRender();
   }, [showEdges]);
 
-  // Selection: paint the part's vertex colours, restoring everything else from the pristine model colours.
+  // The state that belongs to this model, not the previous one.
+  useEffect(() => {
+    useModel(model.hash);
+  }, [model, useModel]);
+
+  /**
+   * Highlighting. Faces and parts are painted into the shared colour
+   * attribute (restored from the model's pristine colours each time);
+   * edges and vertices go into the overlay objects, since they aren't
+   * surfaces. Hover paints first so a selected thing stays selected-coloured.
+   */
   useEffect(() => {
     const s = sceneRef.current;
     if (!s) return;
     const attr = s.objects.geometry.getAttribute("color") as THREE.BufferAttribute;
     const arr = attr.array as Uint8Array;
     arr.set(model.colors);
-    if (selected !== null) {
-      const p = model.parts[selected];
-      for (let i = p.vertexStart; i < p.vertexStart + p.vertexCount; i++) {
-        arr[i * 3] = SELECT_COLOR[0];
-        arr[i * 3 + 1] = SELECT_COLOR[1];
-        arr[i * 3 + 2] = SELECT_COLOR[2];
+    const paint = (refs: readonly SelRef[], rgb: readonly number[]) => {
+      for (const r of refs) {
+        if (r.kind === "face") {
+          const start = model.faces.triStart[r.index];
+          const count = model.faces.triCount[r.index];
+          for (let t = 0; t < count; t++) {
+            for (let k = 0; k < 3; k++) {
+              const vi = model.indices[(start + t) * 3 + k];
+              arr[vi * 3] = rgb[0];
+              arr[vi * 3 + 1] = rgb[1];
+              arr[vi * 3 + 2] = rgb[2];
+            }
+          }
+        } else if (r.kind === "part") {
+          const p = model.parts[r.index];
+          if (!p) continue;
+          for (let i = p.vertexStart; i < p.vertexStart + p.vertexCount; i++) {
+            arr[i * 3] = rgb[0];
+            arr[i * 3 + 1] = rgb[1];
+            arr[i * 3 + 2] = rgb[2];
+          }
+        }
       }
-    }
+    };
+    if (hover) paint([hover], HOVER_RGB);
+    paint(selection, SELECT_COLOR);
     attr.needsUpdate = true;
+
+    setOverlay(s.selLines, s.selPoints, model, selection);
+    setOverlay(s.hoverLines, s.hoverPoints, model, hover ? [hover] : []);
     s.requestRender();
-  }, [selected, model]);
+  }, [selection, hover, model]);
 
   // Visibility: hidden parts get degenerate triangles/segments in place, so
   // every other part's ranges stay where they are.
@@ -267,41 +380,89 @@ function Viewer({ model }: { model: Model3D }) {
     s.requestRender();
   }, [hidden, model]);
 
+  // The Structure panel can't drive the camera, so it asks through the store.
+  useEffect(() => {
+    if (!frameRequest) return;
+    const p = model.parts[frameRequest.part];
+    if (p) frame(p.bounds);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [frameRequest]);
+
   // ---- picking ------------------------------------------------------------
-  /** Nearest visible part under a screen point, with the surface hit and its camera distance. */
-  const pickHit = (clientX: number, clientY: number): { part: number; point: THREE.Vector3; dist: number } | null => {
+  /**
+   * Everything a pick needs from one ray: the nearest surface hit (with the
+   * triangle, which names the face), the parts the ray passes through, and a
+   * world→pixel projector for the screen-space edge and vertex search.
+   *
+   * Coarse pass on part boxes, then exact triangles only inside candidate
+   * parts (via drawRange) — a click on a million-triangle assembly stays
+   * instant.
+   */
+  const probe = (clientX: number, clientY: number) => {
     const s = sceneRef.current;
     const canvas = canvasRef.current;
     if (!s || !canvas) return null;
     const rect = canvas.getBoundingClientRect();
-    const ndc = new THREE.Vector2(((clientX - rect.left) / rect.width) * 2 - 1, -((clientY - rect.top) / rect.height) * 2 + 1);
+    const cursor = { x: clientX - rect.left, y: clientY - rect.top };
+    const ndc = new THREE.Vector2((cursor.x / rect.width) * 2 - 1, -(cursor.y / rect.height) * 2 + 1);
     s.raycaster.setFromCamera(ndc, s.camera);
-    // Coarse pass on part boxes, then exact triangles only inside candidate
-    // parts (via drawRange) — a click on a million-triangle assembly stays
-    // instant.
     const ray = s.raycaster.ray;
-    const hit = new THREE.Vector3();
+    const at = new THREE.Vector3();
     const candidates: { part: number; dist: number }[] = [];
     for (let i = 0; i < s.partBoxes.length; i++) {
       if (hidden.has(i)) continue;
-      if (ray.intersectBox(s.partBoxes[i], hit)) candidates.push({ part: i, dist: hit.distanceTo(ray.origin) });
+      if (ray.intersectBox(s.partBoxes[i], at)) candidates.push({ part: i, dist: at.distanceTo(ray.origin) });
     }
     candidates.sort((a, b) => a.dist - b.dist);
     const geometry = s.objects.geometry;
-    let best: { part: number; point: THREE.Vector3; dist: number } | null = null;
+    let hit: { part: number; triangle: number; point: THREE.Vector3; dist: number } | null = null;
     for (const c of candidates) {
-      if (best && c.dist > best.dist) break;
+      if (hit && c.dist > hit.dist) break;
       const p = model.parts[c.part];
       geometry.setDrawRange(p.indexStart, p.indexCount);
       const hits = s.raycaster.intersectObject(s.objects.mesh, false);
-      if (hits.length > 0 && (!best || hits[0].distance < best.dist)) {
-        best = { part: c.part, point: hits[0].point.clone(), dist: hits[0].distance };
+      if (hits.length > 0 && (!hit || hits[0].distance < hit.dist)) {
+        hit = { part: c.part, triangle: hits[0].faceIndex ?? 0, point: hits[0].point.clone(), dist: hits[0].distance };
       }
     }
     geometry.setDrawRange(0, Infinity);
-    return best;
+
+    const v = new THREE.Vector3();
+    const project: Projector = (p) => {
+      v.set(p[0], p[1], p[2]);
+      const depth = v.distanceTo(s.camera.position);
+      v.project(s.camera);
+      return { x: ((v.x + 1) / 2) * rect.width, y: ((1 - v.y) / 2) * rect.height, visible: v.z < 1, depth };
+    };
+    const worldPerPixel = (d: number) => (2 * d * Math.tan((s.camera.fov * Math.PI) / 360)) / Math.max(1, canvas.clientHeight);
+    return { cursor, hit, candidates, project, worldPerPixel };
   };
-  const pick = (clientX: number, clientY: number): number | null => pickHit(clientX, clientY)?.part ?? null;
+
+  /** The topology under the cursor: vertex, then edge, then the face the ray landed on. */
+  const pickRef = (clientX: number, clientY: number, touch: boolean): SelRef | null => {
+    const pr = probe(clientX, clientY);
+    if (!pr) return null;
+    const tolPx = touch ? 14 : 7;
+    // Only the part the ray actually hit competes for edges and vertices;
+    // with nothing hit, the few parts the ray passes near do.
+    const parts = pr.hit ? [pr.hit.part] : pr.candidates.slice(0, 8).map((c) => c.part);
+    const opts = {
+      tolPx,
+      maxDepth: pr.hit ? pr.hit.dist + pr.worldPerPixel(pr.hit.dist) * (tolPx + 2) : Infinity,
+    };
+    for (const part of parts) {
+      const v = pickVertex(model, part, pr.cursor, pr.project, opts);
+      if (v !== null) return { kind: "vertex", index: v };
+    }
+    for (const part of parts) {
+      const e = pickEdge(model, part, pr.cursor, pr.project, opts);
+      if (e !== null) return { kind: "edge", index: e };
+    }
+    if (pr.hit) return { kind: "face", index: model.faceOfTriangle[pr.hit.triangle] ?? 0 };
+    return null;
+  };
+
+  const pick = (clientX: number, clientY: number): number | null => probe(clientX, clientY)?.hit?.part ?? null;
 
   /**
    * A measure point under the pointer: the surface hit snapped to the part's
@@ -309,13 +470,10 @@ function Viewer({ model }: { model: Model3D }) {
    * to world units at the hit's depth.
    */
   const pickMeasurePoint = (clientX: number, clientY: number, touch: boolean): MeasurePoint | null => {
-    const s = sceneRef.current;
-    const canvas = canvasRef.current;
-    const hit = pickHit(clientX, clientY);
-    if (!s || !canvas || !hit) return null;
+    const pr = probe(clientX, clientY);
+    if (!pr?.hit) return null;
     const px = touch ? 18 : 10;
-    const worldPerPixel = (2 * hit.dist * Math.tan((s.camera.fov * Math.PI) / 360)) / Math.max(1, canvas.clientHeight);
-    return snapToEdges(model, hit.part, [hit.point.x, hit.point.y, hit.point.z], px * worldPerPixel);
+    return snapToEdges(model, pr.hit.part, [pr.hit.point.x, pr.hit.point.y, pr.hit.point.z], px * pr.worldPerPixel(pr.hit.dist));
   };
 
   const addMeasurePoint = (clientX: number, clientY: number, touch: boolean) => {
@@ -425,14 +583,23 @@ function Viewer({ model }: { model: Model3D }) {
         downAt.current = null;
         const part = pick(clientX, clientY);
         if (part === null) return;
-        setHidden((h) => new Set(h).add(part));
-        setSelected((sel) => (sel === part ? null : sel));
+        hidePart(part);
       }, 550);
     }
   };
+  /** Hover highlighting, one pick per frame at most — the cursor moves far more often than that. */
+  const hoverQueued = useRef(false);
   const onPointerMove = (e: React.PointerEvent) => {
     const d = downAt.current;
     if (d && d.id === e.pointerId && Math.hypot(e.clientX - d.x, e.clientY - d.y) > slop(d.touch)) cancelLongPress();
+    if (e.pointerType === "touch" || e.buttons !== 0 || measuring) return;
+    if (hoverQueued.current) return;
+    hoverQueued.current = true;
+    const { clientX, clientY } = e;
+    requestAnimationFrame(() => {
+      hoverQueued.current = false;
+      setHover(pickRef(clientX, clientY, false));
+    });
   };
   const onPointerUp = (e: React.PointerEvent) => {
     cancelLongPress();
@@ -454,12 +621,13 @@ function Viewer({ model }: { model: Model3D }) {
       addMeasurePoint(e.clientX, e.clientY, d.touch);
       return;
     }
-    setSelected(pick(e.clientX, e.clientY));
+    pickInto(pickRef(e.clientX, e.clientY, d.touch), e.shiftKey || e.ctrlKey || e.metaKey);
   };
   const onPointerCancel = () => {
     cancelLongPress();
     downAt.current = null;
   };
+  const onPointerLeave = () => setHover(null);
   /** Double-click / double-tap: frame the part under the cursor, or everything. */
   const frameAt = (clientX: number, clientY: number) => {
     const part = pick(clientX, clientY);
@@ -486,14 +654,13 @@ function Viewer({ model }: { model: Model3D }) {
         case "E":
           setShowEdges((v) => !v);
           break;
-        case "h":
-          if (selected !== null) {
-            setHidden((h) => new Set(h).add(selected));
-            setSelected(null);
-          }
+        case "h": {
+          const last = selection[selection.length - 1];
+          if (last) hidePart(partOf(model, last));
           break;
+        }
         case "H":
-          setHidden(new Set());
+          showAllParts();
           break;
         case "m":
         case "M":
@@ -503,7 +670,7 @@ function Viewer({ model }: { model: Model3D }) {
           // Peel back one layer at a time: points, then the tool, then the selection.
           if (measure.a) clearMeasure();
           else if (measuring) setMeasuring(false);
-          else setSelected(null);
+          else pickInto(null, false);
           break;
         case "1":
           fitAll("iso");
@@ -525,7 +692,7 @@ function Viewer({ model }: { model: Model3D }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selected, hidden, model, measuring, measure]);
+  }, [selection, hidden, model, measuring, measure]);
 
   const toggleMeasuring = () => {
     setMeasuring((v) => {
@@ -537,7 +704,21 @@ function Viewer({ model }: { model: Model3D }) {
   const sizeOf = (b: Model3D["bounds"]) => [0, 1, 2].map((k) => formatLength(b.max[k] - b.min[k], displayUnit)).join(" × ");
   const size = useMemo(() => sizeOf(model.bounds), [model, displayUnit]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const statusPart = hovered ?? selected;
+  const shown = hover ?? selection[selection.length - 1] ?? null;
+  const statusPart = shown ? partOf(model, shown) : null;
+  const rows = useMemo(
+    () =>
+      measureSelection(model, selection, {
+        length: (v) => formatLength(v, displayUnit),
+        area: (v) => formatArea(v, displayUnit),
+        volume: (v) => formatVolume(v, displayUnit),
+      }),
+    [model, selection, displayUnit],
+  );
+  const readoutTitle = selection
+    .slice(-2)
+    .map((r) => refLabel(model, r))
+    .join(" ↔ ");
   const measureHint = !measuring
     ? null
     : !measure.a
@@ -554,6 +735,7 @@ function Viewer({ model }: { model: Model3D }) {
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
         onPointerCancel={onPointerCancel}
+        onPointerLeave={onPointerLeave}
         onDoubleClick={onDoubleClick}
         onContextMenu={(e) => e.preventDefault()}
       />
@@ -589,14 +771,13 @@ function Viewer({ model }: { model: Model3D }) {
           testId="model-measure-toggle"
         />
         <ToolButton
-          title="Hide selected part (H)"
+          title="Hide the selected part (H)"
           label="Hide"
           icon={ICONS.hide}
-          disabled={selected === null}
+          disabled={selection.length === 0}
           onClick={() => {
-            if (selected === null) return;
-            setHidden((h) => new Set(h).add(selected));
-            setSelected(null);
+            const last = selection[selection.length - 1];
+            if (last) hidePart(partOf(model, last));
           }}
         />
         <ToolButton
@@ -604,16 +785,7 @@ function Viewer({ model }: { model: Model3D }) {
           label={`Show all${hidden.size > 0 ? ` (${hidden.size})` : ""}`}
           icon={ICONS.showAll}
           disabled={hidden.size === 0}
-          onClick={() => setHidden(new Set())}
-        />
-        <span className="model-toolbar-sep" />
-        <ToolButton
-          title="Parts tree"
-          label="Parts"
-          icon={ICONS.parts}
-          active={showParts}
-          onClick={() => setShowParts((v) => !v)}
-          testId="model-parts-toggle"
+          onClick={showAllParts}
         />
       </div>
       <div className="model-status" data-testid="model-status">
@@ -652,24 +824,27 @@ function Viewer({ model }: { model: Model3D }) {
           </>
         )}
       </div>
-      {showParts && (
-        <PartsTree
-          model={model}
-          selected={selected}
-          hidden={hidden}
-          onSelect={(p) => setSelected(p)}
-          onHover={setHovered}
-          onFrame={fitPart}
-          onToggleHidden={(p) =>
-            setHidden((h) => {
-              const next = new Set(h);
-              if (next.has(p)) next.delete(p);
-              else next.add(p);
-              return next;
-            })
-          }
-          onClose={() => setShowParts(false)}
-        />
+      {/* The corner readout: what the current picks measure. */}
+      {!measuring && rows.length > 0 && (
+        <div className="model-measure-panel" data-testid="model-measure-panel">
+          <div className="model-measure-panel-head">
+            <span className="model-measure-panel-title" title={readoutTitle}>
+              {readoutTitle}
+            </span>
+            <button className="btn ghost sm" title="Clear the selection (Esc)" onClick={() => pickInto(null, false)}>
+              ✕
+            </button>
+          </div>
+          {rows.map((r) => (
+            <div className="model-measure-row" key={r.label}>
+              <span className="model-measure-key">{r.label}</span>
+              <span className="model-measure-value" title={r.approx ? "Approximate — measured on the tessellation" : undefined}>
+                {r.approx ? "≈ " : ""}
+                {r.value}
+              </span>
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );
@@ -759,12 +934,6 @@ const ICONS = {
       <circle cx="12" cy="12" r="2.5" {...stroke} />
     </svg>
   ),
-  parts: (
-    <svg viewBox="0 0 24 24" width="18" height="18">
-      <path d="M5 5h5M5 12h5M5 19h5M14 5h5M14 12h5M14 19h5" {...stroke} />
-      <path d="M3 5h.01M3 12h.01M3 19h.01" {...stroke} strokeWidth="2.6" />
-    </svg>
-  ),
 };
 
 function visibleBounds(model: Model3D, hidden: Set<number>) {
@@ -779,104 +948,4 @@ function visibleBounds(model: Model3D, hidden: Set<number>) {
     }
   }
   return { min, max };
-}
-
-/* ------------------------------- parts tree ------------------------------ */
-
-interface TreeProps {
-  model: Model3D;
-  selected: number | null;
-  hidden: Set<number>;
-  onSelect: (part: number) => void;
-  onHover: (part: number | null) => void;
-  onFrame: (part: number) => void;
-  onToggleHidden: (part: number) => void;
-  onClose: () => void;
-}
-
-function PartsTree({ model, selected, hidden, onSelect, onHover, onFrame, onToggleHidden, onClose }: TreeProps) {
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
-  const [filter, setFilter] = useState("");
-  const q = filter.trim().toLowerCase();
-
-  const rows: { key: string; depth: number; label: string; part: number | null }[] = [];
-  const walk = (node: ModelNode, depth: number, key: string, isRoot: boolean) => {
-    // The root is only worth a row when there is a hierarchy under it; a
-    // single-part file or a flat list reads better without one.
-    let childDepth = depth;
-    if (!isRoot || node.children.length > 0) {
-      rows.push({ key, depth, label: node.name || "Assembly", part: null });
-      childDepth = depth + 1;
-      if (collapsed.has(key) && !q) return;
-    }
-    for (const p of node.parts) {
-      const name = model.parts[p].name;
-      if (q && !name.toLowerCase().includes(q)) continue;
-      rows.push({ key: `${key}/p${p}`, depth: childDepth, label: name, part: p });
-    }
-    node.children.forEach((c, i) => walk(c, childDepth, `${key}/${i}`, false));
-  };
-  walk(model.tree, 0, "root", true);
-
-  return (
-    <div className="model-parts" data-testid="model-parts">
-      <div className="model-parts-header">
-        <span>Parts</span>
-        <button className="btn ghost sm" onClick={onClose} title="Close">
-          ✕
-        </button>
-      </div>
-      <input
-        className="filexplorer-search"
-        type="search"
-        placeholder="Filter parts…"
-        value={filter}
-        onChange={(e) => setFilter(e.target.value)}
-      />
-      <div className="model-parts-list" onPointerLeave={() => onHover(null)}>
-        {rows.map((r) =>
-          r.part === null ? (
-            <div
-              key={r.key}
-              className="model-parts-group"
-              style={{ paddingLeft: 8 + r.depth * 12 }}
-              onClick={() =>
-                setCollapsed((c) => {
-                  const next = new Set(c);
-                  if (next.has(r.key)) next.delete(r.key);
-                  else next.add(r.key);
-                  return next;
-                })
-              }
-            >
-              <span className="model-parts-caret">{collapsed.has(r.key) ? "▸" : "▾"}</span>
-              {r.label}
-            </div>
-          ) : (
-            <div
-              key={r.key}
-              className={`model-parts-row ${selected === r.part ? "selected" : ""} ${hidden.has(r.part) ? "hidden" : ""}`}
-              style={{ paddingLeft: 8 + r.depth * 12 }}
-              onClick={() => onSelect(r.part!)}
-              onDoubleClick={() => onFrame(r.part!)}
-              onPointerEnter={() => onHover(r.part)}
-              title="Click to select · double-click to frame"
-            >
-              <button
-                className="model-parts-eye"
-                title={hidden.has(r.part) ? "Show" : "Hide"}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onToggleHidden(r.part!);
-                }}
-              >
-                {hidden.has(r.part) ? "○" : "●"}
-              </button>
-              <span className="model-parts-name">{r.label}</span>
-            </div>
-          ),
-        )}
-      </div>
-    </div>
-  );
 }

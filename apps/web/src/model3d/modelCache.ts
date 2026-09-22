@@ -25,7 +25,7 @@ const DB_VERSION = 2;
  * Bump when `Model3D`'s shape or the tessellation/edge extraction changes:
  * it's part of every key, so stale entries simply stop matching and age out.
  */
-const LAYOUT_VERSION = 2;
+const LAYOUT_VERSION = 3;
 const keyOf = (hash: string) => `${LAYOUT_VERSION}:${hash}`;
 const MODELS = "models";
 /** Per-model size + last-use time, kept apart from the (large) model rows so eviction never has to load them. */

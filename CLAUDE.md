@@ -85,21 +85,40 @@ the worker imports the vendored `.mjs`/`.wasm` directly. So:
   three workers with a queue where *opens* preempt *thumbnails*, and requests
   for identical bytes share one parse.
 - `buildModel.ts` (pure, tested) merges every mesh into **one** vertex/index
-  buffer plus a part table of ranges, bakes vertex colours, and extracts
-  B-rep edges (welded triangle edges shared by two *different* faces).
-  Selection/hide in the viewer work on those ranges — two draw calls for any
-  assembly, and picking is box-prefiltered + `drawRange`-scoped raycasts.
+  buffer plus a part table of ranges, and bakes vertex colours. Hiding works
+  on those ranges — two draw calls for any assembly, and picking is
+  box-prefiltered + `drawRange`-scoped raycasts.
+- `topology.ts` (pure, tested) recovers the **B-rep** from the tessellation:
+  `brep_faces` tags give faces; a welded triangle edge shared by two
+  *different* faces is a B-rep edge; those segments chain into edges (a
+  junction or an open end ends a chain), each chain is fitted to a line,
+  circle or arc, and chain endpoints become vertices. Faces carry
+  area/perimeter/centroid/normal/planarity, parts carry area and volume.
+  Everything is flat typed arrays (`FaceTable`/`EdgeTable`/`VertexTable`),
+  so a model still structured-clones out of the worker and into IndexedDB.
 - `modelCache.ts` persists models and thumbnails in IndexedDB keyed by
   `LAYOUT_VERSION:sha256(bytes)`; bump `LAYOUT_VERSION` whenever `Model3D` or
   the extraction changes. LRU-evicted past 768 MB.
 - `modelThumbnail.ts` renders the file-browser's isometric PNG through one
   shared offscreen WebGL context (browsers cap live contexts).
 - Z is up. View presets live in `modelScene.ts`.
-- **Measure tool** (M): `measure3d.ts` (pure, tested) snaps a raycast hit to
-  the hit part's B-rep vertices/edges within a pixel tolerance the viewer
-  converts to world units at the hit depth; the viewer draws the result as
-  a screen-space SVG overlay re-projected in an `afterRender` hook, not via
-  React state per frame.
+- **Selection is Onshape's**: a click picks the topology under the cursor —
+  vertex, then edge, then the face the ray hit (`picking.ts`, pure: the
+  viewer passes a world→pixel projector, so the search is testable without a
+  camera). Shift/Ctrl adds, up to 8. `measure.ts` (pure, tested) turns the
+  selection into the bottom-right readout: one pick gives length, diameter,
+  area or volume, two give distance and angle. `viewerStore.ts` (zustand)
+  holds selection/hover/hidden so the canvas and the Structure panel drive
+  the same state; `StructurePanel.tsx` is the assembly tree, which replaces
+  the Layers panel in a model tab (layers mean nothing to a STEP file).
+  Highlighting: faces/parts repaint the shared colour attribute, edges and
+  vertices go into overlay `LineSegments`/`Points` with `depthTest: false`.
+- **Measure tool** (M): a second, free-point measurement for anywhere a
+  topology pick can't reach. `measure3d.ts` (pure, tested) snaps a raycast
+  hit to the hit part's B-rep vertices/edges within a pixel tolerance the
+  viewer converts to world units at the hit depth; the viewer draws the
+  result as a screen-space SVG overlay re-projected in an `afterRender`
+  hook, not via React state per frame.
 - **Explorer previews** (Windows): every rendered thumbnail is also mirrored
   via the `write_thumbnail_cache` command to `%LOCALAPPDATA%\Sketchor\thumbs\<sha256>.png`; `native/dxf-thumbnailer` (`src/model.rs`) hashes the file
   and serves that PNG, else falls back to `native/step-wire` — a text-level

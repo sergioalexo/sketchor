@@ -30,6 +30,7 @@ import { TabStrip } from "./tabs/TabStrip";
 
 // The 3D viewer pulls in three.js; it's loaded only once a model tab exists.
 const ModelViewport = lazy(() => import("./model3d/ModelViewport").then((m) => ({ default: m.ModelViewport })));
+const StructurePanel = lazy(() => import("./model3d/StructurePanel").then((m) => ({ default: m.StructurePanel })));
 import { UpdateBanner, UpdateButton } from "./update/UpdatePanel";
 import { openExternal } from "./update/updateService";
 
@@ -880,7 +881,10 @@ export function App() {
           </button>
           <button
             className={`action ${showLayers ? "toggled" : ""}`}
-            title={withKey("Toggle layers panel — right-click to add a shortcut", "app.toggleLayers")}
+            title={withKey(
+              modelTab ? "Toggle structure panel — right-click to add a shortcut" : "Toggle layers panel — right-click to add a shortcut",
+              "app.toggleLayers",
+            )}
             data-testid="toggle-layers"
             onClick={() => setShowLayers((v) => !v)}
             onContextMenu={rebind("app.toggleLayers")}
@@ -1164,8 +1168,15 @@ export function App() {
         {showPattern && <PatternPanel onClose={() => setShowPattern(false)} />}
         {showCode && <CodePanel />}
         {showProps && !modelTab && <PropertiesPanel onClose={() => setShowProps(false)} />}
-        {/* Layers is always the rightmost panel. */}
-        {showLayers && <LayerPanel />}
+        {/* Rightmost panel: layers for a drawing, the assembly structure for a model. */}
+        {showLayers &&
+          (modelTab && activeSession?.model ? (
+            <Suspense fallback={<aside className="layerpanel" />}>
+              <StructurePanel model={activeSession.model} />
+            </Suspense>
+          ) : (
+            !modelTab && <LayerPanel />
+          ))}
       </div>
 
       {/* Touch mode: the drawing tools sit along the bottom edge, where thumbs are. A model tab has its own. */}

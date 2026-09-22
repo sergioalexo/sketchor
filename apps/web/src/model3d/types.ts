@@ -33,6 +33,20 @@ export interface Model3D {
    * the convention CAD packages use.
    */
   edges: Float32Array;
+  /**
+   * B-rep topology recovered from the tessellation (topology.ts) — the
+   * faces, edges and vertices the viewer lets you pick and measure, the
+   * way Onshape does. Flat typed arrays because a big assembly has
+   * hundreds of thousands of them and they all have to survive a
+   * structured clone into the main thread.
+   */
+  faces: FaceTable;
+  edgeTable: EdgeTable;
+  nodes: VertexTable;
+  /** Per triangle (`indices`/3): its face in `faces`. Picking a triangle picks a face. */
+  faceOfTriangle: Uint32Array;
+  /** Per segment in `edges`: its edge in `edgeTable`. */
+  edgeOfSegment: Uint32Array;
   parts: ModelPart[];
   /** Assembly hierarchy as the file declared it; leaves reference `parts` by index. */
   tree: ModelNode;
@@ -53,7 +67,90 @@ export interface ModelPart {
   /** Segment range in `edges` (one segment = 6 floats). */
   edgeStart: number;
   edgeCount: number;
+  /** Range in the model's `faces` table. */
+  faceStart: number;
+  faceCount: number;
+  /** Range in the model's `edgeTable`. */
+  edgeRefStart: number;
+  edgeRefCount: number;
+  /** Range in the model's `nodes` table. */
+  nodeStart: number;
+  nodeCount: number;
+  /** Surface area and enclosed volume of this part's mesh (volume is meaningless for an open shell). */
+  area: number;
+  volume: number;
   bounds: Bounds3;
+}
+
+export type Vec3 = [number, number, number];
+
+/** One B-rep face per entry; `triStart`/`triCount` index triangles (`indices`/3). */
+export interface FaceTable {
+  part: Uint32Array;
+  triStart: Uint32Array;
+  triCount: Uint32Array;
+  area: Float32Array;
+  /** Total length of the edges bounding this face. */
+  perimeter: Float32Array;
+  /** Area-weighted centroid, xyz triplets. */
+  centroid: Float32Array;
+  /** Average unit normal, xyz triplets. */
+  normal: Float32Array;
+  /** 1 when every triangle lies in one plane. */
+  planar: Uint8Array;
+}
+
+/** One B-rep edge per entry: a chain of segments in `edges`, fitted to a line or circle where it is one. */
+export interface EdgeTable {
+  part: Uint32Array;
+  segStart: Uint32Array;
+  segCount: Uint32Array;
+  length: Float32Array;
+  /** EDGE_LINE / EDGE_CIRCLE / EDGE_ARC / EDGE_CURVE (topology.ts). */
+  kind: Uint8Array;
+  /** End points, xyz triplets (equal for a closed circle). */
+  a: Float32Array;
+  b: Float32Array;
+  /** Circle/arc centre, radius and plane normal; zeros for other kinds. */
+  center: Float32Array;
+  radius: Float32Array;
+  normal: Float32Array;
+  /** The two faces meeting here, or NO_FACE for an open boundary. */
+  faceA: Uint32Array;
+  faceB: Uint32Array;
+}
+
+/** Edge end points — the model's vertices. */
+export interface VertexTable {
+  part: Uint32Array;
+  xyz: Float32Array;
+}
+
+/** What `extractTopology` returns for one mesh, before merging into the model's tables. */
+export interface MeshTopology {
+  edges: Float32Array;
+  edgeSegStart: Uint32Array;
+  edgeSegCount: Uint32Array;
+  edgeLength: Float32Array;
+  edgeKind: Uint8Array;
+  edgeA: Float32Array;
+  edgeB: Float32Array;
+  edgeCenter: Float32Array;
+  edgeRadius: Float32Array;
+  edgeNormal: Float32Array;
+  edgeFaceA: Uint32Array;
+  edgeFaceB: Uint32Array;
+  vertices: Float32Array;
+  faceTriStart: Uint32Array;
+  faceTriCount: Uint32Array;
+  faceArea: Float32Array;
+  faceCentroid: Float32Array;
+  faceNormal: Float32Array;
+  facePlanar: Uint8Array;
+  faceOfTriangle: Uint32Array;
+  /** Enclosed volume and surface area of this mesh. */
+  volume: number;
+  area: number;
 }
 
 export interface ModelNode {
@@ -91,9 +188,23 @@ export interface OcctMesh {
   index?: { array: ArrayLike<number> };
 }
 
+/** Every typed array a model owns — what the cache measures and what the worker transfers. */
+export function modelArrays(m: Model3D): ArrayBufferView[] {
+  return [
+    m.positions,
+    m.normals,
+    m.colors,
+    m.indices,
+    m.edges,
+    m.faceOfTriangle,
+    m.edgeOfSegment,
+    ...Object.values(m.faces),
+    ...Object.values(m.edgeTable),
+    ...Object.values(m.nodes),
+  ];
+}
+
 /** Bytes of typed-array payload a model carries — what the cache budget counts. */
 export function modelByteSize(m: Model3D): number {
-  return (
-    m.positions.byteLength + m.normals.byteLength + m.colors.byteLength + m.indices.byteLength + m.edges.byteLength
-  );
+  return modelArrays(m).reduce((sum, a) => sum + a.byteLength, 0);
 }
