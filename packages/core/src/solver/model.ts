@@ -188,10 +188,21 @@ export function pointOf(model: SketchModel, ref: PointRef): Vec | null {
     case "point":
       return { x: at(0), y: at(1) };
     case "polyline": {
-      // `a` is the first vertex, `b` the last — the ends a coincident
-      // constraint means when it names a polyline.
-      const last = (e.points.length - 1) * 2;
-      const base = ref.point === "b" ? last : 0;
+      // `a` is the first vertex and `b` the last — the ends a coincident
+      // constraint means when it names a polyline — while `vertex` names
+      // one by index, which is what a vertex grip refers to.
+      if (ref.point === "vertex") {
+        const i = ref.index ?? 0;
+        if (i < 0 || i >= e.points.length) return null;
+        return { x: at(i * 2), y: at(i * 2 + 1) };
+      }
+      if (ref.point === "center") {
+        // The midpoint of a polyline isn't a defined thing; treat it as
+        // the midpoint of its ends rather than inventing a centroid.
+        const last = (e.points.length - 1) * 2;
+        return { x: scale(add(at(0), at(last)), 0.5), y: scale(add(at(1), at(last + 1)), 0.5) };
+      }
+      const base = ref.point === "b" ? (e.points.length - 1) * 2 : 0;
       return { x: at(base), y: at(base + 1) };
     }
     case "text":

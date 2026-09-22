@@ -36,6 +36,8 @@ export interface RenderUiState {
   acquiredPoints: readonly Point[];
   /** The relative zero `@dx,dy` measures from when the active tool has no anchor of its own (T-08). */
   relativeZero: Point | null;
+  /** Constraint marks (T-41): one per place a constraint holds, clickable in the viewport. */
+  constraintGlyphs: readonly { at: Point; glyph: string; state: "normal" | "conflict" | "highlight" }[];
   /** Live offset while dragging a selection. */
   moveOffset: { dx: number; dy: number } | null;
   /** Active measure-tool result overlay, if any. */
@@ -79,6 +81,10 @@ export interface RenderUiState {
   fmtLength: (worldValue: number) => string;
   fmtArea: (worldValueSquared: number) => string;
 }
+
+/** Constraint glyph geometry — Viewport.tsx hit-tests against these same numbers. */
+export const CONSTRAINT_GLYPH_SIZE = 15;
+export const CONSTRAINT_GLYPH_OFFSET = { x: 11, y: -11 };
 
 /** Must match GROUP_HANDLE_OFFSET_PX in Viewport.tsx, which hit-tests this same handle. */
 const GROUP_HANDLE_OFFSET_PX = 26;
@@ -184,6 +190,7 @@ export function render(
   }
 
   if (ui.trackingRay) drawTrackingRay(ctx, width, height, view, ui.trackingRay);
+  for (const g of ui.constraintGlyphs) drawConstraintGlyph(ctx, view, g);
   if (ui.relativeZero) drawRelativeZero(ctx, view, ui.relativeZero);
   for (const p of ui.acquiredPoints) drawAcquiredMarker(ctx, view, p);
   for (const ray of ui.trackRays) drawTrackingRay(ctx, width, height, view, ray);
@@ -891,6 +898,36 @@ function drawSnapMarker(ctx: CanvasRenderingContext2D, view: View, snap: Snap): 
  * tracked point to the edge of the canvas, and the angle next to the point
  * (AutoCAD's polar tooltip).
  */
+/**
+ * A constraint mark: the glyph in a small chip, offset up and right of the
+ * geometry so it doesn't sit on top of the line it describes.
+ */
+function drawConstraintGlyph(
+  ctx: CanvasRenderingContext2D,
+  view: View,
+  g: { at: Point; glyph: string; state: "normal" | "conflict" | "highlight" },
+): void {
+  const p = worldToScreen(view, g.at);
+  const x = p.x + CONSTRAINT_GLYPH_OFFSET.x;
+  const y = p.y + CONSTRAINT_GLYPH_OFFSET.y;
+  const color = g.state === "conflict" ? COLORS.crossingMarker : g.state === "highlight" ? COLORS.selected : COLORS.snap;
+  ctx.save();
+  ctx.globalAlpha = g.state === "normal" ? 0.85 : 1;
+  ctx.fillStyle = COLORS.bg;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1;
+  roundRect(ctx, x - CONSTRAINT_GLYPH_SIZE / 2, y - CONSTRAINT_GLYPH_SIZE / 2, CONSTRAINT_GLYPH_SIZE, CONSTRAINT_GLYPH_SIZE, 3);
+  ctx.fill();
+  ctx.stroke();
+  ctx.fillStyle = color;
+  ctx.font = `${CONSTRAINT_GLYPH_SIZE - 5}px system-ui, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(g.glyph, x, y + 0.5);
+  ctx.restore();
+}
+
+
 /** LibreCAD's relative-zero marker: a small crossed circle at the last point placed. */
 function drawRelativeZero(ctx: CanvasRenderingContext2D, view: View, p: Point): void {
   const s = worldToScreen(view, p);

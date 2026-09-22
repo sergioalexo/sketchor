@@ -59,6 +59,18 @@ four-line rectangle at every stage of being constrained, drag-solve, and the
 degenerate cases that must not throw or hang (empty sketch, constraints on
 deleted or unconstrainable entities, unsatisfiable constraints).
 
+### `packages/core/src/constraintBuilder.test.ts` · `constraintDisplay.test.ts`
+
+Turning a selection into constraints (T-41). A constraint applied to the
+wrong pair of endpoints doesn't look wrong until the sketch is dragged, and
+then the geometry folds in a way the user can't explain — so these assert
+*which points* each constraint attached to, which selections each kind
+accepts and refuses (with the message a disabled button shows), and they
+solve every new constraint type end to end, because a constraint the solver
+can't satisfy is worse than no constraint. `constraintDisplay` pins where
+the glyphs land: both entities of a pairwise constraint, the point itself
+for point constraints, nothing when the geometry is gone.
+
 ### `packages/core/src/commands.test.ts`
 
 - Every command type applies correctly: `add-entity`, `delete-entities`,

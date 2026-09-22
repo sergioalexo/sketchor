@@ -83,13 +83,25 @@ status bar says how many **degrees of freedom** are left, turns green at
 can't all hold at once. Dragging a corner of a constrained sketch drags
 everything tied to it, live.
 
+**Applying one** works the way Onshape does: select the geometry, then
+press the constraint in the **Constraints** panel (`Ctrl+2`). Buttons
+light up for what the selection can take and a disabled one says what it
+would need — *"Two or more lines"*, *"A circle or arc, and a line, circle
+or arc"*. Where a constraint needs points and you selected whole entities,
+the nearest pair of ends is used, which is the one you were looking at.
+
+Constraints are drawn as small marks beside the geometry they hold (the
+**Glyphs** switch turns them off). Click a mark to select what it holds;
+double-click it to remove it. The panel lists everything the sketch has,
+greys out the ones that are merely implied by the others, and turns the
+conflicting ones red.
+
+`distance`, `radius` and `angle` currently *lock the value the geometry
+already has* — editable driving dimensions are the next roadmap item.
+
 The solver is Sketchor's own — least squares by Levenberg–Marquardt over
 the constraint equations, pure TypeScript, no WASM (see
-`packages/core/src/solver/`). What it doesn't have *yet* is a way to
-create constraints by pointing at geometry: today they arrive through
-`window.sketchor.bus.execute({ type: "add-constraint", ... })`. The
-picking tools, the glyphs and the driving dimensions are the next items on
-the roadmap.
+`packages/core/src/solver/`).
 
 The world origin is drawn as a crosshair with labelled +X / +Y stubs (and a
 muted marker clamped to the edge when it's panned off-screen), so `0, 0` is

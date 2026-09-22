@@ -1,5 +1,5 @@
 import { useMemo, Fragment, lazy, Suspense, useEffect, useState } from "react";
-import { freeEndpointEntityIds } from "@sketchor/core";
+import { CONSTRAINT_LABELS, freeEndpointEntityIds } from "@sketchor/core";
 import { bus, doc, getSessions, isModelSession, measurementText, TOOL_HINTS, useApp, type ToolId } from "./state/store";
 import { useTouchMode } from "./touchMode";
 import { SnapPopover } from "./SnapPopover";
@@ -15,6 +15,7 @@ import { DuplicatesPanel } from "./heal/DuplicatesPanel";
 import { ImportReportBanner } from "./dxf/ImportReportBanner";
 import { LayerPanel } from "./layers/LayerPanel";
 import { PropertiesPanel } from "./properties/PropertiesPanel";
+import { ConstraintPanel } from "./constraints/ConstraintPanel";
 import { PatternPanel } from "./pattern/PatternPanel";
 import { FillPanel } from "./fill/FillPanel";
 import { TextPanel } from "./text/TextPanel";
@@ -522,6 +523,7 @@ export function App() {
   const [showCode, setShowCode] = useState(false);
   const [showLayers, setShowLayers] = useState(true);
   const [showProps, setShowProps] = useState(false);
+  const [showConstraints, setShowConstraints] = useState(false);
   const [showDiag, setShowDiag] = useState(false);
   const [showDup, setShowDup] = useState(false);
   const [showPattern, setShowPattern] = useState(false);
@@ -545,6 +547,11 @@ export function App() {
   // The solver's verdict on the current sketch (T-40); null until the
   // drawing has constraints. Re-read on every revision, like the entity count.
   const solve = useMemo(() => bus.lastSolve, [revision]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Constraint ids mean nothing to a reader; the tooltip names their kinds.
+  const constraintName = (id: string) => {
+    const c = doc.getConstraint(id);
+    return c ? CONSTRAINT_LABELS[c.type] : id;
+  };
   const toggleOtrack = useTracking((s) => s.toggleOtrack);
   const setPolarIncrement = useTracking((s) => s.setPolarIncrement);
   const [rebindTarget, setRebindTarget] = useState<{ actionId: string; x: number; y: number } | null>(null);
@@ -582,6 +589,9 @@ export function App() {
       } else if (matchesBinding(e, "app.toggleProperties")) {
         e.preventDefault();
         setShowProps((v) => !v);
+      } else if (matchesBinding(e, "app.toggleConstraints")) {
+        e.preventDefault();
+        setShowConstraints((v) => !v);
       } else if (matchesBinding(e, "app.toggleLayers")) {
         e.preventDefault();
         setShowLayers((v) => !v);
@@ -888,6 +898,23 @@ export function App() {
             </svg>
           </button>
           <button
+            className={`action ${showConstraints ? "toggled" : ""}`}
+            title={withKey(
+              "Toggle constraints panel — apply a constraint to the selection, and see what the sketch already has — right-click to add a shortcut",
+              "app.toggleConstraints",
+            )}
+            data-testid="toggle-constraints"
+            onClick={() => setShowConstraints((v) => !v)}
+            onContextMenu={rebind("app.toggleConstraints")}
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18">
+              <path d="M5 19L19 5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+              <circle cx="5" cy="19" r="2.4" stroke="currentColor" strokeWidth="1.8" fill="none" />
+              <circle cx="19" cy="5" r="2.4" stroke="currentColor" strokeWidth="1.8" fill="none" />
+              <path d="M13 19h6M16 16v6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+            </svg>
+          </button>
+          <button
             className={`action ${showLayers ? "toggled" : ""}`}
             title={withKey(
               modelTab ? "Toggle structure panel — right-click to add a shortcut" : "Toggle layers panel — right-click to add a shortcut",
@@ -1176,6 +1203,7 @@ export function App() {
         {showPattern && <PatternPanel onClose={() => setShowPattern(false)} />}
         {showCode && <CodePanel />}
         {showProps && !modelTab && <PropertiesPanel onClose={() => setShowProps(false)} />}
+        {showConstraints && !modelTab && <ConstraintPanel onClose={() => setShowConstraints(false)} />}
         {/* Rightmost panel: layers for a drawing, the assembly structure for a model. */}
         {showLayers &&
           (modelTab && activeSession?.model ? (
@@ -1275,10 +1303,10 @@ export function App() {
             data-testid="solve-state"
             title={
               solve.status === "over-constrained"
-                ? `These constraints can't all hold at once: ${solve.conflicts.join(", ")}`
+                ? `These constraints can't all hold at once: ${solve.conflicts.map(constraintName).join(", ")}`
                 : solve.status === "fully-constrained"
                   ? "Fully constrained — every degree of freedom is accounted for"
-                  : `${solve.dof} degree${solve.dof === 1 ? "" : "s"} of freedom left${solve.redundant.length > 0 ? ` · redundant: ${solve.redundant.join(", ")}` : ""}`
+                  : `${solve.dof} degree${solve.dof === 1 ? "" : "s"} of freedom left${solve.redundant.length > 0 ? ` · redundant: ${solve.redundant.map(constraintName).join(", ")}` : ""}`
             }
           >
             {solve.status === "over-constrained"

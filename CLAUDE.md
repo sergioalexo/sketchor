@@ -201,8 +201,21 @@ exports only `solveSketch` so the engine stays replaceable.
   approach and the wrong one — it leaves every constraint slightly
   violated in proportion to how hard the user pulls.
 
-Not yet built: tools to *create* constraints (T-41 — today they come from
-`window.sketchor.bus`), driving dimensions (T-42), inference (T-43).
+**Creating them** (T-41) is selection-driven, as in Onshape: select the
+geometry, then press the constraint. `constraintBuilder.ts` (pure, tested)
+decides what applies — `constraintOptions(selection)` for which buttons
+light up and *why* a disabled one doesn't, `buildConstraints(kind, …)` for
+the constraints themselves. Where a constraint needs points and the
+selection only names entities, `nearestPair` picks the ends nearest each
+other, which is what the user was looking at when they asked.
+`constraintDisplay.ts` (pure, tested) says where each constraint's glyph
+hangs; `constraints/ConstraintPanel.tsx` is the panel (Ctrl+2) and owns
+the glyph characters. In the viewport a glyph click selects the geometry a
+constraint holds and a double-click removes it.
+
+Not yet built: driving dimensions (T-42 — `distance`/`radius`/`angle`
+today lock the *current* value rather than being editable), inference
+while drawing (T-43), DOF colouring (T-44).
 
 ## Typed input and the command line
 

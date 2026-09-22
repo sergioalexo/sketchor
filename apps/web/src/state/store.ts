@@ -636,6 +636,12 @@ interface AppState {
   /** The docked command line (T-08), at the bottom of the drawing area. */
   commandLine: boolean;
   toggleCommandLine: () => void;
+  /** Draw a glyph beside each constrained entity (T-41). */
+  showConstraintGlyphs: boolean;
+  setShowConstraintGlyphs: (v: boolean) => void;
+  /** The constraint the pointer is over in the panel — its geometry is highlighted on the canvas. */
+  highlightedConstraint: string | null;
+  setHighlightedConstraint: (id: string | null) => void;
   setShowConnectivityHint: (v: boolean) => void;
   /** Fills detected closed loops (lines/arcs chained shut, or circles) with a translucent tint — on by default. */
   showClosedRegions: boolean;
@@ -731,6 +737,10 @@ export const useApp = create<AppState>((set, get) => ({
   setShowConnectivityHint: (v) => set({ showConnectivityHint: v }),
   commandLine: false,
   toggleCommandLine: () => set((s) => ({ commandLine: !s.commandLine })),
+  showConstraintGlyphs: true,
+  setShowConstraintGlyphs: (v) => set({ showConstraintGlyphs: v }),
+  highlightedConstraint: null,
+  setHighlightedConstraint: (id) => set((s) => (s.highlightedConstraint === id ? s : { highlightedConstraint: id })),
   showClosedRegions: true,
   setShowClosedRegions: (v) => set({ showClosedRegions: v }),
   fitRequestId: 0,

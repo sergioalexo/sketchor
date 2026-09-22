@@ -2492,6 +2492,110 @@ kbd.shortcut-key-fixed {
   font-size: 13px;
 }
 
+/* Constraints panel (T-41): apply buttons, then the sketch's constraint list. */
+.constraint-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 4px;
+  padding: 8px;
+}
+
+.constraint-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.constraint-btn:hover:not(:disabled) {
+  background: var(--border);
+}
+
+.constraint-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.constraint-glyph {
+  flex: none;
+  width: 16px;
+  text-align: center;
+  color: var(--accent);
+  font-size: 14px;
+  line-height: 1;
+}
+
+.constraint-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.constraint-listhead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.constraint-listhead label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+
+.constraint-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.constraint-empty {
+  padding: 10px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.constraint-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.constraint-row:hover,
+.constraint-row.hovered {
+  background: var(--border);
+}
+
+.constraint-row.conflict {
+  color: #e06c75;
+}
+
+.constraint-row.conflict .constraint-glyph {
+  color: #e06c75;
+}
+
+.constraint-row.redundant {
+  color: var(--text-dim);
+  font-style: italic;
+}
+
 /* The solver's verdict in the status bar (T-40). */
 .solve-state {
   padding: 1px 6px;

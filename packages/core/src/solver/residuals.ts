@@ -10,6 +10,7 @@ import {
   konst,
   length,
   mul,
+  scale,
   sub,
   vsub,
   type Num,
@@ -144,6 +145,52 @@ export function rowsFor(model: SketchModel, c: Constraint): Row[] {
       // Signed, so the circle stays on the side it is on rather than
       // flipping through the line to reach the nearest solution.
       return [row(signed.v >= 0 ? sub(signed, radius) : add(signed, radius))];
+    }
+    case "concentric": {
+      const ca = centerOf(model, c.a);
+      const cb = centerOf(model, c.b);
+      if (!ca || !cb) return [];
+      return [row(sub(ca.x, cb.x)), row(sub(ca.y, cb.y))];
+    }
+    case "midpoint": {
+      const p = pointOf(model, c.point);
+      const mid = pointOf(model, { entityId: c.entityId, point: "center" });
+      if (!p || !mid) return [];
+      return [row(sub(p.x, mid.x)), row(sub(p.y, mid.y))];
+    }
+    case "symmetric": {
+      const a = pointOf(model, c.a);
+      const b = pointOf(model, c.b);
+      const axis = directionOf(model, c.axis);
+      const on = pointOf(model, { entityId: c.axis, point: "a" });
+      if (!a || !b || !axis || !on) return [];
+      // Symmetry is two statements: the pair's midpoint is on the axis,
+      // and the line joining them crosses it at a right angle.
+      const mid = { x: scale(add(a.x, b.x), 0.5), y: scale(add(a.y, b.y), 0.5) };
+      return [row(pointToLine(mid, on, axis)), row(cosBetween(vsub(b, a), axis))];
+    }
+    case "collinear": {
+      const u = directionOf(model, c.a);
+      const v = directionOf(model, c.b);
+      const at = pointOf(model, { entityId: c.a, point: "a" });
+      const other = pointOf(model, { entityId: c.b, point: "a" });
+      if (!u || !v || !at || !other) return [];
+      // Parallel, and one of the second line's points on the first line.
+      return [row(sinBetween(u, v)), row(pointToLine(other, at, u))];
+    }
+    case "point-on-curve": {
+      const p = pointOf(model, c.point);
+      if (!p) return [];
+      const center = centerOf(model, c.entityId);
+      const radius = radiusOf(model, c.entityId);
+      if (center && radius) return [row(sub(distanceNum(p, center), radius))];
+      const d = directionOf(model, c.entityId);
+      const at = pointOf(model, { entityId: c.entityId, point: "a" });
+      if (!d || !at) return [];
+      // On the *infinite* line: sliding along it is what makes the
+      // constraint useful, and a point that leaves the drawn segment is
+      // the user's business, not the solver's.
+      return [row(pointToLine(p, at, d))];
     }
     case "fix":
       // Handled by freezing the entity's parameters (see model.ts), which

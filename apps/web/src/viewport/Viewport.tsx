@@ -14,6 +14,7 @@ import {
   distToArc,
   distToSegment,
   polylineSegments,
+  constraintAnchors,
   entitiesInBox,
   entitiesCrossedByFence,
   entitiesInPolygon,
@@ -25,6 +26,7 @@ import {
   imageCorners,
   regionContainingPoint,
   resolveSelection,
+  constraintEntityIds,
   layerOf,
   newEntityId,
   nextEntityName,
@@ -55,7 +57,8 @@ import { openDrawing, saveCurrent } from "../io/drawingFile";
 import { matchesBinding, matchesModifier } from "../keybindings";
 import { printDrawing } from "../print/printDrawing";
 import { formatArea, formatLength } from "../units";
-import { render } from "./renderer";
+import { CONSTRAINT_GLYPH_OFFSET, CONSTRAINT_GLYPH_SIZE, render } from "./renderer";
+import { CONSTRAINT_GLYPHS } from "../constraints/ConstraintPanel";
 import { setImageDecodeCallback } from "./imageCache";
 import { findSnap, snapMovingSelection, snapRotation, SNAP_PX, type Snap } from "./snapping";
 import { acquirePoint, trackAlignment, trackingAngles } from "./objectTracking";
@@ -430,6 +433,7 @@ export function Viewport() {
       trackingRay: activeTool ? trackingRayRef.current : null,
       trackRays: activeTool ? trackRaysRef.current : [],
       relativeZero: activeTool ? relativeZeroRef.current : null,
+      constraintGlyphs: constraintGlyphs(),
       acquiredPoints: activeTool ? acquiredRef.current : [],
       moveOffset:
         interaction.kind === "move" ? { dx: interaction.dx, dy: interaction.dy } : null,
@@ -548,6 +552,37 @@ export function Viewport() {
       }
     }
     return { snap: raw, ray: null };
+  };
+
+  /**
+   * Every constraint mark currently on screen, with the world point it
+   * hangs off. Built once per render and reused by the hit test, so a
+   * click and the picture can't disagree about where a glyph is.
+   */
+  const constraintGlyphs = (): { id: string; at: Point; glyph: string; state: "normal" | "conflict" | "highlight" }[] => {
+    const app = useApp.getState();
+    if (!app.showConstraintGlyphs) return [];
+    const conflicts = new Set(bus.lastSolve?.conflicts ?? []);
+    const lookup = (id: EntityId) => doc.get(id);
+    const out: { id: string; at: Point; glyph: string; state: "normal" | "conflict" | "highlight" }[] = [];
+    for (const c of doc.constraints()) {
+      const state = conflicts.has(c.id) ? "conflict" : app.highlightedConstraint === c.id ? "highlight" : "normal";
+      for (const at of constraintAnchors(lookup, c)) out.push({ id: c.id, at, glyph: CONSTRAINT_GLYPHS[c.type], state });
+    }
+    return out;
+  };
+
+  /** The constraint whose glyph is under a screen point, if any. */
+  const glyphAt = (screen: Point): string | null => {
+    const view = viewRef.current;
+    const reach = CONSTRAINT_GLYPH_SIZE / 2 + 2;
+    for (const g of constraintGlyphs()) {
+      const p = worldToScreen(view, g.at);
+      const dx = screen.x - (p.x + CONSTRAINT_GLYPH_OFFSET.x);
+      const dy = screen.y - (p.y + CONSTRAINT_GLYPH_OFFSET.y);
+      if (Math.abs(dx) <= reach && Math.abs(dy) <= reach) return g.id;
+    }
+    return null;
   };
 
   /**
@@ -1113,6 +1148,18 @@ export function Viewport() {
     if (e.button !== 0) return;
 
     if (app.tool === "select") {
+      // A constraint mark is on top of everything: it is small, and the
+      // geometry under it is reachable a pixel away.
+      const glyph = glyphAt(screen);
+      if (glyph) {
+        const constraint = doc.constraints().find((c) => c.id === glyph);
+        app.setHighlightedConstraint(glyph);
+        if (constraint) app.setSelection(constraintEntityIds(constraint).filter((id) => !!doc.get(id)));
+        interactionRef.current = { kind: "idle" };
+        redraw();
+        return;
+      }
+      app.setHighlightedConstraint(null);
       // A grip of a selected entity under the cursor beats everything else.
       const gripHit = findGrip(app.selection, screen, view, e.pointerType === "touch");
       if (gripHit) {
@@ -1850,6 +1897,16 @@ export function Viewport() {
     const world = screenToWorld(viewRef.current, screen);
     const hit = hitTest(viewRef.current, world);
     const app = useApp.getState();
+
+    // Double-clicking a constraint mark removes that constraint — the
+    // gesture is unambiguous (a mark is not geometry), and it undoes.
+    const glyph = app.tool === "select" ? glyphAt(screen) : null;
+    if (glyph) {
+      bus.execute({ type: "remove-constraint", id: glyph });
+      app.setHighlightedConstraint(null);
+      redraw();
+      return;
+    }
 
     // A tool's own double-click (finishing a polyline) takes priority over the zoom-to-fit / enter-group behavior below.
     const t = getTool(app.tool);
