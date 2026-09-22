@@ -161,6 +161,16 @@ fill, straighten, dim, pan) still run as `case`s in `Viewport.tsx`'s
 pointer handlers — `getTool()` returns null for those. Migrating one means
 moving its case into a class and deleting its `interaction` kind.
 
+Where a point lands is a pipeline, and its order is load-bearing:
+object snap (`viewport/snapping.ts`) → ortho/polar from the tool's anchor
+(`tools/tracking.ts`) → object snap tracking (`viewport/objectTracking.ts`,
+T-20) → raw cursor. A feature snap the cursor actually touched always wins,
+as in AutoCAD; tracking only replaces the fall-through result. Hovering a
+feature point acquires it (three deep, newest first), and `trackAlignment`
+returns the projection — or, when two acquired alignments cross near the
+cursor, their intersection. All three stages are pure and tested;
+`resolvePick` in `Viewport.tsx` is the only place that sequences them.
+
 Selection lives in `packages/core` too, so the rules are testable without a
 canvas: `boxSelect.ts` (window/crossing rectangles), `polygonSelect.ts`
 (lasso polygons, fence strokes, entity outlines, path thinning) and

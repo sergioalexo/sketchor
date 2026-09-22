@@ -539,6 +539,8 @@ export function App() {
   const polarIncrement = useTracking((s) => s.polarIncrement);
   const toggleOrtho = useTracking((s) => s.toggleOrtho);
   const togglePolar = useTracking((s) => s.togglePolar);
+  const otrack = useTracking((s) => s.otrack);
+  const toggleOtrack = useTracking((s) => s.toggleOtrack);
   const setPolarIncrement = useTracking((s) => s.setPolarIncrement);
   const [rebindTarget, setRebindTarget] = useState<{ actionId: string; x: number; y: number } | null>(null);
   const keyBindings = useKeybindings((s) => s.bindings);
@@ -1220,6 +1222,18 @@ export function App() {
               onContextMenu={rebind("view.polar")}
             >
               POLAR
+            </button>
+            <button
+              className={`tracking-toggle ${otrack ? "active" : ""}`}
+              title={withKey(
+                "Object snap tracking: hover a corner or centre to acquire it, then line up with it from anywhere",
+                "view.otrack",
+              )}
+              data-testid="toggle-otrack"
+              onClick={toggleOtrack}
+              onContextMenu={rebind("view.otrack")}
+            >
+              TRACK
             </button>
             <SnapPopover />
             <SelectByPopover />

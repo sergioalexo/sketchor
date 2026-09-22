@@ -20,10 +20,17 @@ export interface TrackingSettings {
   polar: boolean;
   /** Degrees. */
   polarIncrement: number;
+  /**
+   * Object snap tracking (T-20, `objectTracking.ts`): align with feature
+   * points the cursor has hovered. On by default — it only acts when the
+   * cursor genuinely lines up with something, the way Onshape's inference
+   * lines do, and it is the one that makes "above that corner" placeable.
+   */
+  otrack: boolean;
 }
 
 const STORAGE_KEY = "sketchor.tracking.v1";
-const DEFAULTS: TrackingSettings = { ortho: false, polar: false, polarIncrement: 45 };
+const DEFAULTS: TrackingSettings = { ortho: false, polar: false, polarIncrement: 45, otrack: true };
 export const POLAR_INCREMENTS = [5, 10, 15, 22.5, 30, 45, 90] as const;
 
 function load(): TrackingSettings {
@@ -38,6 +45,7 @@ function load(): TrackingSettings {
         typeof p.polarIncrement === "number" && p.polarIncrement > 0 && p.polarIncrement <= 90
           ? p.polarIncrement
           : DEFAULTS.polarIncrement,
+      otrack: typeof p.otrack === "boolean" ? p.otrack : DEFAULTS.otrack,
     };
   } catch {
     return { ...DEFAULTS };
@@ -55,6 +63,7 @@ function save(s: TrackingSettings): void {
 interface TrackingState extends TrackingSettings {
   toggleOrtho: () => void;
   togglePolar: () => void;
+  toggleOtrack: () => void;
   setPolarIncrement: (deg: number) => void;
 }
 
@@ -71,6 +80,11 @@ export const useTracking = create<TrackingState>((set, get) => ({
     save(next);
     set(next);
   },
+  toggleOtrack: () => {
+    const next = { ...settingsOf(get()), otrack: !get().otrack };
+    save(next);
+    set(next);
+  },
   setPolarIncrement: (deg) => {
     const next = { ...settingsOf(get()), polarIncrement: deg };
     save(next);
@@ -79,7 +93,7 @@ export const useTracking = create<TrackingState>((set, get) => ({
 }));
 
 function settingsOf(s: TrackingSettings): TrackingSettings {
-  return { ortho: s.ortho, polar: s.polar, polarIncrement: s.polarIncrement };
+  return { ortho: s.ortho, polar: s.polar, polarIncrement: s.polarIncrement, otrack: s.otrack };
 }
 
 /** Snap kinds that were found by touching a feature; tracking never overrides these. */

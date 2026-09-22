@@ -69,7 +69,8 @@ export interface SnapOptions {
   settings?: SnapSettings;
 }
 
-const SNAP_PX = 10;
+/** Pick aperture, in pixels — also what object snap tracking uses for "lines up with". */
+export const SNAP_PX = 10;
 
 /**
  * Finds the best snap near a world-space cursor position, in priority tiers:

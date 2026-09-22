@@ -30,6 +30,10 @@ export interface RenderUiState {
   snap: Snap | null;
   /** Ortho/polar guide: dashed ray from the tool's anchor through the tracked point, with the angle. */
   trackingRay: { from: Point; to: Point; angleDeg: number } | null;
+  /** Object-snap-tracking guides (T-20): one per alignment the cursor is riding, drawn from the acquired point. */
+  trackRays: readonly { from: Point; to: Point; angleDeg: number }[];
+  /** Feature points the cursor has hovered and can now track from — marked so the user knows they're live. */
+  acquiredPoints: readonly Point[];
   /** Live offset while dragging a selection. */
   moveOffset: { dx: number; dy: number } | null;
   /** Active measure-tool result overlay, if any. */
@@ -177,6 +181,8 @@ export function render(
   }
 
   if (ui.trackingRay) drawTrackingRay(ctx, width, height, view, ui.trackingRay);
+  for (const p of ui.acquiredPoints) drawAcquiredMarker(ctx, view, p);
+  for (const ray of ui.trackRays) drawTrackingRay(ctx, width, height, view, ray);
 
   // Drawn over the geometry, like a CAD axis icon: geometry frequently runs
   // straight through the origin, and a reference marker hidden underneath it
@@ -881,6 +887,22 @@ function drawSnapMarker(ctx: CanvasRenderingContext2D, view: View, snap: Snap): 
  * tracked point to the edge of the canvas, and the angle next to the point
  * (AutoCAD's polar tooltip).
  */
+/** The small plus AutoCAD puts on an acquired point, so it's clear what the guides come from. */
+function drawAcquiredMarker(ctx: CanvasRenderingContext2D, view: View, p: Point): void {
+  const s = worldToScreen(view, p);
+  ctx.save();
+  ctx.strokeStyle = COLORS.snap;
+  ctx.globalAlpha = 0.8;
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.moveTo(s.x - 4, s.y);
+  ctx.lineTo(s.x + 4, s.y);
+  ctx.moveTo(s.x, s.y - 4);
+  ctx.lineTo(s.x, s.y + 4);
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawTrackingRay(
   ctx: CanvasRenderingContext2D,
   width: number,

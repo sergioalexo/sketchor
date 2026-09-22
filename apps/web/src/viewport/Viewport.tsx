@@ -56,7 +56,8 @@ import { printDrawing } from "../print/printDrawing";
 import { formatArea, formatLength } from "../units";
 import { render } from "./renderer";
 import { setImageDecodeCallback } from "./imageCache";
-import { findSnap, snapMovingSelection, snapRotation, type Snap } from "./snapping";
+import { findSnap, snapMovingSelection, snapRotation, SNAP_PX, type Snap } from "./snapping";
+import { acquirePoint, trackAlignment, trackingAngles } from "./objectTracking";
 import { fitToBounds, gridStep, screenToWorld, worldToScreen, zoomAt, type View } from "./view";
 import { getTool, type Pick, type ToolContext } from "../tools";
 import { copySelectionToClipboard, pasteFromClipboard } from "../io/clipboard";
@@ -188,6 +189,19 @@ function toggleConstruction(): void {
 function activeLayerProp(active: string): { layer?: string } {
   return active && active !== "0" ? { layer: active } : {};
 }
+
+/** Snap kinds that mean the cursor is on a real feature point — trackable, and never overridden. */
+const FEATURE_SNAP_KINDS = new Set<Snap["kind"]>([
+  "origin",
+  "endpoint",
+  "midpoint",
+  "center",
+  "quadrant",
+  "intersection",
+  "node",
+  "perpendicular",
+  "tangent",
+]);
 
 /**
  * Window or crossing for a freehand loop, by the same rule a box uses: the
@@ -326,6 +340,9 @@ export function Viewport() {
   const snapRef = useRef<Snap | null>(null);
   /** The ortho/polar guide to draw, when the last pointer move was projected onto one. */
   const trackingRayRef = useRef<{ from: Point; to: Point; angleDeg: number } | null>(null);
+  /** Object snap tracking (T-20): feature points the cursor has hovered, newest first, and the guides in play. */
+  const acquiredRef = useRef<Point[]>([]);
+  const trackRaysRef = useRef<{ from: Point; to: Point; angleDeg: number }[]>([]);
   /** Last pointer position on the canvas, where the typed-coordinate box opens. */
   const lastScreenRef = useRef<Point | null>(null);
   const hoverRef = useRef<EntityId | null>(null);
@@ -393,6 +410,8 @@ export function Viewport() {
       preview,
       snap: state.tool === "select" ? null : snap,
       trackingRay: activeTool ? trackingRayRef.current : null,
+      trackRays: activeTool ? trackRaysRef.current : [],
+      acquiredPoints: activeTool ? acquiredRef.current : [],
       moveOffset:
         interaction.kind === "move" ? { dx: interaction.dx, dy: interaction.dy } : null,
       measurement: state.measurement,
@@ -474,23 +493,42 @@ export function Viewport() {
   };
 
   /**
-   * Resolves a cursor position into what a tool receives: object snap,
-   * then ortho/polar tracking from the tool's anchor (a feature snap the
-   * cursor touched still wins — see tracking.ts). Also records the guide
-   * ray for the renderer.
+   * Resolves a cursor position into what a tool receives, in the order
+   * AutoCAD uses: the object snap the cursor actually touched wins; else
+   * ortho/polar from the tool's anchor; else an alignment with a feature
+   * point the cursor hovered earlier (object snap tracking, T-20). Also
+   * records the guides for the renderer, and acquires the hovered point.
    */
   const resolvePick = (world: Point, shiftKey: boolean): { snap: Snap; ray: typeof trackingRayRef.current } => {
     const view = viewRef.current;
     const app = useApp.getState();
     const t = getTool(app.tool);
     const raw = findSnap(doc, view, world, { anchor: t?.anchor() ?? null, settings: useSnapSettings.getState().settings });
+    const tracking = useTracking.getState();
+    // Hovering a feature point makes it trackable, as in AutoCAD — no
+    // separate gesture, and the acquired list is short enough to stay
+    // predictable.
+    if (tracking.otrack && FEATURE_SNAP_KINDS.has(raw.kind)) {
+      acquiredRef.current = acquirePoint(acquiredRef.current, raw.point);
+    }
+    trackRaysRef.current = [];
     if (!t) return { snap: raw, ray: null };
-    const tracked = applyTracking(t.anchor(), world, raw, trackingIncrement(useTracking.getState(), shiftKey));
-    if (!tracked.ray) return { snap: raw, ray: null };
-    return {
-      snap: { point: tracked.point, kind: "tracking" },
-      ray: { from: tracked.ray.from, to: tracked.point, angleDeg: tracked.ray.angleDeg },
-    };
+    const increment = trackingIncrement(tracking, shiftKey);
+    const tracked = applyTracking(t.anchor(), world, raw, increment);
+    if (tracked.ray) {
+      return {
+        snap: { point: tracked.point, kind: "tracking" },
+        ray: { from: tracked.ray.from, to: tracked.point, angleDeg: tracked.ray.angleDeg },
+      };
+    }
+    if (tracking.otrack && !FEATURE_SNAP_KINDS.has(raw.kind)) {
+      const hit = trackAlignment(world, acquiredRef.current, trackingAngles(increment), SNAP_PX / view.scale);
+      if (hit) {
+        trackRaysRef.current = hit.rays.map((r) => ({ from: r.from, to: hit.point, angleDeg: r.angleDeg }));
+        return { snap: { point: hit.point, kind: "tracking" }, ray: null };
+      }
+    }
+    return { snap: raw, ray: null };
   };
 
   const pickFrom = (e: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean; altKey: boolean }, world: Point, snap: Snap): Pick => ({
@@ -512,6 +550,8 @@ export function Viewport() {
       setTyped(null);
     }
     trackingRayRef.current = null;
+    trackRaysRef.current = [];
+    acquiredRef.current = [];
     syncPrompt();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tool]);
@@ -756,6 +796,10 @@ export function Viewport() {
       } else if (matchesBinding(e, "view.polar")) {
         e.preventDefault();
         useTracking.getState().togglePolar();
+      } else if (matchesBinding(e, "view.otrack")) {
+        e.preventDefault();
+        useTracking.getState().toggleOtrack();
+        acquiredRef.current = [];
       } else if (getTool(app.tool)?.key?.(toolCtx, e)) {
         // The active tool's own keys (finish/close a polyline, arc modes, ...) come before the global ones.
         e.preventDefault();
@@ -777,6 +821,7 @@ export function Viewport() {
         getTool(app.tool)?.cancel(toolCtx);
         setTyped(null);
         setCycle(null);
+        acquiredRef.current = [];
         interactionRef.current = { kind: "idle" };
         app.setSelection([]);
         app.setMeasurement(null);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyTracking, trackingIncrement } from "./tracking";
+import { applyTracking, trackingIncrement, type TrackingSettings } from "./tracking";
 
 /**
  * Ortho/polar decide where the second point of a line lands when the user
@@ -47,10 +47,20 @@ describe("applyTracking", () => {
 });
 
 describe("trackingIncrement", () => {
+  // Object snap tracking (otrack) is a separate stage and never changes the
+  // increment; it rides along in the same settings object.
+  const settings = (over: Partial<TrackingSettings>): TrackingSettings => ({
+    ortho: false,
+    polar: false,
+    polarIncrement: 30,
+    otrack: true,
+    ...over,
+  });
+
   it("Shift is temporary ortho; otherwise the settings decide", () => {
-    expect(trackingIncrement({ ortho: false, polar: false, polarIncrement: 30 }, true)).toBe(90);
-    expect(trackingIncrement({ ortho: false, polar: false, polarIncrement: 30 }, false)).toBeNull();
-    expect(trackingIncrement({ ortho: true, polar: false, polarIncrement: 30 }, false)).toBe(90);
-    expect(trackingIncrement({ ortho: false, polar: true, polarIncrement: 30 }, false)).toBe(30);
+    expect(trackingIncrement(settings({}), true)).toBe(90);
+    expect(trackingIncrement(settings({}), false)).toBeNull();
+    expect(trackingIncrement(settings({ ortho: true }), false)).toBe(90);
+    expect(trackingIncrement(settings({ polar: true }), false)).toBe(30);
   });
 });

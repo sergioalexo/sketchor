@@ -37,6 +37,7 @@ npm run desktop    # native desktop window via Tauri (needs Rust toolchain)
 | Select all / invert | `Ctrl+A` / `Ctrl+I` |
 | Lasso / fence | `Alt`-drag a freehand loop (left → right takes only what's inside, right → left also what it touches); `Ctrl+Alt`-drag an open stroke that takes everything it crosses |
 | Select similar / by | `Ctrl+Shift+A` takes everything of the same type, layer and colour as the selection; the **SELECT** button in the status bar picks by type / layer / colour / construction, with a live count |
+| Ortho / polar / tracking | `F8` constrains to 0/90/180/270° from the last point (`Shift` = temporary), `F10` snaps to an angle increment, `F11` toggles object snap tracking — see below |
 | Lock a layer | the padlock in the Layers panel — the layer stays on screen, dimmed, but nothing on it can be clicked, boxed, lassoed or deleted |
 | Join / Explode | `J` chains the selected lines and arcs into one polyline (closed when the ends meet); `Ctrl+E` explodes selected polylines back into lines and arcs |
 | Divide | Divide tool: type a count (or a spacing like `25mm`), click an entity — points mark the divisions |
@@ -53,6 +54,15 @@ point you just placed — **perpendicular** feet and **tangent** points; then
 midpoints; then the nearest point **along** a line, arc or circle; then a
 line's **extension** past its end (with a dashed guide); then the grid. The
 **SNAP** button in the status bar switches kinds on and off.
+
+**Object snap tracking** (the **TRACK** button, `F11`, on by default) is the
+one that places points nothing can snap to. Hover a corner or a centre and
+it is *acquired* — marked with a small plus. From then on, whenever the
+cursor lines up with it horizontally or vertically (or along the polar
+increment), the cursor is pulled onto that alignment and a dashed guide is
+drawn back to the point. Line up with two acquired points at once and you
+get their crossing: directly above this corner **and** level with that one,
+exactly, with no construction lines to draw and erase.
 
 The world origin is drawn as a crosshair with labelled +X / +Y stubs (and a
 muted marker clamped to the edge when it's panned off-screen), so `0, 0` is
