@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { ArcEntity, CircleEntity, ImageEntity, LineEntity, PolylineEntity } from "./entities";
+import type { ArcEntity, CircleEntity, Entity, ImageEntity, LineEntity, PolylineEntity } from "./entities";
 import { arcPointAt, dist } from "./geometry";
-import { applyGrip, gripsOf } from "./grips";
+import { applyGrip, gripPointRef, gripsOf } from "./grips";
 
 /**
  * Grips are the fastest way to fix a drawing — drag a corner onto where it
@@ -58,5 +58,37 @@ describe("grips", () => {
     expect(r.width).toBeCloseTo(20, 9);
     expect(r.height).toBeCloseTo(8, 9);
     expect((applyGrip(img, g[0], { x: 1, y: 1 }) as ImageEntity).insert).toEqual({ x: 1, y: 1 });
+  });
+});
+
+describe("gripPointRef", () => {
+  it("names the point a grip is, so a drag can become a solve", () => {
+    const l: Entity = { id: "l", type: "line", a: { x: 0, y: 0 }, b: { x: 10, y: 0 } };
+    expect(gripPointRef(l, { point: l.a, kind: "end", index: 0 })).toEqual({ entityId: "l", point: "a" });
+    expect(gripPointRef(l, { point: l.b, kind: "end", index: 1 })).toEqual({ entityId: "l", point: "b" });
+    expect(gripPointRef(l, { point: { x: 5, y: 0 }, kind: "mid", index: 0 })).toEqual({ entityId: "l", point: "center" });
+  });
+
+  it("says no for a grip that isn't a point at all", () => {
+    const c: Entity = { id: "c", type: "circle", center: { x: 0, y: 0 }, radius: 5 };
+    // A quadrant grip changes the radius; there is no point to constrain.
+    expect(gripPointRef(c, { point: { x: 5, y: 0 }, kind: "quadrant", index: 0 })).toBeNull();
+    expect(gripPointRef(c, { point: c.center, kind: "center", index: 0 })).toEqual({ entityId: "c", point: "center" });
+  });
+
+  it("only names a polyline's ends, which is all a PointRef can hold today", () => {
+    const pl: Entity = {
+      id: "p",
+      type: "polyline",
+      points: [
+        { x: 0, y: 0 },
+        { x: 5, y: 0 },
+        { x: 5, y: 5 },
+      ],
+      closed: false,
+    };
+    expect(gripPointRef(pl, { point: pl.points[0], kind: "vertex", index: 0 })).toEqual({ entityId: "p", point: "a" });
+    expect(gripPointRef(pl, { point: pl.points[2], kind: "vertex", index: 2 })).toEqual({ entityId: "p", point: "b" });
+    expect(gripPointRef(pl, { point: pl.points[1], kind: "vertex", index: 1 })).toBeNull();
   });
 });

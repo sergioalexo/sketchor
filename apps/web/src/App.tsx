@@ -1,4 +1,4 @@
-import { Fragment, lazy, Suspense, useEffect, useState } from "react";
+import { useMemo, Fragment, lazy, Suspense, useEffect, useState } from "react";
 import { freeEndpointEntityIds } from "@sketchor/core";
 import { bus, doc, getSessions, isModelSession, measurementText, TOOL_HINTS, useApp, type ToolId } from "./state/store";
 import { useTouchMode } from "./touchMode";
@@ -542,6 +542,9 @@ export function App() {
   const otrack = useTracking((s) => s.otrack);
   const commandLine = useApp((s) => s.commandLine);
   const toggleCommandLine = useApp((s) => s.toggleCommandLine);
+  // The solver's verdict on the current sketch (T-40); null until the
+  // drawing has constraints. Re-read on every revision, like the entity count.
+  const solve = useMemo(() => bus.lastSolve, [revision]); // eslint-disable-line react-hooks/exhaustive-deps
   const toggleOtrack = useTracking((s) => s.toggleOtrack);
   const setPolarIncrement = useTracking((s) => s.setPolarIncrement);
   const [rebindTarget, setRebindTarget] = useState<{ actionId: string; x: number; y: number } | null>(null);
@@ -1266,6 +1269,25 @@ export function App() {
           </span>
         )}
         <span data-testid="entity-count">{modelTab ? "3D model (view-only)" : `${doc.all().length} entities`}</span>
+        {!modelTab && solve && (
+          <span
+            className={`solve-state ${solve.status}`}
+            data-testid="solve-state"
+            title={
+              solve.status === "over-constrained"
+                ? `These constraints can't all hold at once: ${solve.conflicts.join(", ")}`
+                : solve.status === "fully-constrained"
+                  ? "Fully constrained — every degree of freedom is accounted for"
+                  : `${solve.dof} degree${solve.dof === 1 ? "" : "s"} of freedom left${solve.redundant.length > 0 ? ` · redundant: ${solve.redundant.join(", ")}` : ""}`
+            }
+          >
+            {solve.status === "over-constrained"
+              ? `⚠ ${solve.conflicts.length} conflicting`
+              : solve.status === "fully-constrained"
+                ? "fully constrained"
+                : `${solve.dof} DOF`}
+          </span>
+        )}
         {prompt && !modelTab && (
           <span className="tool-prompt" data-testid="tool-prompt">
             {prompt}

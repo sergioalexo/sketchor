@@ -1,4 +1,5 @@
 import type { Entity } from "./entities";
+import type { PointRef } from "./constraints";
 import { imageCorners } from "./entities";
 import { arcPointAt, arcSweep, dist, type Point } from "./geometry";
 
@@ -98,5 +99,38 @@ export function applyGrip(e: Entity, grip: Grip, to: Point): Entity {
       if (grip.index === 1) return { ...e, width: Math.max(1e-6, lx) };
       return { ...e, width: Math.max(1e-6, lx), height: Math.max(1e-6, ly) };
     }
+  }
+}
+
+/**
+ * The constrainable point a grip stands for, or null when it doesn't
+ * stand for one (a circle's quadrant is a radius, not a point; a
+ * polyline's middle vertices have no name a `PointRef` can hold yet).
+ *
+ * This is what lets a grip drag become a *solve* rather than a move: the
+ * solver is told "this point wants to be at the cursor" and everything
+ * the constraints tie to it follows (roadmap T-40).
+ */
+export function gripPointRef(entity: Entity, grip: Grip): PointRef | null {
+  const ref = (point: PointRef["point"]): PointRef => ({ entityId: entity.id, point });
+  switch (entity.type) {
+    case "line":
+      if (grip.kind === "mid") return ref("center");
+      return ref(grip.index === 0 ? "a" : "b");
+    case "arc":
+      if (grip.kind === "center" || grip.kind === "mid") return ref("center");
+      return ref(grip.index === 0 ? "a" : "b");
+    case "circle":
+      return grip.kind === "center" ? ref("center") : null;
+    case "point":
+      return ref("a");
+    case "polyline": {
+      if (grip.kind !== "vertex") return null;
+      if (grip.index === 0) return ref("a");
+      return grip.index === entity.points.length - 1 ? ref("b") : null;
+    }
+    case "text":
+    case "image":
+      return null;
   }
 }

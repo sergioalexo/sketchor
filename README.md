@@ -72,6 +72,25 @@ and 100 up from that corner" without drawing anything to measure from. `rz`
 on the command line (or a shortcut you bind to *Set relative zero*) moves it
 to the cursor.
 
+### Constraints (the parametric layer, in progress)
+
+A drawing can carry **constraints** — coincident, horizontal, vertical,
+parallel, perpendicular, tangent, equal, distance, radius, angle, fix — and
+Sketchor solves them. Adding one moves the geometry that has to move; so
+does editing anything the constraints reach, in the same undo step. The
+status bar says how many **degrees of freedom** are left, turns green at
+*fully constrained*, and names the constraints that conflict when they
+can't all hold at once. Dragging a corner of a constrained sketch drags
+everything tied to it, live.
+
+The solver is Sketchor's own — least squares by Levenberg–Marquardt over
+the constraint equations, pure TypeScript, no WASM (see
+`packages/core/src/solver/`). What it doesn't have *yet* is a way to
+create constraints by pointing at geometry: today they arrive through
+`window.sketchor.bus.execute({ type: "add-constraint", ... })`. The
+picking tools, the glyphs and the driving dimensions are the next items on
+the roadmap.
+
 The world origin is drawn as a crosshair with labelled +X / +Y stubs (and a
 muted marker clamped to the edge when it's panned off-screen), so `0, 0` is
 always locatable and there's something to aim at when snapping.
@@ -375,16 +394,11 @@ desktop app uses if `latest.json` can't be reached.
 
 ## Roadmap
 
-1. **More geometry** — rectangles; trim/extend/offset. (Arcs and polylines are
-   done: a polyline is one entity with optional per-segment arc bulge, so an
-   imported spline or polyline selects as a single object rather than N
-   segments.)
-2. **Parametric constraints** — integrate `planegcs` (FreeCAD's 2D
-   constraint solver, compiled to WASM, available on npm). Constraints
-   (coincident, parallel, tangent, dimensions) become part of the document;
-   a `solve` step runs after each command and emits `move/replace` commands.
-   The `param`/`constraint`/`dim` keywords are already reserved in the sketch
-   grammar so this layer is purely additive.
+1. **More geometry** — ellipses and splines; hatch patterns; blocks.
+2. **Parametric constraints** — *the solver is in* (see below). What is
+   left is the layer above it: tools to create constraints by picking
+   geometry, glyphs that show which constraints exist, and driving
+   dimensions you can double-click and retype.
 3. **AI assistant** — a chat panel backed by the Claude API with tool
    definitions that emit `Command[]` proposals ("draw a 40x20 slot centered
    on the origin"). Proposals render as dashed previews; the user accepts or

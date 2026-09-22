@@ -46,6 +46,19 @@ CLAUDE.md's central rule is that every mutation goes through a `Command` and
 every command derives its own inverse. Nothing verified that; an undo bug here
 silently corrupts a user's drawing.
 
+### `packages/core/src/solver/solve.test.ts`
+
+The parametric engine (T-40). Its two silent failure modes are solving to a
+valid-but-unintended configuration (a rectangle inside out, a circle jumping
+to the far side of a tangent line) and misreporting degrees of freedom — the
+number that tells a user whether their sketch is done. So the tests assert the
+*geometry* that comes back, and the DoF / conflict / redundancy verdicts on
+sketches whose answers are known by hand: one constraint at a time (including
+an arc endpoint, which reaches through centre, radius and angle), the
+four-line rectangle at every stage of being constrained, drag-solve, and the
+degenerate cases that must not throw or hang (empty sketch, constraints on
+deleted or unconstrainable entities, unsatisfiable constraints).
+
 ### `packages/core/src/commands.test.ts`
 
 - Every command type applies correctly: `add-entity`, `delete-entities`,
@@ -57,6 +70,12 @@ silently corrupts a user's drawing.
 - `redo()` reproduces the post-command state, and recomputes the inverse so
   undo→redo→undo→redo cycles stay correct.
 - `execute` clears the redo stack; `canUndo`/`canRedo` track correctly.
+- **The solver middleware (T-40):** no constraints means no solve at all; a
+  constraint that moves geometry joins the *same* undo entry; an ordinary
+  edit is pulled back onto its constraints; a conflict is reported rather
+  than fitted; `redo` re-solves and `undo` re-diagnoses (so a warning does
+  not outlive the constraint that caused it); `solveSilently` previews a
+  drag without touching history.
 - `batch`: child inverses apply in reverse order (`unshift`); nested batches.
 - Commands naming missing ids are no-ops with a coherent inverse: stale
   `delete-entities` id, `move-entities` on a deleted entity, `ungroup` of an

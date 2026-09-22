@@ -2492,6 +2492,28 @@ kbd.shortcut-key-fixed {
   font-size: 13px;
 }
 
+/* The solver's verdict in the status bar (T-40). */
+.solve-state {
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.solve-state.under-constrained {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.solve-state.fully-constrained {
+  color: #4ec9a5;
+  background: color-mix(in srgb, #4ec9a5 14%, transparent);
+}
+
+.solve-state.over-constrained {
+  color: #e06c75;
+  background: color-mix(in srgb, #e06c75 16%, transparent);
+}
+
 /* Docked command line (T-08), at the foot of the drawing area. */
 .command-line {
   position: absolute;

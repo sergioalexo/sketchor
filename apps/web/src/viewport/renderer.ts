@@ -61,7 +61,8 @@ export interface RenderUiState {
   /** Dashed bbox + rotate handle shown when the selection is exactly one whole group. */
   groupHandle: { bounds: Bounds; pivot: Point } | null;
   /** While a grip is being dragged: the entity as it will be, drawn dashed over the original. */
-  gripPreview: Entity | null;
+  /** Dragged-grip preview: the entity under the cursor, plus anything the solver moved with it. */
+  gripPreview: readonly Entity[];
   /**
    * R2's interim connectivity hint (opt-in, off by default): entities with a
    * free endpoint render blue. NOT real constraint/DOF status — see
@@ -158,11 +159,11 @@ export function render(
 
   if (ui.groupHandle) drawGroupHandle(ctx, view, ui.groupHandle);
 
-  if (ui.gripPreview) {
+  if (ui.gripPreview.length > 0) {
     ctx.setLineDash([6, 4]);
-    drawEntity(ctx, view, ui.gripPreview, COLORS.preview, 1.5);
+    for (const preview of ui.gripPreview) drawEntity(ctx, view, preview, COLORS.preview, 1.5);
     ctx.setLineDash([]);
-    drawHandles(ctx, view, ui.gripPreview);
+    for (const preview of ui.gripPreview) drawHandles(ctx, view, preview);
   }
 
   if (ui.transformPreview) {

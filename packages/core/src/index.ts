@@ -13,6 +13,7 @@ export * from "./stretch";
 export * from "./entities";
 export * from "./groups";
 export * from "./constraints";
+export * from "./solver";
 export * from "./connectivity";
 export * from "./document";
 export * from "./commands";

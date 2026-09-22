@@ -161,6 +161,51 @@ fill, straighten, dim, pan) still run as `case`s in `Viewport.tsx`'s
 pointer handlers — `getTool()` returns null for those. Migrating one means
 moving its case into a class and deleting its `interaction` kind.
 
+## The constraint solver (`packages/core/src/solver/`, roadmap T-40)
+
+Constraints move geometry. The engine is **Sketchor's own**, not planegcs:
+a Levenberg–Marquardt least-squares solve over constraint residuals, a few
+hundred lines of pure TS, tested like the rest of the core. `solver/index.ts`
+exports only `solveSketch` so the engine stays replaceable.
+
+- `num.ts` — scalars that carry their own derivatives (sparse forward-mode
+  AD). Residuals are written the way they read; the Jacobian falls out
+  correct. This is what lets a constraint on an *arc's endpoint* reach
+  through the centre, radius and angle without anyone deriving that by hand.
+- `model.ts` — the document ↔ parameter mapping (line 4, circle 3, arc 5,
+  point 2, polyline 2·n; text/image none, so they add no phantom DoF).
+  `fix` **freezes** parameters rather than adding equations, so a fixed
+  entity removes degrees of freedom instead of fighting for them.
+- `residuals.ts` — one constraint → its equations, all in mm or radians.
+  Parallel/perpendicular divide by the lengths (a bare cross product is mm²
+  and grows with the drawing, which quietly biases least squares).
+- `solve.ts` — LM with **uniform** damping (λ·max diag). Per-entry damping
+  leaves rank-deficient directions barely damped and returns a huge step
+  through the null space: the line comes back parallel *and* three times
+  longer. Uniform damping gives the minimum-norm step, which is also what a
+  user means by "satisfy this constraint". DoF = free params − Jacobian
+  rank; a violated row names its constraint (conflict), and dropping a
+  constraint without changing the rank names it as redundant.
+- **Bus middleware** (`commands.ts`): `execute` solves after applying, and
+  the resulting `update-entity` moves join the *same* undo entry — one
+  Ctrl+Z, or you'd undo to a sketch satisfying nothing. `redo` re-solves
+  for the same reason; `undo` only re-reads the verdict (`maxIterations: 0`)
+  because the geometry it restored was already solved. `bus.lastSolve`
+  feeds the status-bar DoF readout.
+- **Drag-solve**: `bus.solveSilently({ drag })` runs without touching
+  history — the viewport's grip drag uses it when the sketch has
+  constraints (`gripPointRef` maps a grip to a `PointRef`), so dragging a
+  corner drags everything tied to it. A drag is solved in **two passes**:
+  once with the cursor's pull as an equation, then again without it.
+  Weighting the pull as one soft equation among hard ones is the obvious
+  approach and the wrong one — it leaves every constraint slightly
+  violated in proportion to how hard the user pulls.
+
+Not yet built: tools to *create* constraints (T-41 — today they come from
+`window.sketchor.bus`), driving dimensions (T-42), inference (T-43).
+
+## Typed input and the command line
+
 Typed input has two front ends and one back end: the floating coordinate
 box (digits open it) and the docked command line (`tools/commandLine.ts`
 parses, `tools/CommandBar.tsx` types, `runCommand` in `Viewport.tsx`

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { BoxSelectMode, ClosedRegion, Command, Entity, EntityId, Point, TextEntity } from "@sketchor/core";
 import {
   applyGrip,
+  gripPointRef,
   arcSweep,
   boundsOf,
   gripsOf,
@@ -103,7 +104,12 @@ type Interaction =
     }
   | { kind: "rotate-group"; ids: EntityId[]; pivot: Point; startAngle: number; rotation: number }
   /** Dragging one grip of a selected entity (T-27); `preview` is the entity with the grip at the cursor. */
-  | { kind: "grip"; entityId: EntityId; grip: Grip; startScreen: Point; preview: Entity | null }
+  /**
+   * `preview` is what the drag would commit: just the dragged entity
+   * normally, or every entity the solver moved when the sketch is
+   * constrained (roadmap T-40's drag-solve).
+   */
+  | { kind: "grip"; entityId: EntityId; grip: Grip; startScreen: Point; preview: Entity[] }
   | { kind: "box-select"; startScreen: Point; startWorld: Point; currentWorld: Point; additive: boolean }
   /**
    * Alt-drag: a freehand path instead of a rectangle. Released as a **lasso**
@@ -442,7 +448,7 @@ export function Viewport() {
       duplicateMarkers: state.duplicateIssues.map((i) => i.location),
       crossingMarkers: state.crossingIssues.map((i) => i.location),
       groupHandle: groupBounds && groupPivot ? { bounds: groupBounds, pivot: groupPivot } : null,
-      gripPreview: interaction.kind === "grip" ? interaction.preview : null,
+      gripPreview: interaction.kind === "grip" ? interaction.preview : [],
       freeEndpointIds: state.showConnectivityHint ? freeEndpointEntityIds(doc) : null,
       closedRegions: state.showClosedRegions ? closedRegionsRef.current.map((r) => r.points) : [],
       fmtLength: (n: number) => formatLength(n, state.displayUnit),
@@ -542,6 +548,23 @@ export function Viewport() {
       }
     }
     return { snap: raw, ray: null };
+  };
+
+  /**
+   * What a grip drag would commit. On an unconstrained drawing that is
+   * simply the entity with its grip moved. Once the sketch has
+   * constraints and the grip names a point the solver understands, the
+   * cursor's pull goes through the solver instead, so everything tied to
+   * that point comes along — the drag-solve that makes a constrained
+   * sketch feel alive rather than stuck (roadmap T-40).
+   */
+  const gripPreviewFor = (entity: Entity, grip: Grip, target: Point): Entity[] => {
+    const plain = [applyGrip(entity, grip, target)];
+    if (doc.constraints().length === 0) return plain;
+    const ref = gripPointRef(entity, grip);
+    if (!ref) return plain;
+    const solved = bus.solveSilently({ drag: { ref, to: target } });
+    return solved && solved.updates.length > 0 ? solved.updates : plain;
   };
 
   /**
@@ -1093,7 +1116,7 @@ export function Viewport() {
       // A grip of a selected entity under the cursor beats everything else.
       const gripHit = findGrip(app.selection, screen, view, e.pointerType === "touch");
       if (gripHit) {
-        interactionRef.current = { kind: "grip", entityId: gripHit.entityId, grip: gripHit.grip, startScreen: screen, preview: null };
+        interactionRef.current = { kind: "grip", entityId: gripHit.entityId, grip: gripHit.grip, startScreen: screen, preview: [] };
         redraw();
         return;
       }
@@ -1528,7 +1551,7 @@ export function Viewport() {
       if (entity) {
         // Snap to everything but the entity being edited; ortho/polar from the grip's other end for a line.
         const target = noSnap(e) ? world : findSnap(doc, view, world, { exclude: [entity.id], settings: useSnapSettings.getState().settings }).point;
-        interactionRef.current = { ...interaction, preview: applyGrip(entity, interaction.grip, target) };
+        interactionRef.current = { ...interaction, preview: gripPreviewFor(entity, interaction.grip, target) };
       }
     } else if (interaction.kind === "free-select") {
       // One point per move event is more than the shape needs; thin as we go
@@ -1675,7 +1698,12 @@ export function Viewport() {
       redraw();
     } else if (interaction.kind === "grip") {
       const moved = dist(screenPos(e), interaction.startScreen) >= (e.pointerType === "touch" ? 10 : 3);
-      if (moved && interaction.preview) bus.execute({ type: "update-entity", entity: interaction.preview });
+      const previews = interaction.preview;
+      if (moved && previews.length === 1) bus.execute({ type: "update-entity", entity: previews[0] });
+      else if (moved && previews.length > 1) {
+        // A drag-solve moved several entities: one batch, one undo step.
+        bus.execute({ type: "batch", commands: previews.map((entity) => ({ type: "update-entity", entity })) });
+      }
       interactionRef.current = { kind: "idle" };
       redraw();
     }

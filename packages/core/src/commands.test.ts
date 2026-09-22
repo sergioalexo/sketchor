@@ -221,6 +221,86 @@ describe("command application", () => {
   });
 });
 
+describe("the solver as bus middleware (T-40)", () => {
+  /** A line and a circle, no constraints yet. */
+  const plain = () => {
+    const doc = new SketchDocument();
+    doc._put(line("e1"));
+    doc._put(circle("e2"));
+    return { doc, bus: new CommandBus(doc) };
+  };
+
+  it("does nothing at all until a drawing has constraints", () => {
+    const { doc, bus } = plain();
+    bus.execute({ type: "move-entities", ids: ["e1"], dx: 5, dy: 5 });
+    expect(bus.lastSolve).toBeNull();
+    expect((doc.get("e1") as LineEntity).a).toEqual({ x: 5, y: 5 });
+  });
+
+  it("moves geometry when a constraint is added, in the same undo step", () => {
+    const { doc, bus } = plain();
+    const before = snapshot(doc);
+    bus.execute({ type: "add-constraint", constraint: { id: "k1", type: "radius", entityId: "e2", value: 7 } });
+    expect((doc.get("e2") as CircleEntity).radius).toBeCloseTo(7, 9);
+    // One Ctrl+Z, not two: the constraint and the move it caused are one act.
+    bus.undo();
+    expect(snapshot(doc)).toBe(before);
+  });
+
+  it("keeps constraints satisfied after an ordinary edit", () => {
+    const { doc, bus } = plain();
+    bus.execute({ type: "add-constraint", constraint: { id: "k1", type: "horizontal", entityId: "e1" } });
+    // Twist the line: the solver puts it back level without being asked.
+    bus.execute({
+      type: "update-entity",
+      entity: { ...line("e1"), b: { x: 10, y: 6 } },
+    });
+    const l = doc.get("e1") as LineEntity;
+    expect(l.a.y).toBeCloseTo(l.b.y, 9);
+    expect(bus.lastSolve?.status).toBe("under-constrained");
+  });
+
+  it("reports a conflict rather than mangling the geometry to fit", () => {
+    const { doc, bus } = plain();
+    bus.execute({ type: "add-constraint", constraint: { id: "f1", type: "fix", entityId: "e2" } });
+    bus.execute({ type: "add-constraint", constraint: { id: "k1", type: "radius", entityId: "e2", value: 7 } });
+    expect(bus.lastSolve?.status).toBe("over-constrained");
+    expect(bus.lastSolve?.conflicts).toEqual(["k1"]);
+    expect((doc.get("e2") as CircleEntity).radius).toBe(2);
+  });
+
+  it("stops warning about a conflict once it is undone", () => {
+    const { bus } = plain();
+    bus.execute({ type: "add-constraint", constraint: { id: "f1", type: "fix", entityId: "e2" } });
+    bus.execute({ type: "add-constraint", constraint: { id: "k1", type: "radius", entityId: "e2", value: 7 } });
+    expect(bus.lastSolve?.status).toBe("over-constrained");
+    bus.undo();
+    expect(bus.lastSolve?.status).not.toBe("over-constrained");
+    expect(bus.lastSolve?.conflicts).toEqual([]);
+  });
+
+  it("solves again on redo, since the command alone doesn't say where things went", () => {
+    const { doc, bus } = plain();
+    bus.execute({ type: "add-constraint", constraint: { id: "k1", type: "radius", entityId: "e2", value: 7 } });
+    const solved = snapshot(doc);
+    bus.undo();
+    bus.redo();
+    expect(snapshot(doc)).toBe(solved);
+  });
+
+  it("can solve without touching history, for a live drag", () => {
+    const { doc, bus } = plain();
+    bus.execute({ type: "add-constraint", constraint: { id: "k1", type: "horizontal", entityId: "e1" } });
+    const result = bus.solveSilently({ drag: { ref: { entityId: "e1", point: "b" }, to: { x: 40, y: 30 } } });
+    expect(result?.updates).toHaveLength(1);
+    // The preview moved; the document did not.
+    expect((doc.get("e1") as LineEntity).b).toEqual({ x: 10, y: 0 });
+    const dragged = result!.updates[0] as LineEntity;
+    expect(dragged.b.x).toBeCloseTo(40, 3);
+    expect(dragged.a.y).toBeCloseTo(dragged.b.y, 9);
+  });
+});
+
 describe("batch", () => {
   it("undoes children in reverse order", () => {
     // The update's inverse must run before the add's inverse; the other order

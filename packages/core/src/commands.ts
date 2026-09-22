@@ -2,6 +2,7 @@ import type { Entity, EntityId } from "./entities";
 import { transformed, translated } from "./entities";
 import type { GroupId } from "./groups";
 import type { Constraint, ConstraintId } from "./constraints";
+import { solveSketch, type SolveOptions, type SolveResult } from "./solver/solve";
 import type { Point } from "./geometry";
 import type { SketchDocument } from "./document";
 
@@ -41,6 +42,13 @@ export class CommandBus {
   private undoStack: HistoryEntry[] = [];
   private redoStack: HistoryEntry[] = [];
   private listeners = new Set<() => void>();
+  private solving = false;
+  /**
+   * What the solver said after the most recent command — degrees of
+   * freedom, conflicts, redundancy. Null while the document has no
+   * constraints, which is every drawing until someone adds one.
+   */
+  lastSolve: SolveResult | null = null;
 
   constructor(readonly doc: SketchDocument) {}
 
@@ -55,9 +63,48 @@ export class CommandBus {
 
   execute(command: Command): void {
     const inverse = this.apply(command);
-    this.undoStack.push({ command, inverse });
+    // The solver runs as a middleware here (roadmap T-40): whatever the
+    // command did, the constraints then have their say, and the moves
+    // they cause join the *same* undo entry. Anything else would make
+    // Ctrl+Z leave a sketch that satisfies nothing.
+    this.undoStack.push({ command, inverse: [...this.solveAfterCommand(), ...inverse] });
     this.redoStack = [];
     this.emit();
+  }
+
+  /**
+   * Re-solves the sketch and applies what moved, returning the inverse
+   * commands. No constraints, no work — and never while undoing or
+   * redoing, where the recorded geometry is already solved.
+   */
+  private solveAfterCommand(): Command[] {
+    const constraints = this.doc.constraints();
+    if (this.solving || constraints.length === 0) {
+      if (constraints.length === 0) this.lastSolve = null;
+      return [];
+    }
+    this.solving = true;
+    try {
+      const result = solveSketch(this.doc.all(), constraints);
+      this.lastSolve = result;
+      const inverse: Command[] = [];
+      for (const entity of result.updates) {
+        inverse.unshift(...this.apply({ type: "update-entity", entity }));
+      }
+      return inverse;
+    } finally {
+      this.solving = false;
+    }
+  }
+
+  /**
+   * Solves without recording history — for a live drag, where the moves
+   * are previewed every frame and only the final position is committed.
+   */
+  solveSilently(options?: SolveOptions): SolveResult | null {
+    const constraints = this.doc.constraints();
+    if (constraints.length === 0) return null;
+    return solveSketch(this.doc.all(), constraints, options);
   }
 
   get canUndo(): boolean {
@@ -72,14 +119,27 @@ export class CommandBus {
     const entry = this.undoStack.pop();
     if (!entry) return;
     for (const inv of entry.inverse) this.apply(inv);
+    // Undo restores geometry that was already solved, so nothing needs
+    // moving — but the *verdict* has to be re-read, or the status bar goes
+    // on warning about a conflict the user has just undone.
+    this.refreshDiagnosis();
     this.redoStack.push(entry);
     this.emit();
+  }
+
+  /** Re-reads the solver's verdict for the current document without moving anything. */
+  private refreshDiagnosis(): void {
+    const constraints = this.doc.constraints();
+    this.lastSolve = constraints.length === 0 ? null : solveSketch(this.doc.all(), constraints, { maxIterations: 0 });
   }
 
   redo(): void {
     const entry = this.redoStack.pop();
     if (!entry) return;
-    entry.inverse = this.apply(entry.command);
+    // Redo re-solves for the same reason execute does: the command alone
+    // doesn't describe where the constraints then put the geometry.
+    const inverse = this.apply(entry.command);
+    entry.inverse = [...this.solveAfterCommand(), ...inverse];
     this.undoStack.push(entry);
     this.emit();
   }
