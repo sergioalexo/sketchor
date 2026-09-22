@@ -38,6 +38,8 @@ export interface RenderUiState {
   pinnedMeasurements: readonly MeasureResult[];
   /** Names of layers to skip drawing. */
   hiddenLayers: ReadonlySet<string>;
+  /** Locked layers: drawn, but dimmed, and never selected (see store.ts). */
+  lockedLayers: ReadonlySet<string>;
   /** The straighten tool's chosen reference edge, highlighted distinctly. */
   referenceEdgeId: EntityId | null;
   /** Entity currently under the cursor (measure tool), highlighted distinctly from selection. */
@@ -62,6 +64,8 @@ export interface RenderUiState {
   freeEndpointIds: ReadonlySet<EntityId> | null;
   /** Live window/crossing drag-select rectangle, while dragging. */
   boxSelect: { start: Point; end: Point; mode: BoxSelectMode } | null;
+  /** Live lasso (closed) or fence (open) path, while dragging one. */
+  freeSelect: { points: readonly Point[]; kind: "lasso" | "fence"; mode: BoxSelectMode } | null;
   /** Boundary polygons of detected closed loops (lines/arcs chained shut, or circles) — filled with a translucent tint. */
   closedRegions: readonly (readonly Point[])[];
   /** Formats a world-unit length/area for on-canvas labels, honoring the current display unit. */
@@ -120,6 +124,7 @@ export function render(
 
   for (const entity of doc.all()) {
     if (ui.hiddenLayers.has(layerOf(entity))) continue;
+    const locked = ui.lockedLayers.has(layerOf(entity));
     const selected = ui.selection.has(entity.id);
     const isReference = entity.id === ui.referenceEdgeId;
     const isFreeEndpoint = !!ui.freeEndpointIds?.has(entity.id);
@@ -137,9 +142,12 @@ export function render(
           : isFreeEndpoint
             ? COLORS.connectivityHint
             : (shown.color ?? COLORS.entity);
+    // A locked layer is background, not geometry you are working on.
+    if (locked) ctx.globalAlpha = 0.45;
     if (shown.fill) drawHatch(ctx, view, shown, shown.fill);
     drawEntity(ctx, view, shown, color, selected || isReference || isHovered ? 2 : 1.5);
     if (selected) drawHandles(ctx, view, shown);
+    ctx.globalAlpha = 1;
   }
 
   if (ui.groupHandle) drawGroupHandle(ctx, view, ui.groupHandle);
@@ -195,6 +203,36 @@ export function render(
   if (ui.snap) drawSnapMarker(ctx, view, ui.snap);
 
   if (ui.boxSelect) drawBoxSelect(ctx, view, ui.boxSelect);
+  if (ui.freeSelect) drawFreeSelect(ctx, view, ui.freeSelect);
+}
+
+/** The lasso loop (closed, tinted) or the fence stroke (open, dashed) as it is drawn. */
+function drawFreeSelect(
+  ctx: CanvasRenderingContext2D,
+  view: View,
+  path: { points: readonly Point[]; kind: "lasso" | "fence"; mode: BoxSelectMode },
+): void {
+  if (path.points.length < 2) return;
+  const color = path.kind === "fence" ? COLORS.crossingSelect : path.mode === "window" ? COLORS.windowSelect : COLORS.crossingSelect;
+  ctx.beginPath();
+  const first = worldToScreen(view, path.points[0]);
+  ctx.moveTo(first.x, first.y);
+  for (let i = 1; i < path.points.length; i++) {
+    const p = worldToScreen(view, path.points[i]);
+    ctx.lineTo(p.x, p.y);
+  }
+  if (path.kind === "lasso") {
+    ctx.closePath();
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.1;
+    ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+  ctx.strokeStyle = color;
+  ctx.lineWidth = path.kind === "fence" ? 1.5 : 1;
+  ctx.setLineDash(path.kind === "lasso" && path.mode === "window" ? [] : [5, 4]);
+  ctx.stroke();
+  ctx.setLineDash([]);
 }
 
 /** Window selection (blue, solid, filled) vs crossing selection (green, dashed) — the standard CAD convention. */

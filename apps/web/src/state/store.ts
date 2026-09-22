@@ -285,7 +285,7 @@ export type ToolId =
   | "stretch";
 
 export const TOOL_HINTS: Record<ToolId, string> = {
-  select: "Click to select (Shift adds) - drag left-to-right to window-select, right-to-left to crossing-select - drag to move - Del deletes - G groups - U ungroups - Shift+C toggles the selection between construction (dashed) and normal lines",
+  select: "Click to select (Shift adds; click again to cycle what's underneath) - drag left-to-right to window-select, right-to-left to crossing-select - Alt-drag lassos, Ctrl+Alt-drag fences - drag to move - Del deletes - G groups - U ungroups - Shift+C toggles construction",
   line: "Click start point, then click next points to chain - or type a length, 100<45, @dx,dy - F8 ortho, F10 polar - Tab draws an infinite construction line instead - Esc finishes and returns to the select tool",
   polyline: "Click each vertex - A switches to an arc leg (two clicks: through-point, end), T to a tangent arc, L back to lines - Enter or double-click to finish, C to close, Backspace undoes the last vertex",
   rectangle: "Click one corner, then the opposite corner - Tab cycles to center + corner and to three-point (rotated)",
@@ -520,15 +520,39 @@ export function referenceEdgeAngleDeg(): number | null {
   return edge?.type === "line" ? (Math.atan2(edge.b.y - edge.a.y, edge.b.x - edge.a.x) * 180) / Math.PI : null;
 }
 
-/** A named drawing layer with a visibility toggle. */
+/** A named drawing layer with visibility and lock toggles. */
 export interface Layer {
   name: string;
   visible: boolean;
+  /**
+   * A locked layer is visible but untouchable: it can't be picked, boxed,
+   * lassoed or edited, and it draws dimmed. This is how you trace over an
+   * imported background without dragging it by accident.
+   */
+  locked?: boolean;
 }
 
 /** Names of layers currently hidden — consulted by the renderer/hit-test. */
 export function hiddenLayerSet(): Set<string> {
   return new Set(useApp.getState().layers.filter((l) => !l.visible).map((l) => l.name));
+}
+
+/** Names of layers currently locked — consulted by every selection path. */
+export function lockedLayerSet(): Set<string> {
+  return new Set(useApp.getState().layers.filter((l) => l.locked).map((l) => l.name));
+}
+
+/** True when `entity` is on a layer that is hidden or locked, i.e. not selectable. */
+export function isPickable(entity: Entity, hidden: Set<string>, locked: Set<string>): boolean {
+  const layer = layerOf(entity);
+  return !hidden.has(layer) && !locked.has(layer);
+}
+
+/** Every entity a click, box, lasso or fence is allowed to select right now. */
+export function selectableEntities(): Entity[] {
+  const hidden = hiddenLayerSet();
+  const locked = lockedLayerSet();
+  return doc.all().filter((e) => isPickable(e, hidden, locked));
 }
 
 interface AppState {
@@ -634,6 +658,7 @@ interface AppState {
   deleteLayer: (name: string) => void;
   renameLayer: (from: string, to: string) => void;
   toggleLayer: (name: string) => void;
+  toggleLayerLock: (name: string) => void;
   /** Rebuild the layer list from the document (used after DXF import). */
   syncLayersFromDoc: (reset?: boolean) => void;
   /** Moves every entity onto the default layer and drops all other layer definitions, as one undo step. */
@@ -758,6 +783,17 @@ export const useApp = create<AppState>((set, get) => ({
     set((s) => ({
       layers: s.layers.map((l) => (l.name === name ? { ...l, visible: !l.visible } : l)),
     })),
+  toggleLayerLock: (name) => {
+    set((s) => ({ layers: s.layers.map((l) => (l.name === name ? { ...l, locked: !l.locked } : l)) }));
+    // Anything on the layer that just locked has to leave the selection, or
+    // the next Delete or drag would edit what the user just protected.
+    const locked = lockedLayerSet();
+    const selection = get().selection.filter((id) => {
+      const e = doc.get(id);
+      return e ? !locked.has(layerOf(e)) : false;
+    });
+    if (selection.length !== get().selection.length) set({ selection });
+  },
   syncLayersFromDoc: (reset = false) => {
     const present = new Set(doc.all().map((e) => layerOf(e)));
     present.add(DEFAULT_LAYER);

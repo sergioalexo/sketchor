@@ -23,6 +23,8 @@ export * from "./svg";
 export * from "./font";
 export * from "./heal";
 export * from "./boxSelect";
+export * from "./polygonSelect";
+export * from "./selectFilter";
 export * from "./regions";
 export * from "./duplicates";
 export * from "./crossings";

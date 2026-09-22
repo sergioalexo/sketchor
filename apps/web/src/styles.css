@@ -605,7 +605,8 @@ body {
 .layer-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  /* Two toggles now (visibility, lock), so the row is tighter than it was. */
+  gap: 6px;
   padding: 6px 10px 6px 8px;
   border-bottom: 1px solid var(--border);
   cursor: pointer;
@@ -640,6 +641,16 @@ body {
 
 .layer-eye.off {
   color: #6b7280;
+}
+
+/* A locked layer stays legible but visibly out of play, like its geometry. */
+.layer-eye.on {
+  color: var(--accent);
+}
+
+.layer-row.locked .layer-name {
+  color: var(--text-dim);
+  font-style: italic;
 }
 
 .layer-del:disabled {
@@ -2479,6 +2490,81 @@ kbd.shortcut-key-fixed {
   min-height: 36px;
   padding: 4px 12px;
   font-size: 13px;
+}
+
+/* Quick Select popover (shares the snap popover's shell). */
+.snap-popover.select-by {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.select-by-group {
+  margin: 6px 0 2px;
+  color: var(--text-dim);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.select-by-swatch {
+  width: 10px;
+  height: 10px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+}
+
+.select-by-tri {
+  display: flex;
+  gap: 4px;
+}
+
+.select-by-apply {
+  width: 100%;
+  margin-top: 8px;
+}
+
+/* Selection cycling: the short list of what else is under the cursor. */
+.select-cycle {
+  position: absolute;
+  z-index: 6;
+  min-width: 140px;
+  max-width: 240px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  font-size: 12px;
+}
+
+.select-cycle-head {
+  padding: 2px 6px 4px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.select-cycle-row {
+  display: block;
+  width: 100%;
+  padding: 4px 6px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.select-cycle-row:hover {
+  background: var(--border);
+}
+
+.select-cycle-row.current {
+  background: var(--accent-soft);
+  color: #fff;
 }
 
 .typed-input {

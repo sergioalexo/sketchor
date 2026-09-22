@@ -3,6 +3,7 @@ import { freeEndpointEntityIds } from "@sketchor/core";
 import { bus, doc, getSessions, isModelSession, measurementText, TOOL_HINTS, useApp, type ToolId } from "./state/store";
 import { useTouchMode } from "./touchMode";
 import { SnapPopover } from "./SnapPopover";
+import { SelectByPopover } from "./SelectByPopover";
 import { POLAR_INCREMENTS, useTracking } from "./tools/tracking";
 import { activeSaveTarget, openDrawing, overlayDrawing, saveCurrent, saveDrawing } from "./io/drawingFile";
 import { DISPLAY_UNITS, formatLength, type DisplayUnit } from "./units";
@@ -1221,6 +1222,7 @@ export function App() {
               POLAR
             </button>
             <SnapPopover />
+            <SelectByPopover />
             {polar && (
               <select
                 className="unit-select"

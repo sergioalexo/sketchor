@@ -25,7 +25,7 @@ npm run desktop    # native desktop window via Tauri (needs Rust toolchain)
 | Fillet / Chamfer / Offset | `Shift+F` type a radius (0 = sharp corner join), click two lines on the halves to keep, or click a polyline corner (`Enter` rounds every corner of the selected polylines) · Chamfer: type a distance, two lines · `Shift+O` type a distance, click the entity, click the side |
 | Typed coordinates | while drawing, type `100` (length toward the cursor), `100<45`, `50,20`, `@50,20` — units like `4in`, `2'6"` accepted |
 | Ortho / polar | `F8` / `F10` (or the status-bar toggles); `Shift` held is temporary ortho |
-| Select tool | `V` — click (Shift adds), drag to move, `Del` deletes |
+| Select tool | `V` — click (Shift adds), drag to move, `Del` deletes; click the same spot again to cycle through whatever overlaps there |
 | Measure tool | `M` — see below |
 | Pan | middle- or right-button drag, the Pan tool, or two fingers |
 | Zoom | mouse wheel (at cursor), or pinch |
@@ -35,6 +35,9 @@ npm run desktop    # native desktop window via Tauri (needs Rust toolchain)
 | Copy / Cut / Paste | `Ctrl+C` / `Ctrl+X` / `Ctrl+V` (at the cursor) / `Ctrl+Shift+V` (in place) / `Ctrl+D` (duplicate) — the clipboard holds readable sketch code, so a copy pastes into a chat or editor too |
 | Nudge | arrow keys move the selection one grid step; `Shift` = ten |
 | Select all / invert | `Ctrl+A` / `Ctrl+I` |
+| Lasso / fence | `Alt`-drag a freehand loop (left → right takes only what's inside, right → left also what it touches); `Ctrl+Alt`-drag an open stroke that takes everything it crosses |
+| Select similar / by | `Ctrl+Shift+A` takes everything of the same type, layer and colour as the selection; the **SELECT** button in the status bar picks by type / layer / colour / construction, with a live count |
+| Lock a layer | the padlock in the Layers panel — the layer stays on screen, dimmed, but nothing on it can be clicked, boxed, lassoed or deleted |
 | Join / Explode | `J` chains the selected lines and arcs into one polyline (closed when the ends meet); `Ctrl+E` explodes selected polylines back into lines and arcs |
 | Divide | Divide tool: type a count (or a spacing like `25mm`), click an entity — points mark the divisions |
 | Zoom window / previous | `Z` then two corners / `Shift+Z` |

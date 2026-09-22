@@ -14,6 +14,10 @@ import {
   distToSegment,
   polylineSegments,
   entitiesInBox,
+  entitiesCrossedByFence,
+  entitiesInPolygon,
+  simplifyPath,
+  selectSimilar,
   entityPoints,
   findClosedRegions,
   freeEndpointEntityIds,
@@ -38,6 +42,8 @@ import {
   getSessionView,
   groupSelection,
   hiddenLayerSet,
+  lockedLayerSet,
+  selectableEntities,
   measurementText,
   referenceEdgeAngleDeg,
   setSessionView,
@@ -95,7 +101,14 @@ type Interaction =
   | { kind: "rotate-group"; ids: EntityId[]; pivot: Point; startAngle: number; rotation: number }
   /** Dragging one grip of a selected entity (T-27); `preview` is the entity with the grip at the cursor. */
   | { kind: "grip"; entityId: EntityId; grip: Grip; startScreen: Point; preview: Entity | null }
-  | { kind: "box-select"; startScreen: Point; startWorld: Point; currentWorld: Point; additive: boolean };
+  | { kind: "box-select"; startScreen: Point; startWorld: Point; currentWorld: Point; additive: boolean }
+  /**
+   * Alt-drag: a freehand path instead of a rectangle. Released as a **lasso**
+   * (the loop closes; left-to-right takes only what is fully inside, like a
+   * box) or, with the fence modifier held, as a **fence** — an open stroke
+   * that takes everything it crosses.
+   */
+  | { kind: "free-select"; startScreen: Point; points: Point[]; additive: boolean; fence: boolean };
 
 const DRAW_KINDS = ["measure", "dim"] as const;
 
@@ -176,13 +189,34 @@ function activeLayerProp(active: string): { layer?: string } {
   return active && active !== "0" ? { layer: active } : {};
 }
 
+/**
+ * Window or crossing for a freehand loop, by the same rule a box uses: the
+ * net direction of the drag. Ending right of where you started means
+ * "only what I enclosed"; ending left means "anything I touched".
+ */
+function freeSelectMode(points: readonly Point[]): BoxSelectMode {
+  if (points.length < 2) return "window";
+  return points[points.length - 1].x >= points[0].x ? "window" : "crossing";
+}
+
+/** What a cycling popover row says: the entity's name if it has one, else its type. */
+function entityLabel(entity: Entity): string {
+  const layer = layerOf(entity);
+  return `${entity.name ?? entity.type}${layer === "0" ? "" : ` · ${layer}`}`;
+}
+
 function hitTest(view: View, world: Point): EntityId | null {
+  return hitCandidates(view, world)[0] ?? null;
+}
+
+/**
+ * Everything within the pick aperture of `world`, nearest first — the list
+ * selection cycling walks. A plain hit test is just its first element.
+ */
+function hitCandidates(view: View, world: Point): EntityId[] {
   const tol = 6 / view.scale;
-  const hidden = hiddenLayerSet();
-  let best: EntityId | null = null;
-  let bestDist = tol;
-  for (const e of doc.all()) {
-    if (hidden.has(layerOf(e))) continue; // can't pick what you can't see
+  const found: { id: EntityId; d: number }[] = [];
+  for (const e of selectableEntities()) {
     const d =
       e.type === "line"
         ? distToSegment(world, e.a, e.b)
@@ -230,12 +264,11 @@ function hitTest(view: View, world: Point): EntityId | null {
                     ? 0
                     : Infinity
                   : Infinity;
-    if (d <= bestDist) {
-      best = e.id;
-      bestDist = d;
-    }
+    if (d <= tol) found.push({ id: e.id, d });
   }
-  return best;
+  // Nearest first; ties (two entities exactly under the cursor) keep
+  // document order, so the topmost-drawn one leads.
+  return found.sort((a, b) => a.d - b.d).map((f) => f.id);
 }
 
 /**
@@ -244,10 +277,8 @@ function hitTest(view: View, world: Point): EntityId | null {
  * Later entities win, matching paint order.
  */
 function closedEntityAt(world: Point): Entity | null {
-  const hidden = hiddenLayerSet();
   let found: Entity | null = null;
-  for (const e of doc.all()) {
-    if (hidden.has(layerOf(e))) continue;
+  for (const e of selectableEntities()) {
     if (e.type === "circle") {
       if (dist(world, e.center) <= e.radius) found = e;
     } else if (e.type === "polyline" && e.closed && pointInPolygon(world, e.points)) {
@@ -300,6 +331,9 @@ export function Viewport() {
   const hoverRef = useRef<EntityId | null>(null);
   /** The typed-coordinate box (T-08), open while a framework tool waits for a point and the user has started typing. */
   const [typed, setTyped] = useState<{ text: string; screen: Point } | null>(null);
+  /** The selection-cycling list, open after a repeat click found more than one entity under the cursor. */
+  const [cycle, setCycle] = useState<{ screen: Point; ids: EntityId[]; index: number } | null>(null);
+  const cycleRef = useRef<{ screen: Point; at: number; index: number; ids: EntityId[] } | null>(null);
   const closedRegionsRef = useRef<ClosedRegion[]>([]);
   const tool = useApp((s) => s.tool);
   const selection = useApp((s) => s.selection);
@@ -364,6 +398,7 @@ export function Viewport() {
       measurement: state.measurement,
       pinnedMeasurements: state.pinnedMeasurements,
       hiddenLayers: hiddenLayerSet(),
+      lockedLayers: lockedLayerSet(),
       referenceEdgeId: state.tool === "straighten" || state.tool === "measure" ? state.referenceEdgeId : null,
       hoverId: state.tool === "measure" ? hoverRef.current : null,
       transformPreview: rotating
@@ -380,6 +415,14 @@ export function Viewport() {
       closedRegions: state.showClosedRegions ? closedRegionsRef.current.map((r) => r.points) : [],
       fmtLength: (n: number) => formatLength(n, state.displayUnit),
       fmtArea: (n: number) => formatArea(n, state.displayUnit),
+      freeSelect:
+        interaction.kind === "free-select"
+          ? {
+              points: interaction.points,
+              kind: interaction.fence ? ("fence" as const) : ("lasso" as const),
+              mode: freeSelectMode(interaction.points),
+            }
+          : null,
       boxSelect:
         interaction.kind === "box-select"
           ? {
@@ -733,6 +776,7 @@ export function Viewport() {
         // select tool so the next stray click can't add geometry.
         getTool(app.tool)?.cancel(toolCtx);
         setTyped(null);
+        setCycle(null);
         interactionRef.current = { kind: "idle" };
         app.setSelection([]);
         app.setMeasurement(null);
@@ -803,13 +847,17 @@ export function Viewport() {
         app.setTool("zoom");
       } else if (matchesBinding(e, "edit.selectAll")) {
         e.preventDefault();
-        const hidden = hiddenLayerSet();
-        app.setSelection(doc.all().filter((en) => !hidden.has(layerOf(en))).map((en) => en.id));
+        app.setSelection(selectableEntities().map((en) => en.id));
       } else if (matchesBinding(e, "edit.invertSelection")) {
         e.preventDefault();
-        const hidden = hiddenLayerSet();
         const cur = new Set(app.selection);
-        app.setSelection(doc.all().filter((en) => !hidden.has(layerOf(en)) && !cur.has(en.id)).map((en) => en.id));
+        app.setSelection(selectableEntities().filter((en) => !cur.has(en.id)).map((en) => en.id));
+      } else if (matchesBinding(e, "edit.selectSimilar")) {
+        e.preventDefault();
+        // Same type, same layer, same colour as whatever is selected now —
+        // the one-gesture way to grab all 400 of something in an import.
+        const samples = app.selection.map((id) => doc.get(id)).filter((en): en is Entity => !!en);
+        if (samples.length > 0) app.setSelection(selectSimilar(selectableEntities(), samples));
       } else if (matchesBinding(e, "edit.join")) {
         e.preventDefault();
         const commands = joinCommands(app.selection.map((id) => doc.get(id)).filter((en): en is Entity => !!en));
@@ -847,9 +895,35 @@ export function Viewport() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    setCycle(null);
+  }, [tool]);
+
   const screenPos = (e: React.PointerEvent): Point => {
     const rect = canvasRef.current!.getBoundingClientRect();
     return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  };
+
+  /**
+   * Clicking the same spot again takes the *next* entity under the cursor
+   * rather than the same one (AutoCAD's SELECTIONCYCLING), and puts up a
+   * list so you can jump straight to the one you wanted. Repeat clicks
+   * inside the double-click window are left alone — that gesture already
+   * means "enter this group" / "zoom to fit".
+   */
+  const cyclingHit = (view: View, world: Point, screen: Point): EntityId | null => {
+    const ids = hitCandidates(view, world);
+    const prev = cycleRef.current;
+    const now = performance.now();
+    const sameSpot =
+      !!prev &&
+      dist(prev.screen, screen) < 6 &&
+      prev.ids.length === ids.length &&
+      prev.ids.every((id, i) => id === ids[i]);
+    const index = sameSpot && now - prev.at > 300 ? (prev.index + 1) % ids.length : 0;
+    cycleRef.current = ids.length > 0 ? { screen, at: now, index, ids } : null;
+    setCycle(index > 0 ? { screen, ids, index } : null);
+    return ids[index] ?? null;
   };
 
   const onPointerDown = (e: React.PointerEvent) => {
@@ -1113,7 +1187,20 @@ export function Viewport() {
         break;
       }
       case "select": {
-        const hit = hitTest(view, world);
+        // Alt turns the drag into a freehand selection: a lasso, or a fence
+        // while the no-snap modifier is also held. Checked before the hit
+        // test, so a lasso can start over geometry in a crowded drawing.
+        if (e.altKey) {
+          interactionRef.current = {
+            kind: "free-select",
+            startScreen: screen,
+            points: [world],
+            additive: matchesModifier(e, "mouse.addToSelection"),
+            fence: matchesModifier(e, "mouse.freeMove"),
+          };
+          break;
+        }
+        const hit = cyclingHit(view, world, screen);
         if (hit) {
           // Clicking any member of a group selects the whole group, unless it's currently "entered".
           const resolved = resolveSelection(doc, hit, app.enteredGroupId);
@@ -1352,6 +1439,12 @@ export function Viewport() {
         const target = noSnap(e) ? world : findSnap(doc, view, world, { exclude: [entity.id], settings: useSnapSettings.getState().settings }).point;
         interactionRef.current = { ...interaction, preview: applyGrip(entity, interaction.grip, target) };
       }
+    } else if (interaction.kind === "free-select") {
+      // One point per move event is more than the shape needs; thin as we go
+      // so a long lasso stays a few dozen edges rather than a few hundred.
+      const last = interaction.points[interaction.points.length - 1];
+      if (dist(last, world) > 2 / view.scale) interaction.points.push(world);
+      interactionRef.current = { ...interaction };
     } else if (interaction.kind === "box-select") {
       interactionRef.current = { ...interaction, currentWorld: world };
     }
@@ -1412,6 +1505,23 @@ export function Viewport() {
       }
     }
     const interaction = interactionRef.current;
+    if (interaction.kind === "free-select") {
+      const app = useApp.getState();
+      const path = simplifyPath(interaction.points, 2 / viewRef.current.scale);
+      const fence = interaction.fence || matchesModifier(e, "mouse.freeMove");
+      const picked = fence
+        ? entitiesCrossedByFence(selectableEntities(), path)
+        : entitiesInPolygon(selectableEntities(), path, freeSelectMode(path));
+      app.setSelection(interaction.additive ? [...new Set([...app.selection, ...picked])] : picked);
+      interactionRef.current = { kind: "idle" };
+      redraw();
+      try {
+        canvasRef.current!.releasePointerCapture(e.pointerId);
+      } catch {
+        // see setPointerCapture note
+      }
+      return;
+    }
     if (interaction.kind === "box-select") {
       const screen = screenPos(e);
       const app = useApp.getState();
@@ -1427,9 +1537,7 @@ export function Viewport() {
           maxY: Math.max(s.y, c.y),
         };
         const mode: BoxSelectMode = c.x >= s.x ? "window" : "crossing";
-        const hidden = hiddenLayerSet();
-        const visible = doc.all().filter((ent) => !hidden.has(layerOf(ent)));
-        const picked = entitiesInBox(visible, box, mode);
+        const picked = entitiesInBox(selectableEntities(), box, mode);
         app.setSelection(interaction.additive ? [...new Set([...app.selection, ...picked])] : picked);
       }
       interactionRef.current = { kind: "idle" };
@@ -1549,6 +1657,36 @@ export function Viewport() {
         onDoubleClick={onDoubleClick}
         onContextMenu={(e) => e.preventDefault()}
       />
+      {cycle && (
+        <div className="select-cycle" style={{ left: cycle.screen.x + 14, top: cycle.screen.y + 14 }} data-testid="select-cycle">
+          <div className="select-cycle-head">{cycle.ids.length} here</div>
+          {cycle.ids.map((id, i) => {
+            const entity = doc.get(id);
+            if (!entity) return null;
+            return (
+              <button
+                key={id}
+                className={`select-cycle-row ${i === cycle.index ? "current" : ""}`}
+                onClick={() => {
+                  useApp.getState().setSelection(resolveSelection(doc, id, useApp.getState().enteredGroupId));
+                  if (cycleRef.current) cycleRef.current = { ...cycleRef.current, index: i, at: performance.now() };
+                  setCycle({ ...cycle, index: i });
+                }}
+                onPointerEnter={() => {
+                  hoverRef.current = id;
+                  redraw();
+                }}
+                onPointerLeave={() => {
+                  hoverRef.current = null;
+                  redraw();
+                }}
+              >
+                {entityLabel(entity)}
+              </button>
+            );
+          })}
+        </div>
+      )}
       {typed && (
         <TypedInputBox
           value={typed.text}

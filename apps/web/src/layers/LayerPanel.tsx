@@ -3,10 +3,11 @@ import { layerOf, DEFAULT_LAYER } from "@sketchor/core";
 import { doc, useApp } from "../state/store";
 
 /**
- * Layer panel: lists the drawing's layers with a visibility toggle, the
- * active layer (where new geometry lands), and add/delete. Layers come
- * from DXF imports (group code 8) or are created here; hiding one removes
- * its geometry from the canvas without deleting it.
+ * Layer panel: lists the drawing's layers with visibility and lock
+ * toggles, the active layer (where new geometry lands), and add/delete.
+ * Layers come from DXF imports (group code 8) or are created here; hiding
+ * one removes its geometry from the canvas without deleting it, and
+ * locking one leaves it on screen but out of reach of every selection.
  */
 export function LayerPanel() {
   const layers = useApp((s) => s.layers);
@@ -14,6 +15,7 @@ export function LayerPanel() {
   const revision = useApp((s) => s.revision);
   const setActiveLayer = useApp((s) => s.setActiveLayer);
   const toggleLayer = useApp((s) => s.toggleLayer);
+  const toggleLayerLock = useApp((s) => s.toggleLayerLock);
   const addLayer = useApp((s) => s.addLayer);
   const deleteLayer = useApp((s) => s.deleteLayer);
   const renameLayer = useApp((s) => s.renameLayer);
@@ -78,7 +80,7 @@ export function LayerPanel() {
           return (
             <div
               key={layer.name}
-              className={`layer-row ${active ? "active" : ""}`}
+              className={`layer-row ${active ? "active" : ""} ${layer.locked ? "locked" : ""}`}
               data-testid={`layer-${layer.name}`}
               onClick={() => setActiveLayer(layer.name)}
             >
@@ -92,6 +94,17 @@ export function LayerPanel() {
                 }}
               >
                 {layer.visible ? <EyeIcon /> : <EyeOffIcon />}
+              </button>
+              <button
+                className={`layer-eye ${layer.locked ? "on" : "off"}`}
+                title={layer.locked ? "Unlock layer" : "Lock layer — visible, but nothing on it can be selected"}
+                data-testid={`layer-lock-${layer.name}`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleLayerLock(layer.name);
+                }}
+              >
+                {layer.locked ? <LockIcon /> : <UnlockIcon />}
               </button>
 
               {editing === layer.name ? (
@@ -147,6 +160,25 @@ export function LayerPanel() {
         New geometry is drawn on <b>{activeLayer}</b>
       </div>
     </aside>
+  );
+}
+
+function LockIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16">
+      <rect x="5" y="11" width="14" height="9" rx="1.5" stroke="currentColor" strokeWidth="1.8" fill="none" />
+      <path d="M8 11V8a4 4 0 0 1 8 0v3" stroke="currentColor" strokeWidth="1.8" fill="none" />
+    </svg>
+  );
+}
+
+/** The open shackle: same body, hasp swung clear, so locked/unlocked read at a glance. */
+function UnlockIcon() {
+  return (
+    <svg viewBox="0 0 24 24" width="16" height="16">
+      <rect x="5" y="11" width="14" height="9" rx="1.5" stroke="currentColor" strokeWidth="1.8" fill="none" />
+      <path d="M8 11V8a4 4 0 0 1 7.5-2" stroke="currentColor" strokeWidth="1.8" fill="none" />
+    </svg>
   );
 }
 

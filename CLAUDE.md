@@ -161,6 +161,16 @@ fill, straighten, dim, pan) still run as `case`s in `Viewport.tsx`'s
 pointer handlers — `getTool()` returns null for those. Migrating one means
 moving its case into a class and deleting its `interaction` kind.
 
+Selection lives in `packages/core` too, so the rules are testable without a
+canvas: `boxSelect.ts` (window/crossing rectangles), `polygonSelect.ts`
+(lasso polygons, fence strokes, entity outlines, path thinning) and
+`selectFilter.ts` (select-similar and Quick Select). `Viewport.tsx` only
+supplies the gesture and the candidate list. Every selection path — click,
+box, lasso, fence, Ctrl+A, select-similar — goes through
+`selectableEntities()` in `state/store.ts`, which drops hidden **and locked**
+layers; a new path that calls `doc.all()` directly is a bug (it would let a
+click grab geometry the user locked).
+
 Geometry the editing tools stand on, all in `packages/core` and tested:
 `intersect.ts` (entity → `Path` of segment/arc curves, `intersectCurves`,
 `trimAt`/`splitAt`/`extendTo`, `entityFromPath`), `fillet.ts`, `offset.ts`
