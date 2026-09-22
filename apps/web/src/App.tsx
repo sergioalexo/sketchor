@@ -540,6 +540,8 @@ export function App() {
   const toggleOrtho = useTracking((s) => s.toggleOrtho);
   const togglePolar = useTracking((s) => s.togglePolar);
   const otrack = useTracking((s) => s.otrack);
+  const commandLine = useApp((s) => s.commandLine);
+  const toggleCommandLine = useApp((s) => s.toggleCommandLine);
   const toggleOtrack = useTracking((s) => s.toggleOtrack);
   const setPolarIncrement = useTracking((s) => s.setPolarIncrement);
   const [rebindTarget, setRebindTarget] = useState<{ actionId: string; x: number; y: number } | null>(null);
@@ -1237,6 +1239,15 @@ export function App() {
             </button>
             <SnapPopover />
             <SelectByPopover />
+            <button
+              className={`tracking-toggle ${commandLine ? "active" : ""}`}
+              title={withKey("Command line: type tool aliases, commands and coordinates", "view.commandLine")}
+              data-testid="toggle-command-line"
+              onClick={toggleCommandLine}
+              onContextMenu={rebind("view.commandLine")}
+            >
+              CMD
+            </button>
             {polar && (
               <select
                 className="unit-select"

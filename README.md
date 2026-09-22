@@ -37,6 +37,7 @@ npm run desktop    # native desktop window via Tauri (needs Rust toolchain)
 | Select all / invert | `Ctrl+A` / `Ctrl+I` |
 | Lasso / fence | `Alt`-drag a freehand loop (left → right takes only what's inside, right → left also what it touches); `Ctrl+Alt`-drag an open stroke that takes everything it crosses |
 | Select similar / by | `Ctrl+Shift+A` takes everything of the same type, layer and colour as the selection; the **SELECT** button in the status bar picks by type / layer / colour / construction, with a live count |
+| Command line | `Ctrl+9` or the **CMD** button — type tool aliases (`l`, `c`, `rec`, `o 5`, `f 2.5`), commands (`u`, `e`, `j`, `x`, `fit`, `rz`) or coordinates (`100,50`, `@30<45`); `Tab` completes, `↑`/`↓` walk the history, `Enter` on an empty line repeats the last command |
 | Ortho / polar / tracking | `F8` constrains to 0/90/180/270° from the last point (`Shift` = temporary), `F10` snaps to an angle increment, `F11` toggles object snap tracking — see below |
 | Lock a layer | the padlock in the Layers panel — the layer stays on screen, dimmed, but nothing on it can be clicked, boxed, lassoed or deleted |
 | Join / Explode | `J` chains the selected lines and arcs into one polyline (closed when the ends meet); `Ctrl+E` explodes selected polylines back into lines and arcs |
@@ -63,6 +64,13 @@ increment), the cursor is pulled onto that alignment and a dashed guide is
 drawn back to the point. Line up with two acquired points at once and you
 get their crossing: directly above this corner **and** level with that one,
 exactly, with no construction lines to draw and erase.
+
+**Relative zero** is the last point you placed, marked with a small crossed
+circle. `@dx,dy` measures from the tool's own last point while it has one,
+and from the relative zero when it doesn't — so a line can start "20 right
+and 100 up from that corner" without drawing anything to measure from. `rz`
+on the command line (or a shortcut you bind to *Set relative zero*) moves it
+to the cursor.
 
 The world origin is drawn as a crosshair with labelled +X / +Y stubs (and a
 muted marker clamped to the edge when it's panned off-screen), so `0, 0` is

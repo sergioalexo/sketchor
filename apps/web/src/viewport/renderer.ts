@@ -34,6 +34,8 @@ export interface RenderUiState {
   trackRays: readonly { from: Point; to: Point; angleDeg: number }[];
   /** Feature points the cursor has hovered and can now track from — marked so the user knows they're live. */
   acquiredPoints: readonly Point[];
+  /** The relative zero `@dx,dy` measures from when the active tool has no anchor of its own (T-08). */
+  relativeZero: Point | null;
   /** Live offset while dragging a selection. */
   moveOffset: { dx: number; dy: number } | null;
   /** Active measure-tool result overlay, if any. */
@@ -181,6 +183,7 @@ export function render(
   }
 
   if (ui.trackingRay) drawTrackingRay(ctx, width, height, view, ui.trackingRay);
+  if (ui.relativeZero) drawRelativeZero(ctx, view, ui.relativeZero);
   for (const p of ui.acquiredPoints) drawAcquiredMarker(ctx, view, p);
   for (const ray of ui.trackRays) drawTrackingRay(ctx, width, height, view, ray);
 
@@ -887,6 +890,23 @@ function drawSnapMarker(ctx: CanvasRenderingContext2D, view: View, snap: Snap): 
  * tracked point to the edge of the canvas, and the angle next to the point
  * (AutoCAD's polar tooltip).
  */
+/** LibreCAD's relative-zero marker: a small crossed circle at the last point placed. */
+function drawRelativeZero(ctx: CanvasRenderingContext2D, view: View, p: Point): void {
+  const s = worldToScreen(view, p);
+  ctx.save();
+  ctx.strokeStyle = COLORS.snap;
+  ctx.globalAlpha = 0.7;
+  ctx.lineWidth = 1.2;
+  ctx.beginPath();
+  ctx.arc(s.x, s.y, 5, 0, Math.PI * 2);
+  ctx.moveTo(s.x - 8, s.y);
+  ctx.lineTo(s.x + 8, s.y);
+  ctx.moveTo(s.x, s.y - 8);
+  ctx.lineTo(s.x, s.y + 8);
+  ctx.stroke();
+  ctx.restore();
+}
+
 /** The small plus AutoCAD puts on an acquired point, so it's clear what the guides come from. */
 function drawAcquiredMarker(ctx: CanvasRenderingContext2D, view: View, p: Point): void {
   const s = worldToScreen(view, p);

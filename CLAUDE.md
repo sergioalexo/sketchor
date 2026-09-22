@@ -161,6 +161,15 @@ fill, straighten, dim, pan) still run as `case`s in `Viewport.tsx`'s
 pointer handlers — `getTool()` returns null for those. Migrating one means
 moving its case into a class and deleting its `interaction` kind.
 
+Typed input has two front ends and one back end: the floating coordinate
+box (digits open it) and the docked command line (`tools/commandLine.ts`
+parses, `tools/CommandBar.tsx` types, `runCommand` in `Viewport.tsx`
+executes). Both commit through `commitTypedText`, which asks the tool to
+read the string itself (`typed()` — an angle for rotate, a factor for
+scale) before resolving it as a coordinate against the tool's anchor, or
+against the **relative zero** (the last point any tool placed) when the
+tool has none.
+
 Where a point lands is a pipeline, and its order is load-bearing:
 object snap (`viewport/snapping.ts`) → ortho/polar from the tool's anchor
 (`tools/tracking.ts`) → object snap tracking (`viewport/objectTracking.ts`,

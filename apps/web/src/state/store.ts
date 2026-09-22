@@ -633,6 +633,9 @@ interface AppState {
    * solver yet — so it's opt-in and off by default. See connectivity.ts.
    */
   showConnectivityHint: boolean;
+  /** The docked command line (T-08), at the bottom of the drawing area. */
+  commandLine: boolean;
+  toggleCommandLine: () => void;
   setShowConnectivityHint: (v: boolean) => void;
   /** Fills detected closed loops (lines/arcs chained shut, or circles) with a translucent tint — on by default. */
   showClosedRegions: boolean;
@@ -726,6 +729,8 @@ export const useApp = create<AppState>((set, get) => ({
   setFileBrowserDesktopDir: (dir) => set({ fileBrowserDesktopDir: dir }),
   showConnectivityHint: false,
   setShowConnectivityHint: (v) => set({ showConnectivityHint: v }),
+  commandLine: false,
+  toggleCommandLine: () => set((s) => ({ commandLine: !s.commandLine })),
   showClosedRegions: true,
   setShowClosedRegions: (v) => set({ showClosedRegions: v }),
   fitRequestId: 0,

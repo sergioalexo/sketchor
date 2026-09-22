@@ -64,6 +64,8 @@ import { copySelectionToClipboard, pasteFromClipboard } from "../io/clipboard";
 import { applyTracking, trackingIncrement, useTracking } from "../tools/tracking";
 import { useSnapSettings } from "../tools/snapSettings";
 import { parseTypedInput, resolveTypedInput, startsTypedInput } from "../tools/typedInput";
+import { parseCommand, type AppCommandId } from "../tools/commandLine";
+import { CommandBar, type CommandEcho } from "../tools/CommandBar";
 
 /**
  * The half-finished states a pan can interrupt. Panning or zooming mid-draw
@@ -348,11 +350,21 @@ export function Viewport() {
   const hoverRef = useRef<EntityId | null>(null);
   /** The typed-coordinate box (T-08), open while a framework tool waits for a point and the user has started typing. */
   const [typed, setTyped] = useState<{ text: string; screen: Point } | null>(null);
+  /**
+   * The relative zero (T-08, LibreCAD's): the last point any tool placed.
+   * `@dx,dy` measures from the tool's own anchor while it has one, and
+   * from here when it doesn't — which is what makes "start 20 right of
+   * that corner" typeable.
+   */
+  const relativeZeroRef = useRef<Point | null>(null);
+  const [commandEcho, setCommandEcho] = useState<CommandEcho[]>([]);
   /** The selection-cycling list, open after a repeat click found more than one entity under the cursor. */
   const [cycle, setCycle] = useState<{ screen: Point; ids: EntityId[]; index: number } | null>(null);
   const cycleRef = useRef<{ screen: Point; at: number; index: number; ids: EntityId[] } | null>(null);
   const closedRegionsRef = useRef<ClosedRegion[]>([]);
   const tool = useApp((s) => s.tool);
+  const commandLine = useApp((s) => s.commandLine);
+  const promptText = useApp((s) => s.prompt);
   const selection = useApp((s) => s.selection);
   const revision = useApp((s) => s.revision);
   const layers = useApp((s) => s.layers);
@@ -411,6 +423,7 @@ export function Viewport() {
       snap: state.tool === "select" ? null : snap,
       trackingRay: activeTool ? trackingRayRef.current : null,
       trackRays: activeTool ? trackRaysRef.current : [],
+      relativeZero: activeTool ? relativeZeroRef.current : null,
       acquiredPoints: activeTool ? acquiredRef.current : [],
       moveOffset:
         interaction.kind === "move" ? { dx: interaction.dx, dy: interaction.dy } : null,
@@ -529,6 +542,32 @@ export function Viewport() {
       }
     }
     return { snap: raw, ray: null };
+  };
+
+  /**
+   * Commits a typed string to the active tool: the tool's own reading of it
+   * first (an angle for rotate, a factor for scale), else a coordinate
+   * relative to its anchor — or to the relative zero when it has none.
+   * Shared by the floating coordinate box and the command line.
+   */
+  const commitTypedText = (text: string): boolean => {
+    const app = useApp.getState();
+    const t = getTool(app.tool);
+    if (!t) return false;
+    if (t.typed?.(toolCtx, text)) {
+      syncPrompt();
+      redraw();
+      return true;
+    }
+    const parsed = parseTypedInput(text, app.displayUnit);
+    const cursor = lastScreenRef.current ? screenToWorld(viewRef.current, lastScreenRef.current) : null;
+    const point = parsed ? resolveTypedInput(parsed, t.anchor() ?? relativeZeroRef.current, cursor) : null;
+    if (!point) return false;
+    t.pick(toolCtx, { point, world: point, snap: null, shiftKey: false, ctrlKey: false, altKey: false });
+    relativeZeroRef.current = point;
+    syncPrompt();
+    redraw();
+    return true;
   };
 
   const pickFrom = (e: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean; altKey: boolean }, world: Point, snap: Snap): Pick => ({
@@ -796,6 +835,12 @@ export function Viewport() {
       } else if (matchesBinding(e, "view.polar")) {
         e.preventDefault();
         useTracking.getState().togglePolar();
+      } else if (matchesBinding(e, "view.commandLine")) {
+        e.preventDefault();
+        app.toggleCommandLine();
+      } else if (matchesBinding(e, "edit.relativeZero")) {
+        e.preventDefault();
+        runAppCommand("relativeZero");
       } else if (matchesBinding(e, "view.otrack")) {
         e.preventDefault();
         useTracking.getState().toggleOtrack();
@@ -1069,6 +1114,7 @@ export function Viewport() {
     if (fwTool) {
       const { snap } = resolvePick(world, e.shiftKey);
       fwTool.pick(toolCtx, pickFrom(e, world, snap));
+      relativeZeroRef.current = snap.point;
       setTyped(null);
       syncPrompt();
       redraw();
@@ -1640,6 +1686,127 @@ export function Viewport() {
     }
   };
 
+  /** Runs one command-line entry and returns what to echo back. */
+  const runCommand = (line: string): void => {
+    const parsed = parseCommand(line);
+    const app = useApp.getState();
+    const say = (text: string, kind: CommandEcho["kind"] = "out") =>
+      setCommandEcho((prev) => [...prev, { text: line, kind: "in" as const }, { text, kind }].slice(-8));
+    switch (parsed.kind) {
+      case "tool": {
+        app.setTool(parsed.tool);
+        if (parsed.argument) {
+          // The rest of the line is the tool's first typed input: `o 5`,
+          // `f 2.5`. The tool has just been activated, so this reaches it.
+          const consumed = getTool(parsed.tool)?.typed?.(toolCtx, parsed.argument) ?? false;
+          say(consumed ? `${parsed.tool} ${parsed.argument}` : `${parsed.tool} (ignored "${parsed.argument}")`);
+        } else {
+          say(parsed.tool);
+        }
+        syncPrompt();
+        redraw();
+        return;
+      }
+      case "point": {
+        if (commitTypedText(parsed.text)) say(parsed.text);
+        else say(`Can't place ${parsed.text} — no tool is waiting for a point`, "error");
+        return;
+      }
+      case "app": {
+        const done = runAppCommand(parsed.id);
+        say(done ?? parsed.id, done ? "out" : "out");
+        return;
+      }
+      case "unknown":
+        say(`Unknown command "${parsed.text}"`, "error");
+        return;
+      case "empty":
+        return;
+    }
+  };
+
+  /** The non-tool commands; returns a line to echo. */
+  const runAppCommand = (id: AppCommandId): string => {
+    const app = useApp.getState();
+    const entitiesOf = (ids: EntityId[]) => ids.map((i) => doc.get(i)).filter((en): en is Entity => !!en);
+    switch (id) {
+      case "undo":
+        bus.undo();
+        return "undo";
+      case "redo":
+        bus.redo();
+        return "redo";
+      case "delete": {
+        if (app.selection.length === 0) return "nothing selected";
+        const ids = app.selection;
+        bus.execute({ type: "delete-entities", ids });
+        app.setSelection([]);
+        return `deleted ${ids.length}`;
+      }
+      case "selectAll": {
+        const ids = selectableEntities().map((en) => en.id);
+        app.setSelection(ids);
+        return `${ids.length} selected`;
+      }
+      case "invertSelection": {
+        const cur = new Set(app.selection);
+        const ids = selectableEntities().filter((en) => !cur.has(en.id)).map((en) => en.id);
+        app.setSelection(ids);
+        return `${ids.length} selected`;
+      }
+      case "selectSimilar": {
+        const samples = entitiesOf(app.selection);
+        if (samples.length === 0) return "select one first";
+        const ids = selectSimilar(selectableEntities(), samples);
+        app.setSelection(ids);
+        return `${ids.length} selected`;
+      }
+      case "join": {
+        const commands = joinCommands(entitiesOf(app.selection));
+        if (commands.length === 0) return "nothing to join";
+        bus.execute({ type: "batch", commands });
+        app.setSelection(commands.filter((c) => c.type === "add-entity").map((c) => (c as { entity: Entity }).entity.id));
+        return "joined";
+      }
+      case "explode": {
+        const commands = explodeCommands(entitiesOf(app.selection));
+        if (commands.length === 0) return "nothing to explode";
+        bus.execute({ type: "batch", commands });
+        return "exploded";
+      }
+      case "group":
+        groupSelection();
+        return "grouped";
+      case "ungroup":
+        ungroupSelection();
+        return "ungrouped";
+      case "fit":
+        fitView(app.selection.length ? app.selection : undefined);
+        return "fit";
+      case "zoomPrevious":
+        zoomPrevious();
+        return "zoom previous";
+      case "relativeZero": {
+        const cursor = lastScreenRef.current ? screenToWorld(viewRef.current, lastScreenRef.current) : null;
+        relativeZeroRef.current = cursor ? findSnap(doc, viewRef.current, cursor, { settings: useSnapSettings.getState().settings }).point : null;
+        redraw();
+        return relativeZeroRef.current ? "relative zero set" : "move the cursor onto the drawing first";
+      }
+      case "save":
+        void saveCurrent();
+        return "save";
+      case "open":
+        void openDrawing();
+        return "open";
+      case "cancel":
+        getTool(app.tool)?.cancel(toolCtx);
+        app.setSelection([]);
+        syncPrompt();
+        redraw();
+        return "cancelled";
+    }
+  };
+
   const onWheel = (e: React.WheelEvent) => {
     const screen = { x: e.nativeEvent.offsetX, y: e.nativeEvent.offsetY };
     const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
@@ -1702,6 +1869,14 @@ export function Viewport() {
         onDoubleClick={onDoubleClick}
         onContextMenu={(e) => e.preventDefault()}
       />
+      {commandLine && (
+        <CommandBar
+          echo={commandEcho}
+          prompt={promptText}
+          onSubmit={runCommand}
+          onClose={() => useApp.getState().toggleCommandLine()}
+        />
+      )}
       {cycle && (
         <div className="select-cycle" style={{ left: cycle.screen.x + 14, top: cycle.screen.y + 14 }} data-testid="select-cycle">
           <div className="select-cycle-head">{cycle.ids.length} here</div>
@@ -1747,22 +1922,8 @@ export function Viewport() {
             redraw();
           }}
           onCommit={(text) => {
-            const app = useApp.getState();
-            const t = getTool(app.tool);
-            if (t?.typed?.(toolCtx, text)) {
-              setTyped(null);
-              syncPrompt();
-              redraw();
-              return true;
-            }
-            const parsed = parseTypedInput(text, app.displayUnit);
-            const cursor = lastScreenRef.current ? screenToWorld(viewRef.current, lastScreenRef.current) : null;
-            const point = t && parsed ? resolveTypedInput(parsed, t.anchor(), cursor) : null;
-            if (!t || !point) return false;
-            t.pick(toolCtx, { point, world: point, snap: null, shiftKey: false, ctrlKey: false, altKey: false });
+            if (!commitTypedText(text)) return false;
             setTyped(null);
-            syncPrompt();
-            redraw();
             return true;
           }}
           onCancel={() => {
