@@ -168,7 +168,7 @@ const fmt: Formatters = {
   area: (v) => `${Math.round(v * 1000) / 1000}mm²`,
   volume: (v) => `${Math.round(v * 1000) / 1000}mm³`,
 };
-const rowValue = (rows: { label: string; value: string }[], label: string) => rows.find((r) => r.label === label)?.value;
+const rowValue = (m: { rows: { label: string; value: string }[] }, label: string) => m.rows.find((r) => r.label === label)?.value;
 
 describe("measureSelection", () => {
   const m = model(cube());
@@ -187,7 +187,62 @@ describe("measureSelection", () => {
     expect(rowValue(face, "Area")).toBe("1mm²");
     expect(rowValue(face, "Perimeter")).toBe("4mm");
     const v = measureSelection(m, [{ kind: "vertex", index: 0 }], fmt);
-    expect(v.map((r) => r.label)).toEqual(["X", "Y", "Z"]);
+    expect(v.rows.map((r) => r.label)).toEqual(["X", "Y", "Z"]);
+  });
+
+  it("draws the span it measured: a straight edge measures itself", () => {
+    const edge = measureSelection(m, [{ kind: "edge", index: 0 }], fmt);
+    expect(edge.segment).not.toBeNull();
+    const span = Math.hypot(
+      edge.segment!.to[0] - edge.segment!.from[0],
+      edge.segment!.to[1] - edge.segment!.from[1],
+      edge.segment!.to[2] - edge.segment!.from[2],
+    );
+    expect(span).toBeCloseTo(1, 9);
+    // A circle's span is its radius — centre out to the rim.
+    const cyl = model(cylinder(5, 10, 48));
+    const rim = measureSelection(cyl, [{ kind: "edge", index: 0 }], fmt);
+    const radius = Math.hypot(
+      rim.segment!.to[0] - rim.segment!.from[0],
+      rim.segment!.to[1] - rim.segment!.from[1],
+      rim.segment!.to[2] - rim.segment!.from[2],
+    );
+    expect(radius).toBeCloseTo(5, 6);
+  });
+
+  it("has nothing to draw for measurements that aren't a distance", () => {
+    expect(measureSelection(m, [{ kind: "face", index: 0 }], fmt).segment).toBeNull();
+    expect(measureSelection(m, [{ kind: "vertex", index: 0 }], fmt).segment).toBeNull();
+    expect(measureSelection(m, [{ kind: "part", index: 0 }], fmt).segment).toBeNull();
+    // Two faces at an angle: there is an angle to report but no span.
+    expect(measureSelection(m, [{ kind: "face", index: 0 }, { kind: "face", index: 2 }], fmt).segment).toBeNull();
+  });
+
+  it("measures a point to a plane along the normal, and says where it landed", () => {
+    // Corner (0,0,0) against the top face (+Z at z = 1).
+    const lo = [...Array(8).keys()].find((i) => m.nodes.xyz[i * 3] === 0 && m.nodes.xyz[i * 3 + 1] === 0 && m.nodes.xyz[i * 3 + 2] === 0)!;
+    const measured = measureSelection(m, [{ kind: "vertex", index: lo }, { kind: "face", index: 0 }], fmt);
+    expect(rowValue(measured, "Distance to plane")).toBe("1mm");
+    const seg = measured.segment!;
+    // Straight up the Z axis: the foot of the perpendicular, not a corner
+    // of the face — which is what makes the drawn line believable.
+    expect(seg.from).toEqual([0, 0, 0]);
+    expect(seg.to[0]).toBeCloseTo(0, 9);
+    expect(seg.to[1]).toBeCloseTo(0, 9);
+    expect(seg.to[2]).toBeCloseTo(1, 9);
+    expect(rowValue(measured, "ΔX ΔY ΔZ")).toBe("0mm, 0mm, 1mm");
+  });
+
+  it("the deltas always describe the same two points the line is drawn between", () => {
+    const pts = Array.from({ length: 8 }, (_, i) => [m.nodes.xyz[i * 3], m.nodes.xyz[i * 3 + 1], m.nodes.xyz[i * 3 + 2]]);
+    const lo = pts.findIndex((p) => p.every((c) => c === 0));
+    const hi = pts.findIndex((p) => p.every((c) => c === 1));
+    const measured = measureSelection(m, [{ kind: "vertex", index: lo }, { kind: "vertex", index: hi }], fmt);
+    const seg = measured.segment!;
+    const delta = rowValue(measured, "ΔX ΔY ΔZ");
+    expect(delta).toBe(
+      [0, 1, 2].map((k) => fmt.length(seg.to[k] - seg.from[k])).join(", "),
+    );
   });
 
   it("two vertices give the distance and the axis deltas", () => {

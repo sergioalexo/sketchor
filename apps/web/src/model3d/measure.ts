@@ -24,6 +24,26 @@ export interface MeasureRow {
   approx?: boolean;
 }
 
+/**
+ * The two points a measurement is actually taken between — what the
+ * viewer draws the dimension line and the ΔX/ΔY/ΔZ legs from. A number
+ * with no line to it is a number the user has to take on trust: "23 in"
+ * between two planes says nothing about *where* those 23 inches were
+ * measured.
+ */
+export interface MeasureSegment {
+  from: Vec3;
+  to: Vec3;
+  /** The ends are sampled (a tessellated curve, a non-planar face) rather than exact. */
+  approx?: boolean;
+}
+
+export interface Measurement {
+  rows: MeasureRow[];
+  /** Null for a measurement that isn't a distance (an area, an angle between planes, a part summary). */
+  segment: MeasureSegment | null;
+}
+
 export interface Formatters {
   length(worldValue: number): string;
   area(worldValueSquared: number): string;
@@ -100,13 +120,39 @@ function pointToSegment(p: Vec3, a: Vec3, b: Vec3): number {
 }
 
 export function pointToPolyline(p: Vec3, pts: Vec3[]): number {
-  let best = Infinity;
-  for (let i = 0; i + 1 < pts.length; i++) best = Math.min(best, pointToSegment(p, pts[i], pts[i + 1]));
-  return pts.length === 1 ? distance(p, pts[0]) : best;
+  return closestOnPolyline(p, pts).d;
+}
+
+/** The point on a segment nearest `p`. */
+export function closestOnSegment(p: Vec3, a: Vec3, b: Vec3): Vec3 {
+  const ab = sub(b, a);
+  const len2 = dot(ab, ab);
+  if (len2 < 1e-18) return a;
+  let t = dot(sub(p, a), ab) / len2;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  return [a[0] + ab[0] * t, a[1] + ab[1] * t, a[2] + ab[2] * t];
+}
+
+/** The point on a polyline nearest `p`, with the distance to it. */
+export function closestOnPolyline(p: Vec3, pts: Vec3[]): { at: Vec3; d: number } {
+  if (pts.length === 0) return { at: p, d: 0 };
+  if (pts.length === 1) return { at: pts[0], d: distance(p, pts[0]) };
+  let best: { at: Vec3; d: number } | null = null;
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const at = closestOnSegment(p, pts[i], pts[i + 1]);
+    const d = distance(p, at);
+    if (!best || d < best.d) best = { at, d };
+  }
+  return best!;
 }
 
 /** Shortest distance between two line segments (exact, including parallel and touching cases). */
 export function segmentToSegment(p1: Vec3, q1: Vec3, p2: Vec3, q2: Vec3): number {
+  return closestSegmentToSegment(p1, q1, p2, q2).d;
+}
+
+/** The nearest pair of points on two segments, and the distance between them. */
+export function closestSegmentToSegment(p1: Vec3, q1: Vec3, p2: Vec3, q2: Vec3): { a: Vec3; b: Vec3; d: number } {
   const d1 = sub(q1, p1);
   const d2 = sub(q2, p2);
   const r = sub(p1, p2);
@@ -115,7 +161,7 @@ export function segmentToSegment(p1: Vec3, q1: Vec3, p2: Vec3, q2: Vec3): number
   const f = dot(d2, r);
   let s = 0;
   let t = 0;
-  if (a < 1e-18 && e < 1e-18) return distance(p1, p2);
+  if (a < 1e-18 && e < 1e-18) return { a: p1, b: p2, d: distance(p1, p2) };
   if (a < 1e-18) {
     t = clamp01(f / e);
   } else {
@@ -138,17 +184,25 @@ export function segmentToSegment(p1: Vec3, q1: Vec3, p2: Vec3, q2: Vec3): number
   }
   const c1: Vec3 = [p1[0] + d1[0] * s, p1[1] + d1[1] * s, p1[2] + d1[2] * s];
   const c2: Vec3 = [p2[0] + d2[0] * t, p2[1] + d2[1] * t, p2[2] + d2[2] * t];
-  return distance(c1, c2);
+  return { a: c1, b: c2, d: distance(c1, c2) };
 }
 
 export function polylineToPolyline(a: Vec3[], b: Vec3[]): number {
-  let best = Infinity;
+  return closestPolylineToPolyline(a, b).d;
+}
+
+/** The nearest pair of points on two polylines, and the distance between them. */
+export function closestPolylineToPolyline(a: Vec3[], b: Vec3[]): { a: Vec3; b: Vec3; d: number } {
+  let best: { a: Vec3; b: Vec3; d: number } | null = null;
   for (let i = 0; i + 1 < a.length; i++) {
     for (let j = 0; j + 1 < b.length; j++) {
-      best = Math.min(best, segmentToSegment(a[i], a[i + 1], b[j], b[j + 1]));
+      const hit = closestSegmentToSegment(a[i], a[i + 1], b[j], b[j + 1]);
+      if (!best || hit.d < best.d) best = hit;
     }
   }
-  return best;
+  if (best) return best;
+  // Degenerate input (a one-point "polyline"): fall back to the points themselves.
+  return { a: a[0] ?? [0, 0, 0], b: b[0] ?? [0, 0, 0], d: distance(a[0] ?? [0, 0, 0], b[0] ?? [0, 0, 0]) };
 }
 
 function clamp01(v: number): number {
@@ -200,10 +254,11 @@ export function faceRadius(model: Model3D, face: number): number | null {
 
 /* ------------------------------ the readout ------------------------------ */
 
-export function measureSelection(model: Model3D, refs: SelRef[], fmt: Formatters): MeasureRow[] {
-  if (refs.length === 0) return [];
+export function measureSelection(model: Model3D, refs: SelRef[], fmt: Formatters): Measurement {
+  if (refs.length === 0) return { rows: [], segment: null };
   if (refs.length === 1) return measureOne(model, refs[0], fmt);
-  const rows = measurePair(model, refs[refs.length - 2], refs[refs.length - 1], fmt);
+  const pair = measurePair(model, refs[refs.length - 2], refs[refs.length - 1], fmt);
+  const rows = pair.rows;
   // Totals make a multi-select worth something even when the pair says
   // little — except a face pair, which already reports its combined area.
   if (refs.length > 2 && refs.every((r) => r.kind === "face")) {
@@ -214,18 +269,49 @@ export function measureSelection(model: Model3D, refs: SelRef[], fmt: Formatters
     const total = refs.reduce((a, r) => a + model.edgeTable.length[r.index], 0);
     rows.push({ label: `Total length (${refs.length})`, value: fmt.length(total) });
   }
-  return rows;
+  return { rows, segment: pair.segment };
 }
 
-function measureOne(model: Model3D, ref: SelRef, fmt: Formatters): MeasureRow[] {
+/**
+ * The ΔX / ΔY / ΔZ row for a measured span, and the row order the readout
+ * uses: the straight-line distance first, then how it breaks down along
+ * the axes. Both come from the same two points the dimension line is
+ * drawn between, so the picture and the numbers can't disagree.
+ */
+function deltaRow(segment: MeasureSegment, fmt: Formatters): MeasureRow {
+  const [ax, ay, az] = segment.from;
+  const [bx, by, bz] = segment.to;
+  return {
+    label: "ΔX ΔY ΔZ",
+    value: `${fmt.length(bx - ax)}, ${fmt.length(by - ay)}, ${fmt.length(bz - az)}`,
+    approx: segment.approx,
+  };
+}
+
+/** A distance measurement: the span, its length, and the deltas along it. */
+function spanRows(label: string, segment: MeasureSegment, fmt: Formatters, extra: MeasureRow[] = []): Measurement {
+  return {
+    rows: [
+      { label, value: fmt.length(distance(segment.from, segment.to)), approx: segment.approx },
+      ...extra,
+      deltaRow(segment, fmt),
+    ],
+    segment,
+  };
+}
+
+function measureOne(model: Model3D, ref: SelRef, fmt: Formatters): Measurement {
   switch (ref.kind) {
     case "vertex": {
       const p = vertexPoint(model, ref.index);
-      return [
-        { label: "X", value: fmt.length(p[0]) },
-        { label: "Y", value: fmt.length(p[1]) },
-        { label: "Z", value: fmt.length(p[2]) },
-      ];
+      return {
+        rows: [
+          { label: "X", value: fmt.length(p[0]) },
+          { label: "Y", value: fmt.length(p[1]) },
+          { label: "Z", value: fmt.length(p[2]) },
+        ],
+        segment: null,
+      };
     }
     case "edge": {
       const t = model.edgeTable;
@@ -241,12 +327,20 @@ function measureOne(model: Model3D, ref: SelRef, fmt: Formatters): MeasureRow[] 
         rows.push({ label: "Center", value: `${fmt.length(c[0])}, ${fmt.length(c[1])}, ${fmt.length(c[2])}` });
       }
       rows.push({ label: "Length", value: fmt.length(t.length[ref.index]), approx: kind === EDGE_CURVE });
+      const a = read3(t.a, ref.index);
+      const b = read3(t.b, ref.index);
+      // A straight edge measures itself: the dimension line runs along it,
+      // and the deltas are its span. A circle shows its radius instead —
+      // a line from the centre out to where the rim starts.
       if (kind === EDGE_LINE) {
-        const a = read3(t.a, ref.index);
-        const b = read3(t.b, ref.index);
-        rows.push({ label: "ΔX ΔY ΔZ", value: `${fmt.length(b[0] - a[0])}, ${fmt.length(b[1] - a[1])}, ${fmt.length(b[2] - a[2])}` });
+        const segment: MeasureSegment = { from: a, to: b };
+        rows.push(deltaRow(segment, fmt));
+        return { rows, segment };
       }
-      return rows;
+      if (kind === EDGE_CIRCLE || kind === EDGE_ARC) {
+        return { rows, segment: { from: read3(t.center, ref.index), to: a } };
+      }
+      return { rows, segment: null };
     }
     case "face": {
       const rows: MeasureRow[] = [{ label: "Area", value: fmt.area(model.faces.area[ref.index]), approx: !model.faces.planar[ref.index] }];
@@ -260,50 +354,47 @@ function measureOne(model: Model3D, ref: SelRef, fmt: Formatters): MeasureRow[] 
         const n = read3(model.faces.normal, ref.index);
         rows.push({ label: "Normal", value: `${round(n[0])}, ${round(n[1])}, ${round(n[2])}` });
       }
-      return rows;
+      return { rows, segment: null };
     }
     case "part": {
       const p = model.parts[ref.index];
-      if (!p) return [];
+      if (!p) return { rows: [], segment: null };
       const size = [0, 1, 2].map((k) => p.bounds.max[k] - p.bounds.min[k]);
-      return [
-        { label: "Size", value: size.map((v) => fmt.length(v)).join(" × ") },
-        { label: "Surface area", value: fmt.area(p.area) },
-        { label: "Volume", value: fmt.volume(p.volume), approx: true },
-        { label: "Faces / edges", value: `${p.faceCount} / ${p.edgeRefCount}` },
-      ];
+      return {
+        rows: [
+          { label: "Size", value: size.map((v) => fmt.length(v)).join(" × ") },
+          { label: "Surface area", value: fmt.area(p.area) },
+          { label: "Volume", value: fmt.volume(p.volume), approx: true },
+          { label: "Faces / edges", value: `${p.faceCount} / ${p.edgeRefCount}` },
+        ],
+        segment: null,
+      };
     }
   }
 }
 
-function measurePair(model: Model3D, a: SelRef, b: SelRef, fmt: Formatters): MeasureRow[] {
+function measurePair(model: Model3D, a: SelRef, b: SelRef, fmt: Formatters): Measurement {
   const kinds = [a.kind, b.kind].sort().join("+");
-  const rows: MeasureRow[] = [];
-
-  const pointOf = (r: SelRef): Vec3 | null => (r.kind === "vertex" ? vertexPoint(model, r.index) : null);
 
   if (kinds === "vertex+vertex") {
-    const p = pointOf(a)!;
-    const q = pointOf(b)!;
-    rows.push({ label: "Distance", value: fmt.length(distance(p, q)) });
-    rows.push({ label: "ΔX ΔY ΔZ", value: `${fmt.length(q[0] - p[0])}, ${fmt.length(q[1] - p[1])}, ${fmt.length(q[2] - p[2])}` });
-    return rows;
+    const from = vertexPoint(model, (a as Extract<SelRef, { kind: "vertex" }>).index);
+    const to = vertexPoint(model, (b as Extract<SelRef, { kind: "vertex" }>).index);
+    return spanRows("Distance", { from, to }, fmt);
   }
 
   if (kinds === "edge+vertex") {
     const v = (a.kind === "vertex" ? a : b) as Extract<SelRef, { kind: "vertex" }>;
     const e = (a.kind === "edge" ? a : b) as Extract<SelRef, { kind: "edge" }>;
     const p = vertexPoint(model, v.index);
-    rows.push({ label: "Distance", value: fmt.length(pointToPolyline(p, edgePoints(model, e.index))), approx: model.edgeTable.kind[e.index] === EDGE_CURVE });
-    return rows;
+    const near = closestOnPolyline(p, edgePoints(model, e.index));
+    return spanRows("Distance", { from: p, to: near.at, approx: model.edgeTable.kind[e.index] === EDGE_CURVE }, fmt);
   }
 
   if (kinds === "face+vertex") {
     const v = (a.kind === "vertex" ? a : b) as Extract<SelRef, { kind: "vertex" }>;
     const f = (a.kind === "face" ? a : b) as Extract<SelRef, { kind: "face" }>;
     const p = vertexPoint(model, v.index);
-    rows.push(faceDistanceRow(model, f.index, [p], fmt));
-    return rows;
+    return faceSpan(model, f.index, [p], fmt);
   }
 
   if (kinds === "edge+edge") {
@@ -311,76 +402,99 @@ function measurePair(model: Model3D, a: SelRef, b: SelRef, fmt: Formatters): Mea
     const eb = b as Extract<SelRef, { kind: "edge" }>;
     const ka = model.edgeTable.kind[ea.index];
     const kb = model.edgeTable.kind[eb.index];
-    const pa = edgePoints(model, ea.index);
-    const pb = edgePoints(model, eb.index);
+    const extra: MeasureRow[] = [];
     if (ka === EDGE_LINE && kb === EDGE_LINE) {
       const angle = acuteAngle(edgeDirection(model, ea.index), edgeDirection(model, eb.index));
-      rows.push({ label: "Angle", value: deg(angle) });
+      extra.push({ label: "Angle", value: deg(angle) });
     }
     if ((ka === EDGE_CIRCLE || ka === EDGE_ARC) && (kb === EDGE_CIRCLE || kb === EDGE_ARC)) {
       const ca = read3(model.edgeTable.center, ea.index);
       const cb = read3(model.edgeTable.center, eb.index);
-      rows.push({ label: "Centre distance", value: fmt.length(distance(ca, cb)) });
+      extra.push({ label: "Centre distance", value: fmt.length(distance(ca, cb)) });
     }
-    rows.push({ label: "Distance", value: fmt.length(polylineToPolyline(pa, pb)), approx: ka === EDGE_CURVE || kb === EDGE_CURVE });
-    return rows;
+    const near = closestPolylineToPolyline(edgePoints(model, ea.index), edgePoints(model, eb.index));
+    const approx = ka === EDGE_CURVE || kb === EDGE_CURVE;
+    return spanRows("Distance", { from: near.a, to: near.b, approx }, fmt, extra);
   }
 
   if (kinds === "edge+face") {
     const e = (a.kind === "edge" ? a : b) as Extract<SelRef, { kind: "edge" }>;
     const f = (a.kind === "face" ? a : b) as Extract<SelRef, { kind: "face" }>;
+    const extra: MeasureRow[] = [];
     if (model.faces.planar[f.index] && model.edgeTable.kind[e.index] === EDGE_LINE) {
       const n = read3(model.faces.normal, f.index);
       const angle = Math.PI / 2 - acuteAngle(edgeDirection(model, e.index), n);
-      rows.push({ label: "Angle", value: deg(Math.abs(angle)) });
+      extra.push({ label: "Angle", value: deg(Math.abs(angle)) });
     }
-    rows.push(faceDistanceRow(model, f.index, edgePoints(model, e.index), fmt));
-    return rows;
+    return faceSpan(model, f.index, edgePoints(model, e.index), fmt, extra);
   }
 
   if (kinds === "face+face") {
     const fa = a as Extract<SelRef, { kind: "face" }>;
     const fb = b as Extract<SelRef, { kind: "face" }>;
-    const planar = model.faces.planar[fa.index] && model.faces.planar[fb.index];
-    if (planar) {
+    const area: MeasureRow = { label: "Total area", value: fmt.area(model.faces.area[fa.index] + model.faces.area[fb.index]) };
+    if (model.faces.planar[fa.index] && model.faces.planar[fb.index]) {
       const na = read3(model.faces.normal, fa.index);
       const nb = read3(model.faces.normal, fb.index);
-      const angle = acuteAngle(na, nb);
       const parallel = norm(cross(normalize(na), normalize(nb))) < 1e-3;
+      const ca = read3(model.faces.centroid, fa.index);
       if (parallel) {
-        const ca = read3(model.faces.centroid, fa.index);
+        // Parallel planes: measure straight along the normal, from one
+        // face's centroid to the point opposite it on the other. That is
+        // the 23 in a user means by "how far apart are these two faces".
+        const n = normalize(na);
         const cb = read3(model.faces.centroid, fb.index);
-        rows.push({ label: "Distance", value: fmt.length(Math.abs(dot(sub(cb, ca), normalize(na)))) });
-      } else {
-        rows.push({ label: "Angle", value: deg(angle) });
+        const gap = dot(sub(cb, ca), n);
+        const to: Vec3 = [ca[0] + n[0] * gap, ca[1] + n[1] * gap, ca[2] + n[2] * gap];
+        const measured = spanRows("Distance", { from: ca, to }, fmt);
+        return { rows: [...measured.rows, area], segment: measured.segment };
       }
-    } else {
-      rows.push(faceDistanceRow(model, fb.index, faceSamplePoints(model, fa.index), fmt));
+      const angle = acuteAngle(na, nb);
+      return { rows: [{ label: "Angle", value: deg(angle) }, area], segment: null };
     }
-    rows.push({ label: "Total area", value: fmt.area(model.faces.area[fa.index] + model.faces.area[fb.index]) });
-    return rows;
+    const measured = faceSpan(model, fb.index, faceSamplePoints(model, fa.index), fmt);
+    return { rows: [...measured.rows, area], segment: measured.segment };
   }
 
   // Anything involving a whole part: report both, nothing clever.
-  return [
-    { label: refLabel(model, a), value: summary(model, a, fmt) },
-    { label: refLabel(model, b), value: summary(model, b, fmt) },
-  ];
+  return {
+    rows: [
+      { label: refLabel(model, a), value: summary(model, a, fmt) },
+      { label: refLabel(model, b), value: summary(model, b, fmt) },
+    ],
+    segment: null,
+  };
 }
 
-/** Distance from a set of points to a face: exact to the plane of a planar face, nearest-sample otherwise. */
-function faceDistanceRow(model: Model3D, face: number, points: Vec3[], fmt: Formatters): MeasureRow {
+/**
+ * The span from a set of points to a face: exact and perpendicular for a
+ * planar face (the foot of the perpendicular is where the line lands),
+ * nearest-sample otherwise.
+ */
+function faceSpan(model: Model3D, face: number, points: Vec3[], fmt: Formatters, extra: MeasureRow[] = []): Measurement {
   if (model.faces.planar[face]) {
     const n = normalize(read3(model.faces.normal, face));
     const c = read3(model.faces.centroid, face);
-    let best = Infinity;
-    for (const p of points) best = Math.min(best, Math.abs(dot(sub(p, c), n)));
-    return { label: "Distance to plane", value: fmt.length(best) };
+    let best: { from: Vec3; to: Vec3; d: number } | null = null;
+    for (const p of points) {
+      const gap = dot(sub(p, c), n);
+      const to: Vec3 = [p[0] - n[0] * gap, p[1] - n[1] * gap, p[2] - n[2] * gap];
+      const d = Math.abs(gap);
+      if (!best || d < best.d) best = { from: p, to, d };
+    }
+    if (!best) return { rows: extra, segment: null };
+    return spanRows("Distance to plane", { from: best.from, to: best.to }, fmt, extra);
   }
   const samples = faceSamplePoints(model, face);
-  let best = Infinity;
-  for (const p of points) for (const q of samples) best = Math.min(best, distance(p, q));
-  return { label: "Distance", value: fmt.length(best), approx: true };
+  let best: { from: Vec3; to: Vec3; d: number } | null = null;
+  for (const p of points) {
+    for (const q of samples) {
+      const d = distance(p, q);
+      if (!best || d < best.d) best = { from: p, to: q, d };
+    }
+  }
+  if (!best) return { rows: extra, segment: null };
+  return spanRows("Distance", { from: best.from, to: best.to, approx: true }, fmt, extra);
 }
 
 function summary(model: Model3D, ref: SelRef, fmt: Formatters): string {

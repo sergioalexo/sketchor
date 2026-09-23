@@ -2384,10 +2384,6 @@ kbd.shortcut-key-fixed {
 
 /* ---------- 3D measure tool ---------- */
 
-.model-canvas.measuring {
-  cursor: crosshair;
-}
-
 .model-measure-overlay {
   position: absolute;
   inset: 0;
@@ -2490,6 +2486,69 @@ kbd.shortcut-key-fixed {
   min-height: 36px;
   padding: 4px 12px;
   font-size: 13px;
+}
+
+/* The ΔX / ΔY / ΔZ legs of a 3D measurement, one colour per axis. */
+.model-measure-overlay .m-delta {
+  stroke-width: 1.2;
+  stroke-dasharray: 4 3;
+  opacity: 0.85;
+}
+
+.model-measure-overlay .m-dx {
+  stroke: #e06c75;
+}
+
+.model-measure-overlay .m-dy {
+  stroke: #98c379;
+}
+
+.model-measure-overlay .m-dz {
+  stroke: #61afef;
+}
+
+/* Right-click menu in the Structure panel (isolate, hide, zoom). */
+.structure-menu {
+  position: fixed;
+  z-index: 40;
+  min-width: 150px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+}
+
+.structure-menu-head {
+  padding: 3px 8px 5px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.structure-menu button {
+  display: block;
+  width: 100%;
+  padding: 5px 8px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.structure-menu button:hover:not(:disabled) {
+  background: var(--border);
+}
+
+.structure-menu button:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 /* Constraints panel (T-41): apply buttons, then the sketch's constraint list. */

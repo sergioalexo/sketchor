@@ -22,6 +22,8 @@ interface ViewerState {
   hidden: Set<number>;
   /** Bumped to ask the viewer to frame a part (the panel can't drive the camera itself). */
   frameRequest: { part: number; n: number } | null;
+  /** Bumped to ask the viewer to fit everything still visible — what isolating should end with. */
+  fitRequest: number;
 
   useModel(hash: string): void;
   setSelection(selection: SelRef[]): void;
@@ -30,6 +32,13 @@ interface ViewerState {
   setHover(ref: SelRef | null): void;
   hide(part: number): void;
   toggleHidden(part: number): void;
+  /**
+   * Isolate: hide everything *except* these parts. The way you look
+   * inside an assembly — and the reason it is one action rather than
+   * "hide the other 126 parts" is that it has to be reversible in one
+   * click, which Show all is.
+   */
+  isolate(parts: readonly number[], partCount: number): void;
   showAll(): void;
   requestFrame(part: number): void;
 }
@@ -40,10 +49,11 @@ export const useViewer = create<ViewerState>((set, get) => ({
   hover: null,
   hidden: new Set(),
   frameRequest: null,
+  fitRequest: 0,
 
   useModel: (hash) => {
     if (get().modelHash === hash) return;
-    set({ modelHash: hash, selection: [], hover: null, hidden: new Set(), frameRequest: null });
+    set({ modelHash: hash, selection: [], hover: null, hidden: new Set(), frameRequest: null, fitRequest: 0 });
   },
   setSelection: (selection) => set({ selection: selection.slice(-MAX_SELECTION) }),
   pick: (ref, additive) => {
@@ -71,6 +81,16 @@ export const useViewer = create<ViewerState>((set, get) => ({
       hidden: new Set(s.hidden).add(part),
       selection: s.selection.filter((r) => r.kind === "part" && r.index === part ? false : true),
     })),
+  isolate: (parts, partCount) => {
+    const keep = new Set(parts);
+    if (keep.size === 0) return;
+    const hidden = new Set<number>();
+    for (let i = 0; i < partCount; i++) if (!keep.has(i)) hidden.add(i);
+    // Fit afterwards: isolating one screw in a 127-part assembly and
+    // leaving the camera where it was shows you an empty screen with a
+    // speck in it.
+    set((s) => ({ hidden, fitRequest: s.fitRequest + 1 }));
+  },
   toggleHidden: (part) =>
     set((s) => {
       const next = new Set(s.hidden);

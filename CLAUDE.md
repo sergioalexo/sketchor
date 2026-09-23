@@ -113,12 +113,21 @@ the worker imports the vendored `.mjs`/`.wasm` directly. So:
   the Layers panel in a model tab (layers mean nothing to a STEP file).
   Highlighting: faces/parts repaint the shared colour attribute, edges and
   vertices go into overlay `LineSegments`/`Points` with `depthTest: false`.
-- **Measure tool** (M): a second, free-point measurement for anywhere a
-  topology pick can't reach. `measure3d.ts` (pure, tested) snaps a raycast
-  hit to the hit part's B-rep vertices/edges within a pixel tolerance the
-  viewer converts to world units at the hit depth; the viewer draws the
-  result as a screen-space SVG overlay re-projected in an `afterRender`
-  hook, not via React state per frame.
+- **There is no separate measure tool** — selecting *is* measuring, and
+  `measure3d.ts` (the old free-point one) is gone. `measureSelection`
+  returns `{ rows, segment }`: the segment is the two points the distance
+  was actually taken between, so every pair measurement also yields
+  ΔX/ΔY/ΔZ *from the same two points the line is drawn between* — the
+  picture and the numbers cannot disagree. The viewer draws it as a
+  screen-space SVG overlay (direct span + three dashed axis legs, a leg
+  under 3 px suppressed), re-projected in the `afterRender` hook and also
+  synced immediately when the selection changes, so a measurement never
+  appears a frame late.
+- **Isolate**: `viewerStore.isolate(parts, partCount)` hides everything
+  else and bumps `fitRequest`, which the viewer answers with a fit — the
+  point of isolating a screw is to see it. Reachable from the Structure
+  panel's right-click menu (a part row, or a whole sub-assembly node,
+  which isolates its subtree), the toolbar, or `I`. Show all reverses it.
 - **Explorer previews** (Windows): every rendered thumbnail is also mirrored
   via the `write_thumbnail_cache` command to `%LOCALAPPDATA%\Sketchor\thumbs\<sha256>.png`; `native/dxf-thumbnailer` (`src/model.rs`) hashes the file
   and serves that PNG, else falls back to `native/step-wire` — a text-level

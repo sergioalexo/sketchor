@@ -26,7 +26,7 @@ npm run desktop    # native desktop window via Tauri (needs Rust toolchain)
 | Typed coordinates | while drawing, type `100` (length toward the cursor), `100<45`, `50,20`, `@50,20` — units like `4in`, `2'6"` accepted |
 | Ortho / polar | `F8` / `F10` (or the status-bar toggles); `Shift` held is temporary ortho |
 | Select tool | `V` — click (Shift adds), drag to move, `Del` deletes; click the same spot again to cycle through whatever overlaps there |
-| Measure tool | `M` — see below |
+| Measure tool | `M` — see below (2D drawings; in a 3D tab, selecting is measuring) |
 | Pan | middle- or right-button drag, the Pan tool, or two fingers |
 | Zoom | mouse wheel (at cursor), or pinch |
 | Save / Save As | `Ctrl+S` overwrites the tab's own file; the Save menu names that file and offers Save As / Save a Copy |
@@ -230,8 +230,8 @@ Opening a `.step`/`.stp` (or `.iges`/`.igs`) file gives a 3D viewer tab
 instead of a drawing: shaded parts in the colours the file carries, B-rep
 edges drawn as dark outlines, orbit with the left mouse button, pan with the
 right or middle, wheel to zoom toward the cursor. Double-click frames what
-is under the cursor, `H` hides the selected part and `Shift+H` shows
-everything again; `E` toggles edges, `F` fits, and `1`–`4` jump to
+is under the cursor, `H` hides the selected part, `I` isolates it and
+`Shift+H` shows everything again; `E` toggles edges, `F` fits, and `1`–`4` jump to
 isometric / top / front / right.
 
 **Clicking picks geometry, the way Onshape does** — the vertex, edge or
@@ -246,19 +246,29 @@ what it measures:
 | A circle or arc | Diameter, radius, centre, arc angle |
 | A face | Area, perimeter, normal (and diameter, for a cylindrical one) |
 | A part (from the Structure panel) | Size, surface area, volume, face and edge counts |
-| Two of anything | Distance — and the angle, where one means something |
+| Two of anything | Distance, ΔX / ΔY / ΔZ — and the angle, where one means something |
 
 Shift- or Ctrl-click adds to the selection (up to eight); `Esc` or a click
-on empty space clears it. The panel on the right is the **Structure** tree
-for a model tab — the assembly hierarchy, with a filter, per-part hide/show
-and double-click to frame — in the slot layers occupy for a drawing.
+on empty space clears it.
 
-**Measure** (`M`, or the toolbar button) is the free-point version, for a
-distance between two places that aren't a vertex, edge or face: click or tap
-two points to get the straight-line distance plus ΔX / ΔY / ΔZ. Each point
-snaps to the nearest corner or edge under the cursor, and the readout says
-which kind of point each end landed on. The measurement stays attached to
-the geometry while you orbit; `Esc` clears it, then leaves the tool.
+**There is no separate measure mode** — selecting is measuring. Whatever the
+readout reports, the viewer *draws*: a solid dimension line between the two
+points the distance was actually taken between (the foot of the
+perpendicular, for a distance to a plane; the nearest points, for two
+edges), the length on it, and three dashed legs showing the ΔX, ΔY and ΔZ
+that make it up — red, green, blue. Pick one straight edge and the line runs
+along it; pick a circle and it shows the radius. The drawing stays attached
+to the geometry while you orbit.
+
+**Isolate** — right-click a part in the Structure panel (or a whole
+sub-assembly, which isolates everything under it) and choose *Isolate*:
+everything else is hidden and the view fits what's left. The toolbar button
+and `I` do the same for the current selection, and **Show all** brings
+everything back. The same menu offers Hide and Zoom to.
+
+The panel on the right is the **Structure** tree for a model tab — the
+assembly hierarchy, with a filter, per-part hide/show and double-click to
+frame — in the slot layers occupy for a drawing.
 
 On a touch screen: one finger orbits, two fingers pinch-zoom and pan, tap
 picks (with a wider aperture, so fingers can still hit an edge), double-tap

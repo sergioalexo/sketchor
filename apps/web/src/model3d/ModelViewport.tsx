@@ -14,8 +14,7 @@ import {
   type ModelObjects,
   type ViewPreset,
 } from "./modelScene";
-import { measureBetween, snapToEdges, type MeasurePoint } from "./measure3d";
-import { measureSelection, partOf, refLabel, type SelRef } from "./measure";
+import { measureSelection, partOf, refLabel, type MeasureSegment, type SelRef } from "./measure";
 import { pickEdge, pickVertex, type Projector } from "./picking";
 import { useOpenLoads } from "./stepImport";
 import type { Model3D } from "./types";
@@ -36,11 +35,14 @@ import { useViewer } from "./viewerStore";
  * M toggles the measure tool, Esc clears the measurement / selection,
  * 1/2/3/4 jump to iso/top/front/right.
  *
- * Measure: with the tool on, each click/tap picks a point on the model,
- * snapped to the nearest B-rep vertex or edge (measure3d.ts); the second
- * point completes a distance, drawn as a screen-space overlay that is
- * re-projected after every render so it sticks to the geometry while the
- * camera moves. Nothing is stored — a measurement is a readout, not data.
+ * Measuring is not a separate mode: selecting *is* measuring. One pick
+ * reports what that thing is (a length, a radius, an area, a volume); a
+ * second reports the distance between them, broken into ΔX/ΔY/ΔZ, and the
+ * viewer draws the span it measured — a solid dimension line between the
+ * two points it used, with dashed legs for the three components. The
+ * overlay is screen-space SVG, re-projected after every render so it
+ * sticks to the geometry while the camera moves. Nothing is stored — a
+ * measurement is a readout, not data.
  *
  * Rendering is on demand — a frame is drawn only when the camera or the
  * scene changed — so an open model tab costs nothing while idle.
@@ -171,16 +173,18 @@ function Viewer({ model }: { model: Model3D }) {
   const hover = useViewer((v) => v.hover);
   const hidden = useViewer((v) => v.hidden);
   const frameRequest = useViewer((v) => v.frameRequest);
+  const fitRequest = useViewer((v) => v.fitRequest);
   const pickInto = useViewer((v) => v.pick);
   const setHover = useViewer((v) => v.setHover);
   const hidePart = useViewer((v) => v.hide);
   const showAllParts = useViewer((v) => v.showAll);
+  const isolate = useViewer((v) => v.isolate);
   const useModel = useViewer((v) => v.useModel);
   const [showEdges, setShowEdges] = useState(true);
-  const [measuring, setMeasuring] = useState(false);
-  const [measure, setMeasure] = useState<{ a: MeasurePoint | null; b: MeasurePoint | null }>({ a: null, b: null });
-  const measureRef = useRef(measure);
-  measureRef.current = measure;
+  /** The span the current selection measures; the overlay re-projects it every frame. */
+  const segmentRef = useRef<MeasureSegment | null>(null);
+  /** The overlay's re-projection, so a new measurement can draw itself without waiting for a frame. */
+  const syncOverlayRef = useRef<(() => void) | null>(null);
   const overlayRef = useRef<SVGSVGElement>(null);
   const labelRef = useRef<HTMLDivElement>(null);
   const displayUnit = useApp((s) => s.displayUnit);
@@ -388,6 +392,12 @@ function Viewer({ model }: { model: Model3D }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [frameRequest]);
 
+  // Isolating ends with a fit, so what survived fills the screen.
+  useEffect(() => {
+    if (fitRequest > 0) fitAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fitRequest]);
+
   // ---- picking ------------------------------------------------------------
   /**
    * Everything a pick needs from one ray: the nearest surface hit (with the
@@ -464,28 +474,18 @@ function Viewer({ model }: { model: Model3D }) {
 
   const pick = (clientX: number, clientY: number): number | null => probe(clientX, clientY)?.hit?.part ?? null;
 
+
   /**
-   * A measure point under the pointer: the surface hit snapped to the part's
-   * vertices/edges within a pixel tolerance — wider for a finger — converted
-   * to world units at the hit's depth.
+   * The dimension drawing. Re-projected imperatively after each render
+   * rather than through React state, so orbiting with a measurement on
+   * screen doesn't re-render the component once per frame.
+   *
+   * Three dashed legs run from one end to the other along X, then Y, then
+   * Z — the same numbers the ΔX ΔY ΔZ row gives, in the place they
+   * actually apply. A leg shorter than a few pixels is left out; an
+   * axis-aligned span would otherwise draw a degenerate staircase on top
+   * of itself.
    */
-  const pickMeasurePoint = (clientX: number, clientY: number, touch: boolean): MeasurePoint | null => {
-    const pr = probe(clientX, clientY);
-    if (!pr?.hit) return null;
-    const px = touch ? 18 : 10;
-    return snapToEdges(model, pr.hit.part, [pr.hit.point.x, pr.hit.point.y, pr.hit.point.z], px * pr.worldPerPixel(pr.hit.dist));
-  };
-
-  const addMeasurePoint = (clientX: number, clientY: number, touch: boolean) => {
-    const pt = pickMeasurePoint(clientX, clientY, touch);
-    if (!pt) return;
-    setMeasure((m) => (m.a && !m.b ? { a: m.a, b: pt } : { a: pt, b: null }));
-  };
-  const clearMeasure = () => setMeasure({ a: null, b: null });
-
-  // The overlay is re-projected imperatively after each render rather than
-  // through React state, so orbiting with a measurement on screen doesn't
-  // re-render the component per frame.
   useEffect(() => {
     const s = sceneRef.current;
     if (!s) return;
@@ -493,51 +493,72 @@ function Viewer({ model }: { model: Model3D }) {
       const svg = overlayRef.current;
       const label = labelRef.current;
       const canvas = canvasRef.current;
-      const m = measureRef.current;
       if (!svg || !label || !canvas) return;
       const w = canvas.clientWidth;
       const h = canvas.clientHeight;
-      const project = (pt: MeasurePoint) => {
-        const v = new THREE.Vector3(...pt.point).project(s.camera);
+      svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
+      const seg = segmentRef.current;
+      const v = new THREE.Vector3();
+      const project = (p: readonly [number, number, number]) => {
+        v.set(p[0], p[1], p[2]).project(s.camera);
         return { x: ((v.x + 1) / 2) * w, y: ((1 - v.y) / 2) * h, visible: v.z < 1 };
       };
-      const pts = [m.a, m.b].filter((p): p is MeasurePoint => !!p).map(project);
-      svg.setAttribute("viewBox", `0 0 ${w} ${h}`);
-      const [c1, c2, line] = ["#m-a", "#m-b", "#m-line"].map((id) => svg.querySelector(id) as SVGElement | null);
-      const place = (el: SVGElement | null, p?: { x: number; y: number; visible: boolean }) => {
-        if (!el) return;
-        el.style.display = p && p.visible ? "" : "none";
-        if (p) {
-          el.setAttribute("cx", String(p.x));
-          el.setAttribute("cy", String(p.y));
-        }
+      const el = (id: string) => svg.querySelector(id) as SVGElement | null;
+      const hide = (node: SVGElement | null) => {
+        if (node) node.style.display = "none";
       };
-      place(c1, pts[0]);
-      place(c2, pts[1]);
-      if (line) {
-        const both = pts.length === 2 && pts[0].visible && pts[1].visible;
-        line.style.display = both ? "" : "none";
-        if (both) {
-          line.setAttribute("x1", String(pts[0].x));
-          line.setAttribute("y1", String(pts[0].y));
-          line.setAttribute("x2", String(pts[1].x));
-          line.setAttribute("y2", String(pts[1].y));
-        }
-        label.style.display = both ? "" : "none";
-        if (both) {
-          label.style.left = `${(pts[0].x + pts[1].x) / 2}px`;
-          label.style.top = `${(pts[0].y + pts[1].y) / 2}px`;
-        }
+      if (!seg) {
+        for (const id of ["#m-a", "#m-b", "#m-line", "#m-dx", "#m-dy", "#m-dz"]) hide(el(id));
+        label.style.display = "none";
+        return;
+      }
+      const a = project(seg.from);
+      const b = project(seg.to);
+      const corners: [number, number, number][] = [
+        seg.from,
+        [seg.to[0], seg.from[1], seg.from[2]],
+        [seg.to[0], seg.to[1], seg.from[2]],
+        seg.to,
+      ];
+      const legs = [0, 1, 2].map((i) => ({ from: project(corners[i]), to: project(corners[i + 1]) }));
+      const place = (node: SVGElement | null, p: { x: number; y: number; visible: boolean }) => {
+        if (!node) return;
+        node.style.display = p.visible ? "" : "none";
+        node.setAttribute("cx", String(p.x));
+        node.setAttribute("cy", String(p.y));
+      };
+      place(el("#m-a"), a);
+      place(el("#m-b"), b);
+      const span = (node: SVGElement | null, from: { x: number; y: number; visible: boolean }, to: { x: number; y: number; visible: boolean }) => {
+        if (!node) return;
+        const draw = from.visible && to.visible && Math.hypot(to.x - from.x, to.y - from.y) > 3;
+        node.style.display = draw ? "" : "none";
+        if (!draw) return;
+        node.setAttribute("x1", String(from.x));
+        node.setAttribute("y1", String(from.y));
+        node.setAttribute("x2", String(to.x));
+        node.setAttribute("y2", String(to.y));
+      };
+      span(el("#m-line"), a, b);
+      span(el("#m-dx"), legs[0].from, legs[0].to);
+      span(el("#m-dy"), legs[1].from, legs[1].to);
+      span(el("#m-dz"), legs[2].from, legs[2].to);
+      const both = a.visible && b.visible;
+      label.style.display = both ? "" : "none";
+      if (both) {
+        label.style.left = `${(a.x + b.x) / 2}px`;
+        label.style.top = `${(a.y + b.y) / 2}px`;
       }
     };
     s.afterRender.current = sync;
+    syncOverlayRef.current = sync;
     sync();
     return () => {
       if (s.afterRender.current === sync) s.afterRender.current = null;
+      if (syncOverlayRef.current === sync) syncOverlayRef.current = null;
     };
-  }, [measure, model]);
-
-  const measured = useMemo(() => (measure.a && measure.b ? measureBetween(measure.a.point, measure.b.point) : null), [measure]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [model]);
 
   /** Frames `bounds` from a preset, or from wherever the camera is looking now. */
   const frame = (bounds: Model3D["bounds"], preset?: ViewPreset) => {
@@ -592,7 +613,7 @@ function Viewer({ model }: { model: Model3D }) {
   const onPointerMove = (e: React.PointerEvent) => {
     const d = downAt.current;
     if (d && d.id === e.pointerId && Math.hypot(e.clientX - d.x, e.clientY - d.y) > slop(d.touch)) cancelLongPress();
-    if (e.pointerType === "touch" || e.buttons !== 0 || measuring) return;
+    if (e.pointerType === "touch" || e.buttons !== 0) return;
     if (hoverQueued.current) return;
     hoverQueued.current = true;
     const { clientX, clientY } = e;
@@ -616,10 +637,6 @@ function Viewer({ model }: { model: Model3D }) {
         return;
       }
       lastTap.current = { at: now, x: e.clientX, y: e.clientY };
-    }
-    if (measuring) {
-      addMeasurePoint(e.clientX, e.clientY, d.touch);
-      return;
     }
     pickInto(pickRef(e.clientX, e.clientY, d.touch), e.shiftKey || e.ctrlKey || e.metaKey);
   };
@@ -662,15 +679,16 @@ function Viewer({ model }: { model: Model3D }) {
         case "H":
           showAllParts();
           break;
-        case "m":
-        case "M":
-          toggleMeasuring();
+        case "i":
+        case "I": {
+          // Isolate what is selected; with nothing selected, show everything.
+          const parts = [...new Set(selection.map((r) => partOf(model, r)))];
+          if (parts.length > 0) isolateParts(parts);
+          else showAllParts();
           break;
+        }
         case "Escape":
-          // Peel back one layer at a time: points, then the tool, then the selection.
-          if (measure.a) clearMeasure();
-          else if (measuring) setMeasuring(false);
-          else pickInto(null, false);
+          pickInto(null, false);
           break;
         case "1":
           fitAll("iso");
@@ -692,21 +710,14 @@ function Viewer({ model }: { model: Model3D }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selection, hidden, model, measuring, measure]);
-
-  const toggleMeasuring = () => {
-    setMeasuring((v) => {
-      if (v) clearMeasure();
-      return !v;
-    });
-  };
+  }, [selection, hidden, model]);
 
   const sizeOf = (b: Model3D["bounds"]) => [0, 1, 2].map((k) => formatLength(b.max[k] - b.min[k], displayUnit)).join(" × ");
   const size = useMemo(() => sizeOf(model.bounds), [model, displayUnit]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const shown = hover ?? selection[selection.length - 1] ?? null;
   const statusPart = shown ? partOf(model, shown) : null;
-  const rows = useMemo(
+  const measurement = useMemo(
     () =>
       measureSelection(model, selection, {
         length: (v) => formatLength(v, displayUnit),
@@ -715,22 +726,41 @@ function Viewer({ model }: { model: Model3D }) {
       }),
     [model, selection, displayUnit],
   );
+  const rows = measurement.rows;
+  const spanLength = measurement.segment
+    ? formatLength(
+        Math.hypot(
+          measurement.segment.to[0] - measurement.segment.from[0],
+          measurement.segment.to[1] - measurement.segment.from[1],
+          measurement.segment.to[2] - measurement.segment.from[2],
+        ),
+        displayUnit,
+      )
+    : "";
+
+  // Hand the span to the overlay. Drawn straight away rather than waiting
+  // for the next frame: the camera hasn't moved, so the projection is
+  // already valid, and a measurement that appears one frame late reads as
+  // a glitch.
+  useEffect(() => {
+    segmentRef.current = measurement.segment;
+    syncOverlayRef.current?.();
+    sceneRef.current?.requestRender();
+  }, [measurement]);
+
+  /** How many parts are on screen — the Isolate button lights up when it's just the selection. */
+  const visiblePartCount = model.parts.length - hidden.size;
+  const isolateParts = (parts: number[]) => isolate(parts, model.parts.length);
   const readoutTitle = selection
     .slice(-2)
     .map((r) => refLabel(model, r))
     .join(" ↔ ");
-  const measureHint = !measuring
-    ? null
-    : !measure.a
-      ? "Tap the first point"
-      : !measure.b
-        ? "Tap the second point"
-        : null;
+
   return (
     <div className="model-stage" ref={hostRef} data-testid="model-viewport">
       <canvas
         ref={canvasRef}
-        className={`model-canvas ${measuring ? "measuring" : ""}`}
+        className="model-canvas"
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
@@ -741,12 +771,16 @@ function Viewer({ model }: { model: Model3D }) {
       />
       {/* Measurement overlay: screen-space, re-projected after every render (see the sync effect). */}
       <svg ref={overlayRef} className="model-measure-overlay" data-testid="model-measure-overlay" aria-hidden="true">
+        {/* The ΔX / ΔY / ΔZ staircase, drawn behind the direct span. */}
+        <line id="m-dx" className="m-delta m-dx" style={{ display: "none" }} />
+        <line id="m-dy" className="m-delta m-dy" style={{ display: "none" }} />
+        <line id="m-dz" className="m-delta m-dz" style={{ display: "none" }} />
         <line id="m-line" style={{ display: "none" }} />
         <circle id="m-a" r="5" style={{ display: "none" }} />
         <circle id="m-b" r="5" style={{ display: "none" }} />
       </svg>
       <div ref={labelRef} className="model-measure-label" data-testid="model-measure-label" style={{ display: "none" }}>
-        {measured ? formatLength(measured.distance, displayUnit) : ""}
+        {spanLength}
       </div>
       <div className="model-toolbar" data-testid="model-toolbar">
         <ToolButton title="Isometric (1)" label="Iso" icon={ICONS.iso} onClick={() => fitAll("iso")} />
@@ -763,12 +797,13 @@ function Viewer({ model }: { model: Model3D }) {
           onClick={() => setShowEdges((v) => !v)}
         />
         <ToolButton
-          title="Measure the distance between two points — snaps to corners and edges (M)"
-          label="Measure"
-          icon={ICONS.measure}
-          active={measuring}
-          onClick={toggleMeasuring}
-          testId="model-measure-toggle"
+          title="Isolate the selected part — everything else is hidden (I)"
+          label="Isolate"
+          icon={ICONS.isolate}
+          active={hidden.size > 0 && hidden.size === model.parts.length - visiblePartCount}
+          disabled={selection.length === 0}
+          onClick={() => isolateParts([...new Set(selection.map((r) => partOf(model, r)))])}
+          testId="model-isolate"
         />
         <ToolButton
           title="Hide the selected part (H)"
@@ -789,43 +824,24 @@ function Viewer({ model }: { model: Model3D }) {
         />
       </div>
       <div className="model-status" data-testid="model-status">
-        {measuring ? (
-          <>
-            {measured && measure.a && measure.b ? (
-              <span className="model-status-measure" data-testid="model-measure-readout">
-                <b>{formatLength(measured.distance, displayUnit)}</b>
-                {" · ΔX "}
-                {formatLength(measured.dx, displayUnit)}
-                {" ΔY "}
-                {formatLength(measured.dy, displayUnit)}
-                {" ΔZ "}
-                {formatLength(measured.dz, displayUnit)}
-                <span className="model-status-snap">
-                  {" "}
-                  ({measure.a.snap} → {measure.b.snap})
-                </span>
-              </span>
-            ) : (
-              <span className="model-status-part">{measureHint}</span>
-            )}
-          </>
-        ) : (
-          <>
-            <span>{model.parts.length} parts</span>
-            <span>{model.triangleCount.toLocaleString()} triangles</span>
-            <span title={statusPart !== null ? "Part bounding box, X × Y × Z" : "Bounding box, X × Y × Z"}>
-              {statusPart !== null ? sizeOf(model.parts[statusPart].bounds) : size}
-            </span>
-            {statusPart !== null && (
-              <span className="model-status-part" data-testid="model-status-part">
-                {model.parts[statusPart].name}
-              </span>
-            )}
-          </>
+        <span>{model.parts.length} parts</span>
+        <span>{model.triangleCount.toLocaleString()} triangles</span>
+        <span title={statusPart !== null ? "Part bounding box, X × Y × Z" : "Bounding box, X × Y × Z"}>
+          {statusPart !== null ? sizeOf(model.parts[statusPart].bounds) : size}
+        </span>
+        {statusPart !== null && (
+          <span className="model-status-part" data-testid="model-status-part">
+            {model.parts[statusPart].name}
+          </span>
+        )}
+        {hidden.size > 0 && (
+          <span className="model-status-part" data-testid="model-status-hidden">
+            {hidden.size} hidden
+          </span>
         )}
       </div>
       {/* The corner readout: what the current picks measure. */}
-      {!measuring && rows.length > 0 && (
+      {rows.length > 0 && (
         <div className="model-measure-panel" data-testid="model-measure-panel">
           <div className="model-measure-panel-head">
             <span className="model-measure-panel-title" title={readoutTitle}>
@@ -916,10 +932,10 @@ const ICONS = {
       <path d="M12 12l8-4.5M12 12L4 7.5M12 12v9" {...stroke} strokeDasharray="2 2" />
     </svg>
   ),
-  measure: (
+  isolate: (
     <svg viewBox="0 0 24 24" width="18" height="18">
-      <path d="M3 17L17 3l4 4L7 21z" {...stroke} />
-      <path d="M8 12l2 2M11 9l2 2M14 6l2 2" {...stroke} />
+      <path d="M9 9h6v6H9z" {...stroke} />
+      <path d="M4 4h3M4 4v3M20 4h-3M20 4v3M4 20h3M4 20v-3M20 20h-3M20 20v-3" {...stroke} />
     </svg>
   ),
   hide: (
