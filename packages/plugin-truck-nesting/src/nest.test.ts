@@ -21,16 +21,16 @@ describe("nestByOrders", () => {
     expect(r.unplaced).toHaveLength(0);
   });
 
-  it("bands orders in unload sequence — first order at the door, later orders deeper", () => {
+  it("bands orders in load sequence — first order at the nose, later orders nearer the door", () => {
     const r = nestByOrders(trailer, [
       order("First", [pallet(), pallet()]),
       order("Second", [pallet(), pallet()]),
       order("Third", [pallet(), pallet()]),
     ]);
-    const doorEdge = (idx: number) => Math.min(...r.placed.filter((p) => p.orderIndex === idx).map((p) => p.x));
-    expect(doorEdge(0)).toBeCloseTo(0);
-    expect(doorEdge(0)).toBeLessThanOrEqual(doorEdge(1));
-    expect(doorEdge(1)).toBeLessThanOrEqual(doorEdge(2));
+    const noseEdge = (idx: number) => Math.min(...r.placed.filter((p) => p.orderIndex === idx).map((p) => p.x));
+    expect(noseEdge(0)).toBeCloseTo(0);
+    expect(noseEdge(0)).toBeLessThanOrEqual(noseEdge(1));
+    expect(noseEdge(1)).toBeLessThanOrEqual(noseEdge(2));
   });
 
   it("reordering the orders moves the bands", () => {
@@ -143,5 +143,54 @@ describe("nestByOrders", () => {
     const gapY = Math.max(a.y - (b.y + b.width), b.y - (a.y + a.width));
     // separated on at least one axis by >= 2*margin
     expect(Math.max(gapX, gapY)).toBeGreaterThanOrEqual(2 * m - 1e-6);
+  });
+});
+
+describe("orientation lock", () => {
+  // 1200 across × 800 along. Auto is free to turn it; the locks are not.
+  const across = (r: NestResult) => r.placed.map((p) => Math.round(p.width));
+
+  it("auto turns a pallet when that packs tighter", () => {
+    // A narrow trailer can only take this pallet turned.
+    const narrow: TrailerProfile = { name: "narrow", length: 13600, width: 900 };
+    const r = nestByOrders(narrow, [order("A", [pallet({ orientation: "auto" })])]);
+    expect(r.placed).toHaveLength(1);
+    expect(r.placed[0].rotated).toBe(true);
+    expect(across(r)).toEqual([800]);
+  });
+
+  it("keeps a fixed pallet as entered, even where turning it would fit", () => {
+    const narrow: TrailerProfile = { name: "narrow", length: 13600, width: 900 };
+    const r = nestByOrders(narrow, [order("A", [pallet({ orientation: "fixed" })])]);
+    expect(r.placed).toHaveLength(0);
+    expect(r.unplaced[0].reason).toContain("orientation locked");
+  });
+
+  it("always turns a pallet locked to turned, even when it needn't", () => {
+    const r = nestByOrders(trailer, [order("A", [pallet({ orientation: "turned" })])]);
+    expect(r.placed[0].rotated).toBe(true);
+    expect(across(r)).toEqual([800]);
+    // And the placement carries the lock through, for the print.
+    expect(r.placed[0].orientation).toBe("turned");
+  });
+
+  it("defaults to auto when nothing is set, which is the old behaviour", () => {
+    const r = nestByOrders(trailer, [order("A", [pallet()])]);
+    expect(r.placed[0].orientation).toBe("auto");
+  });
+
+  it("never turns a round pallet, whatever the lock says", () => {
+    const r = nestByOrders(trailer, [order("A", [pallet({ shape: "round", width: 1000, orientation: "turned" })])]);
+    expect(r.placed).toHaveLength(1);
+    expect(r.placed[0].rotated).toBe(false);
+  });
+
+  it("separates 'locked the wrong way' from 'too big for the trailer'", () => {
+    const narrow: TrailerProfile = { name: "narrow", length: 13600, width: 900 };
+    const r = nestByOrders(narrow, [
+      order("A", [pallet({ orientation: "fixed" }), pallet({ width: 4000, length: 4000, orientation: "auto" })]),
+    ]);
+    expect(r.unplaced[0].count).toBe(2);
+    expect(r.unplaced[0].reason).toContain("locked the wrong way");
   });
 });

@@ -12,8 +12,9 @@ function rectsOverlap(a: PlacedItem, b: PlacedItem): boolean {
 
 /**
  * Sanity-checks a nest result: pallets that didn't fit, a load longer than the
- * trailer, pallets overlapping, and the load-order rule — no later drop parked
- * between an earlier drop and the door. Overlap and blocked-access shouldn't
+ * trailer, pallets overlapping, and the load-order rule — no later-loaded
+ * drop parked deeper than an earlier one, where unloading would have to move
+ * it first. Overlap and blocked-access shouldn't
  * fire against `nestByOrders`'s own output (the banding rules them out), so they
  * pay off the moment anything can move a pallet independently of its band.
  */
@@ -48,14 +49,14 @@ export function validateNest(result: NestResult): ValidationFinding[] {
       if (b.x < a.x - EPS) {
         findings.push({
           level: "error",
-          message: `${b.city || `Drop ${b.orderIndex + 1}`} (unloaded after ${a.city || `drop ${a.orderIndex + 1}`}) blocks it from the door.`,
+          message: `${b.city || `Drop ${b.orderIndex + 1}`} (loaded after ${a.city || `drop ${a.orderIndex + 1}`}) is buried behind it.`,
         });
       }
     }
   }
 
   const clean = findings.every((f) => f.level === "info");
-  if (clean) findings.push({ level: "info", message: "No issues — the plan unloads cleanly." });
+  if (clean) findings.push({ level: "info", message: "No issues — every drop comes off without moving another." });
 
   const wall = Math.max(0, trailer.wallMargin ?? 0);
   if (wall > 1e-6) {

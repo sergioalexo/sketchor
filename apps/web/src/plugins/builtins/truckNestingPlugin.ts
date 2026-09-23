@@ -10,11 +10,57 @@ import {
   type NestResult,
   type Order,
   type Pallet,
+  type PalletOrientation,
   type PalletShape,
   type TrailerProfile,
   type ValidationFinding,
 } from "@sketchor/plugin-truck-nesting";
-import { PALETTE, type DisplayUnitInfo, type PluginModule } from "@sketchor/plugin-sdk";
+import { type DisplayUnitInfo, type PluginModule } from "@sketchor/plugin-sdk";
+
+/**
+ * Order colours, deliberately *not* the app's shared entity palette.
+ *
+ * A load plan is read on a printed sheet on a loading dock, often
+ * photocopied, and the only thing distinguishing one drop from the next is
+ * its colour. The shared palette runs through neighbouring hues
+ * (red-orange-yellow, teal-blue-indigo) at one lightness, which muddles
+ * exactly there. This is the Okabe–Ito set — designed to stay distinct for
+ * colour-blind readers and in grayscale — ordered so consecutive orders
+ * alternate warm and cool, with three further distinct hues after it.
+ */
+const ORDER_COLORS: readonly string[] = [
+  "#e69f00", // orange
+  "#56b4e9", // sky blue
+  "#009e73", // green
+  "#f0e442", // yellow
+  "#0072b2", // blue
+  "#d55e00", // vermillion
+  "#cc79a7", // pink
+  "#8c564b", // brown
+  "#6a3d9a", // purple
+  "#999999", // grey
+];
+
+/**
+ * Black or white, whichever reads on `background` — relative luminance per
+ * WCAG. Half these colours are dark enough that black text on them is
+ * unreadable at pallet-label size, which on a load plan means the item
+ * number is illegible.
+ */
+function inkOn(background: string): string {
+  const hex = background.trim().replace("#", "");
+  const full = hex.length === 3 ? hex.split("").map((c) => c + c).join("") : hex;
+  if (full.length !== 6) return "#111111";
+  const channel = (i: number) => {
+    const v = parseInt(full.slice(i * 2, i * 2 + 2), 16) / 255;
+    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  };
+  const luminance = 0.2126 * channel(0) + 0.7152 * channel(1) + 0.0722 * channel(2);
+  // 0.179 is where contrast against black and against white are equal
+  // ((L+0.05)/0.05 == 1.05/(L+0.05)); guessing a threshold higher than
+  // that puts white text on mid-tone oranges, which is the worst of both.
+  return luminance > 0.179 ? "#111111" : "#ffffff";
+}
 
 /**
  * First-party dogfood: the Truck Load Planner. All the nesting maths lives in
@@ -84,7 +130,7 @@ function seedOrder(pallet: PalletPreset): Order {
     jobNumber: "",
     city: "",
     state: "",
-    color: PALETTE[0],
+    color: ORDER_COLORS[0],
     pallets: [{ id: `p-${Date.now().toString(36)}`, name: pallet.name, width: pallet.width, length: pallet.length, shape: pallet.shape, qty: 1 }],
   };
 }
@@ -105,6 +151,9 @@ function str(v: unknown): string {
 function asShape(v: unknown): PalletShape {
   return v === "round" ? "round" : "rect";
 }
+function asOrientation(v: unknown): PalletOrientation {
+  return v === "fixed" || v === "turned" ? v : "auto";
+}
 
 function asPallet(v: unknown): Pallet | null {
   if (!v || typeof v !== "object") return null;
@@ -117,6 +166,7 @@ function asPallet(v: unknown): Pallet | null {
     shape: asShape(o.shape),
     qty: Math.max(1, Math.floor(num(o.qty, 1))),
     tag: str(o.tag) || undefined,
+    orientation: asOrientation(o.orientation),
   };
 }
 
@@ -137,7 +187,7 @@ function asOrder(v: unknown): Order | null {
     jobNumber: str(o.jobNumber),
     city: str(o.city),
     state: str(o.state),
-    color: str(o.color) || PALETTE[0],
+    color: str(o.color) || ORDER_COLORS[0],
     pallets,
   };
 }
@@ -205,7 +255,7 @@ const plugin: PluginModule = {
     let lastResult: NestResult | null = null;
     let lastFindings: ValidationFinding[] = [];
 
-    const pushInit = () => void sketchor.ui.postMessage({ type: "init", state, unit, palette: PALETTE });
+    const pushInit = () => void sketchor.ui.postMessage({ type: "init", state, unit, palette: ORDER_COLORS });
 
     void sketchor.app.onDisplayUnitChange((info) => {
       unit = info;
@@ -323,7 +373,7 @@ function fmtIsoDate(iso: string): string {
 
 /**
  * A printable load-plan report: a top-down SVG of the nest, a legend mapping
- * each unload stop's colour to its city, and a full pallet list — built from
+ * each drop's colour to its city, and a full pallet list — built from
  * the last solved {@link NestResult}, not the live canvas, so it always
  * matches what Auto-nest actually computed.
  */
@@ -332,34 +382,48 @@ function jobDestination(p: { jobNumber?: string; city: string; state?: string })
   return [p.jobNumber?.trim(), cityState].filter(Boolean).join(" — ") || "—";
 }
 
-function buildPrintHtml(
+export function buildPrintHtml(
   result: NestResult,
   findings: ValidationFinding[],
   info: { loadName: string; truckInfo: string; loadDate: string; perMm: number; unitLabel: string },
 ): string {
   const { trailer } = result;
   const pad = Math.max(trailer.length, trailer.width) * 0.03;
-  const vb = `${-pad} ${-pad} ${trailer.length + pad * 2} ${trailer.width + pad * 3}`;
+  // Extra room below the trailer for the (now much larger) NOSE / DOOR labels.
+  const vb = `${-pad} ${-pad} ${trailer.length + pad * 2} ${trailer.width + pad * 2 + Math.min(trailer.width * 0.11, 220) * 1.4}`;
 
   const shapes = result.placed
     .map((p, i) => {
+      const ink = inkOn(p.color);
       const shape =
         p.shape === "round"
           ? `<circle cx="${p.x + p.width / 2}" cy="${p.y + p.width / 2}" r="${p.width / 2}" fill="${p.color}" stroke="#111" stroke-width="${pad * 0.05}" />`
           : `<rect x="${p.x}" y="${p.y}" width="${p.length}" height="${p.width}" fill="${p.color}" stroke="#111" stroke-width="${pad * 0.05}" />`;
       // The item number, big and bold — the same number as on the drawn plan
       // and the pallet table below, since city/tag text is often too small
-      // to read once the trailer is zoomed to fit the page.
-      const fontSize = Math.min(Math.min(p.length, p.width) * 0.4, 160);
-      const textEl = `<text x="${p.x + p.length / 2}" y="${p.y + p.width / 2}" font-size="${fontSize}" font-weight="700" text-anchor="middle" dominant-baseline="middle" fill="#111">${i + 1}</text>`;
-      return shape + textEl;
+      // to read once the trailer is zoomed to fit the page. The tag goes
+      // under it: it is the instruction for whoever is loading ("FRAGILE",
+      // "TOP LOAD"), and it has to be readable *on the nest*, not only in a
+      // table they'd have to cross-reference by number.
+      const tag = p.tag?.trim() ?? "";
+      const fontSize = Math.min(Math.min(p.length, p.width) * (tag ? 0.34 : 0.4), 160);
+      const tagSize = Math.min(Math.min(p.length, p.width) * 0.15, 64);
+      const cx = p.x + p.length / 2;
+      const cy = p.y + p.width / 2;
+      const numberY = tag ? cy - tagSize * 0.5 : cy;
+      const textEl = `<text x="${cx}" y="${numberY}" font-size="${fontSize}" font-weight="700" text-anchor="middle" dominant-baseline="middle" fill="${ink}">${i + 1}</text>`;
+      const tagEl = tag
+        ? `<text x="${cx}" y="${cy + fontSize * 0.55}" font-size="${tagSize}" font-weight="600" text-anchor="middle" dominant-baseline="middle" fill="${ink}">${escapeHtml(tag)}</text>`
+        : "";
+      return shape + textEl + tagEl;
     })
     .join("");
 
-  // DOOR (x = 0, where the load unloads from) and NOSE (x = length, against the cab).
-  const endFontSize = Math.min(trailer.width * 0.06, 90);
-  const endLabels = `<text x="${endFontSize * 0.2}" y="${trailer.width + endFontSize * 1.1}" font-size="${endFontSize}" font-weight="700" fill="#111">DOOR</text>
-    <text x="${trailer.length - endFontSize * 0.2}" y="${trailer.width + endFontSize * 1.1}" font-size="${endFontSize}" font-weight="700" text-anchor="end" fill="#111">NOSE</text>`;
+  // NOSE (x = 0, against the cab, loaded first) and DOOR (x = length).
+  // Large: this is what tells the dock which way round the plan goes.
+  const endFontSize = Math.min(trailer.width * 0.11, 220);
+  const endLabels = `<text x="${endFontSize * 0.2}" y="${trailer.width + endFontSize * 1.05}" font-size="${endFontSize}" font-weight="700" fill="#111">NOSE</text>
+    <text x="${trailer.length - endFontSize * 0.2}" y="${trailer.width + endFontSize * 1.05}" font-size="${endFontSize}" font-weight="700" text-anchor="end" fill="#111">DOOR</text>`;
 
   const svg = `<svg viewBox="${vb}" xmlns="http://www.w3.org/2000/svg">
     <rect x="0" y="0" width="${trailer.length}" height="${trailer.width}" fill="none" stroke="#111" stroke-width="${pad * 0.08}" />
@@ -384,7 +448,7 @@ function buildPrintHtml(
   const rows = result.placed
     .map((p, i) => {
       const dims = p.shape === "round" ? `Ø ${fmtMm(p.width, info.perMm, info.unitLabel)}` : `${fmtMm(p.width, info.perMm, info.unitLabel)} × ${fmtMm(p.length, info.perMm, info.unitLabel)}`;
-      return `<tr><td>${i + 1}</td><td><span class="swatch" style="background:${escapeHtml(p.color)}"></span>${escapeHtml(p.jobNumber || "—")}</td><td>${escapeHtml([p.city, p.state].filter(Boolean).join(", ") || "—")}</td><td>${p.shape === "round" ? "Round" : "Rect"}</td><td>${dims}</td><td>${escapeHtml(p.tag || "")}</td></tr>`;
+      return `<tr><td>${i + 1}</td><td><span class="swatch" style="background:${escapeHtml(p.color)}"></span>${escapeHtml(p.jobNumber || "—")}</td><td>${escapeHtml([p.city, p.state].filter(Boolean).join(", ") || "—")}</td><td>${dims}</td><td>${escapeHtml(p.tag || "")}</td></tr>`;
     })
     .join("");
 
@@ -419,11 +483,11 @@ function buildPrintHtml(
     <h1>${escapeHtml(info.loadName)}</h1>
     <div class="sub"><b>${escapeHtml(trailer.name)}</b> &middot; ${fmtMm(trailer.length, info.perMm, info.unitLabel)} × ${fmtMm(trailer.width, info.perMm, info.unitLabel)} &middot; ${result.placed.length} pallets, ${fmtMm(result.usedLength, info.perMm, info.unitLabel)} used${info.truckInfo ? ` &middot; ${escapeHtml(info.truckInfo)}` : ""}${fmtIsoDate(info.loadDate) ? ` &middot; ${escapeHtml(fmtIsoDate(info.loadDate))}` : ""}</div>
     ${svg}
-    <h2>Legend — unload sequence</h2>
+    <h2>Legend — load sequence</h2>
     <div class="legend">${legend}</div>
     <h2>Pallets</h2>
     <table>
-      <thead><tr><th>#</th><th>Job Number</th><th>City / State</th><th>Shape</th><th>Size</th><th>Tag</th></tr></thead>
+      <thead><tr><th>#</th><th>Job Number</th><th>City / State</th><th>Size</th><th>Tag</th></tr></thead>
       <tbody>${rows}</tbody>
     </table>
     ${unplaced}
@@ -431,7 +495,7 @@ function buildPrintHtml(
   </div>`;
 }
 
-const PANEL_HTML = `<!doctype html>
+export const PANEL_HTML = `<!doctype html>
 <html>
   <head>
     <style>
@@ -516,7 +580,7 @@ const PANEL_HTML = `<!doctype html>
     </div>
     <div class="presets" id="presets" hidden></div>
 
-    <h4>Orders — drag <span style="opacity:.6">&#10303;</span> or use &#9650;&#9660; to set unload order</h4>
+    <h4>Orders — drag <span style="opacity:.6">&#10303;</span> or use &#9650;&#9660; to set load order</h4>
     <div id="orders"></div>
     <button class="ghost sm" id="order-add">+ Add order</button>
 
@@ -543,6 +607,14 @@ const PANEL_HTML = `<!doctype html>
       const $ = (id) => document.getElementById(id);
       const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
       const RECT_SVG = '<svg width="14" height="14" viewBox="0 0 14 14"><rect x="2" y="3.5" width="10" height="7" rx="1" fill="none" stroke="#dfe1e5" stroke-width="1.4"/></svg>';
+      // Orientation lock. "Auto" is the old behaviour — the nester turns a
+      // pallet when that packs tighter. The other two say it can't be
+      // turned, because the freight or the forklift says so.
+      const ORIENT_OPTS = [
+        { v: "auto", label: "Auto turn" },
+        { v: "fixed", label: "Keep W×L" },
+        { v: "turned", label: "Turn 90°" },
+      ];
       const ROUND_SVG = '<svg width="14" height="14" viewBox="0 0 14 14"><circle cx="7" cy="7" r="4.6" fill="none" stroke="#dfe1e5" stroke-width="1.4"/></svg>';
 
       // A hint for the common case, not a full postal database — any city/state can still be typed freely.
@@ -762,6 +834,11 @@ const PANEL_HTML = `<!doctype html>
                 "<input class='p-num pw' type='number' min='0' step='any' title='" + (round ? "Diameter" : "Width") + " (" + esc(unit.label) + ")' value='" + toU(p.width) + "'>" +
                 (round ? "" : "<span class='times'>&times;</span><input class='p-num pl' type='number' min='0' step='any' title='Length (" + esc(unit.label) + ")' value='" + toU(p.length) + "'>") +
                 "<input class='p-tag' placeholder='Tag (e.g. FRAGILE)' value='" + esc(p.tag || "") + "'>" +
+                (round
+                  ? ""
+                  : "<select class='p-orient' title='Orientation — Auto lets the nester turn it to pack tighter; the others lock it'>" +
+                    ORIENT_OPTS.map((o) => "<option value='" + o.v + "'" + ((p.orientation || "auto") === o.v ? " selected" : "") + ">" + o.label + "</option>").join("") +
+                    "</select>") +
                 "</div>" +
                 "</div>"
               );
@@ -895,6 +972,8 @@ const PANEL_HTML = `<!doctype html>
             const plEl = row.querySelector(".pl");
             if (plEl) plEl.addEventListener("input", (e) => { p.length = fromU(e.target.value); persist(); });
             row.querySelector(".p-tag").addEventListener("input", (e) => { p.tag = e.target.value; persist(); });
+            const orientEl = row.querySelector(".p-orient");
+            if (orientEl) orientEl.addEventListener("change", (e) => { p.orientation = e.target.value; persist(); });
             row.querySelector(".ps").addEventListener("click", () => {
               p.shape = p.shape === "round" ? "rect" : "round";
               if (p.shape === "round") p.length = p.width;
@@ -981,7 +1060,7 @@ const PANEL_HTML = `<!doctype html>
           byOrder.set(p.orderId, e);
         });
         const seq = [...byOrder.values()].sort((a, b) => a.index - b.index);
-        if (seq.length) html += "<h4>Unload sequence</h4>";
+        if (seq.length) html += "<h4>Load sequence</h4>";
         seq.forEach((o) => {
           html += "<div class='stop' style='border-left-color:" + esc(o.color) + "'>#" + (o.index + 1) + " " + esc(o.dest) + " · " + o.n + " pallet" + (o.n === 1 ? "" : "s") + "</div>";
         });

@@ -55,6 +55,14 @@ const added = (cmds: ReturnType<typeof buildNestLayout>) => cmds.filter((c) => c
 const isColor = (c: ReturnType<typeof buildNestLayout>[number], col: string) =>
   c.type === "add-entity" && c.entity.color === col;
 
+/**
+ * A guide is identified by its dedicated layer, not by being white: pallet
+ * labels are drawn white too when the order colour behind them is dark, and
+ * a colour-based filter quietly counts those as guides.
+ */
+const isGuide = (c: ReturnType<typeof buildNestLayout>[number]) =>
+  c.type === "add-entity" && c.entity.layer === LOAD_PLAN_GUIDE_LAYER;
+
 describe("buildNestLayout", () => {
   it("draws one hatched shape per pallet, each in its own group", () => {
     const result = nestByOrders(trailer, orders);
@@ -94,8 +102,15 @@ describe("buildNestLayout", () => {
   it("labels the door and nose ends of the trailer", () => {
     const cmds = buildNestLayout(nestByOrders(trailer, orders));
     const texts = added(cmds).filter((c) => c.type === "add-entity" && c.entity.type === "text");
-    expect(texts.some((c) => c.type === "add-entity" && c.entity.type === "text" && c.entity.text === "DOOR")).toBe(true);
-    expect(texts.some((c) => c.type === "add-entity" && c.entity.type === "text" && c.entity.text === "NOSE")).toBe(true);
+    // NOSE is the deep end (x = 0, loaded first); DOOR is where loading
+    // starts from — the labels tell the dock which way round the plan goes,
+    // so which end carries which word is the whole point.
+    const at = (label: string) => {
+      const t = texts.find((c) => c.type === "add-entity" && c.entity.type === "text" && c.entity.text === label);
+      return t?.type === "add-entity" && t.entity.type === "text" ? t.entity.at.x : null;
+    };
+    expect(at("NOSE")).toBeLessThan(trailer.length / 2);
+    expect(at("DOOR")).toBeGreaterThan(trailer.length / 2);
   });
 
   it("writes a printable summary block beside the trailer", () => {
@@ -114,19 +129,18 @@ describe("buildNestLayout", () => {
 describe("buildNestLayout margins", () => {
   it("adds no guides when both margins are zero", () => {
     const cmds = buildNestLayout(nestByOrders(trailer, orders));
-    expect(added(cmds).filter((c) => isColor(c, "#ffffff"))).toHaveLength(0);
+    expect(added(cmds).filter(isGuide)).toHaveLength(0);
   });
 
   it("draws dashed white guides for the wall clearance and each pallet slot", () => {
     const result = nestByOrders({ ...trailer, wallMargin: 120 }, orders, { palletMargin: 30 });
     const cmds = buildNestLayout(result);
-    const guides = added(cmds).filter((c) => isColor(c, "#ffffff"));
+    const guides = added(cmds).filter(isGuide);
     expect(guides).toHaveLength(1 + result.placed.length);
     for (const g of guides) {
       if (g.type === "add-entity") {
         expect(g.entity.dashed).toBe(true);
-        // guides live on their own layer so they can be hidden from the plan
-        expect(g.entity.layer).toBe(LOAD_PLAN_GUIDE_LAYER);
+        expect(g.entity.color).toBe("#ffffff");
         if ("fill" in g.entity) expect(g.entity.fill).toBeUndefined();
       }
     }
@@ -235,6 +249,31 @@ describe("readLivePlacements", () => {
     expect(live[movedIndex].x).toBeCloseTo((original?.x ?? 0) + 2000);
     // Everything else about the item (job/city/color) is preserved from the solved result.
     expect(live[movedIndex].jobNumber).toBe(original?.jobNumber);
+  });
+
+  it("keeps a pallet's size after it is turned on the canvas — the vanishing-dimensions bug", () => {
+    // Rotating a pallet 90° in the view left p1.x − p0.x = 0, so the pallet
+    // read back as 0 mm long: its dimensions disappeared from the plan and
+    // the printed size column. Sides are measured as edge lengths now.
+    const result = nestByOrders(trailer, orders);
+    let m = applyCommands(model(), buildNestLayout(result));
+    const shape = m.entities.find((e) => e.name === "pallet-shape" && e.type === "polyline");
+    if (!shape || shape.type !== "polyline") throw new Error("expected a rect pallet in the fixture");
+    const index = result.placed.findIndex((p) => p.shape === "rect");
+    const before = result.placed[index];
+
+    // Turn it a quarter turn about its own first corner.
+    const [o] = shape.points;
+    const turned = {
+      ...shape,
+      points: shape.points.map((p) => ({ x: o.x - (p.y - o.y), y: o.y + (p.x - o.x) })),
+    };
+    m = { ...m, entities: m.entities.map((e) => (e.id === turned.id ? turned : e)) };
+
+    const live = readLivePlacements(m, result);
+    expect(live[index].length).toBeCloseTo(before.length, 6);
+    expect(live[index].width).toBeCloseTo(before.width, 6);
+    expect(live[index].length).toBeGreaterThan(0);
   });
 
   it("survives a dimension toggle regrouping — pairs by item number, not group array order", () => {

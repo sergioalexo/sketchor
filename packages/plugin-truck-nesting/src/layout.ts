@@ -129,6 +129,27 @@ const NAME_LABEL = "pallet-label";
 const NAME_NUMBER = "pallet-number";
 const NAME_GUIDE = "pallet-guide";
 
+/**
+ * Black or white, whichever reads on `background` (WCAG relative
+ * luminance). Order colours span light yellows to dark blues, and a fixed
+ * dark label is illegible on the dark half — on a load plan that means the
+ * item number, which is the one thing a loader reads.
+ */
+export function inkOn(background: string): string {
+  const hex = background.trim().replace("#", "");
+  const full = hex.length === 3 ? hex.split("").map((c) => c + c).join("") : hex;
+  if (full.length !== 6) return "#111111";
+  const channel = (i: number) => {
+    const v = parseInt(full.slice(i * 2, i * 2 + 2), 16) / 255;
+    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+  };
+  const luminance = 0.2126 * channel(0) + 0.7152 * channel(1) + 0.0722 * channel(2);
+  // 0.179 is where contrast against black and against white are equal
+  // ((L+0.05)/0.05 == 1.05/(L+0.05)); guessing a threshold higher than
+  // that puts white text on mid-tone oranges, which is the worst of both.
+  return Number.isFinite(luminance) && luminance > 0.179 ? "#111111" : "#ffffff";
+}
+
 /** "City, ST" (or whichever half is present) — the destination shown on a pallet and in print. */
 function cityState(p: { city: string; state: string }): string {
   return [p.city?.trim(), p.state?.trim()].filter(Boolean).join(", ");
@@ -142,7 +163,18 @@ interface PalletGeometry {
   shape: PalletShape;
 }
 
-/** Recovers a placed pallet's current footprint from its drawn shape entity — including any manual drag since it was nested. */
+/**
+ * Recovers a placed pallet's current footprint from its drawn shape entity —
+ * including any manual drag *or turn* since it was nested.
+ *
+ * The sides are measured as the lengths of two adjacent edges rather than as
+ * differences of coordinates. A pallet the user rotated on the canvas has
+ * the same four corners in the same order, but `p1.x − p0.x` is then zero,
+ * which silently reported a pallet 0 mm long: the dimensions vanished from
+ * the plan and the printed size column, which is exactly the bug this
+ * guards against. The position is the footprint's bounding-box corner, which
+ * is what every consumer here wants and is rotation-proof too.
+ */
 function geometryFromShapeEntity(e: Entity): PalletGeometry | null {
   if (e.type === "circle") {
     const d = e.radius * 2;
@@ -150,7 +182,16 @@ function geometryFromShapeEntity(e: Entity): PalletGeometry | null {
   }
   if (e.type === "polyline" && e.points.length >= 3) {
     const [p0, p1, p2] = e.points;
-    return { x: p0.x, y: p0.y, length: p1.x - p0.x, width: p2.y - p1.y, shape: "rect" };
+    const side = (a: { x: number; y: number }, b: { x: number; y: number }) => Math.hypot(b.x - a.x, b.y - a.y);
+    const xs = e.points.map((p) => p.x);
+    const ys = e.points.map((p) => p.y);
+    return {
+      x: Math.min(...xs),
+      y: Math.min(...ys),
+      length: side(p0, p1),
+      width: side(p1, p2),
+      shape: "rect",
+    };
   }
   return null;
 }
@@ -245,6 +286,7 @@ function palletCommands(p: PlacedItem, itemNumber: number, opts: LayoutOptions):
   if (dest) lines.push({ text: dest, height: smallH, name: NAME_LABEL });
   if (p.tag?.trim()) lines.push({ text: p.tag.trim(), height: smallH, name: NAME_LABEL });
 
+  const ink = inkOn(p.color);
   const lineGaps = lines.map((l) => l.height * 1.25);
   const blockH = lineGaps.reduce((a, b) => a + b, 0);
   let cursorY = p.y + p.width / 2 - blockH / 2;
@@ -253,7 +295,7 @@ function palletCommands(p: PlacedItem, itemNumber: number, opts: LayoutOptions):
     const t = text(
       { x: p.x + Math.max(p.length / 2 - w / 2, p.length * 0.06), y: cursorY + lineGaps[i] / 2 - l.height / 2 },
       l.text,
-      { layer: LOAD_PLAN_LAYER, color: "#111111", height: l.height, name: l.name },
+      { layer: LOAD_PLAN_LAYER, color: ink, height: l.height, name: l.name },
     );
     push(add(t), t.id);
     cursorY += lineGaps[i];
@@ -316,9 +358,12 @@ export function buildNestLayout(
 ): Command[] {
   const commands: Command[] = [...trailerOutlineCommands(result.trailer).commands];
 
-  // DOOR (x = 0, where the load unloads from) and NOSE (x = length, against
-  // the cab) — orientation is otherwise implicit in the plan.
-  const endLabelH = Math.min(result.trailer.width * 0.05, 90);
+  // NOSE (x = 0, against the cab — loaded first) and DOOR (x = length, where
+  // loading starts from and unloading finishes). Orientation is otherwise
+  // implicit in the plan, and these two words are how anyone reading the
+  // plan on the dock knows which way round it goes — so they are drawn
+  // large enough to read at arm's length on a printed sheet.
+  const endLabelH = Math.min(result.trailer.width * 0.09, 170);
   const endLabel = (atX: number, str: string, alignRight: boolean) => {
     const w = str.length * endLabelH * 0.6;
     commands.push(
@@ -331,8 +376,8 @@ export function buildNestLayout(
       ),
     );
   };
-  endLabel(0, "DOOR", false);
-  endLabel(result.trailer.length, "NOSE", true);
+  endLabel(0, "NOSE", false);
+  endLabel(result.trailer.length, "DOOR", true);
 
   // One group per pallet — shape + guide + tag + dimensions. A single group
   // (not nested per order) so a click selects one pallet and dragging it snaps
@@ -376,7 +421,7 @@ function summaryLines(result: NestResult, findings: ValidationFinding[]): string
   lines.push(
     `${result.placed.length} pallets, ${Math.round(result.usedLength)} / ${Math.round(result.trailer.length)} mm used`,
   );
-  lines.push("Unload order (first off at the door):");
+  lines.push("Load order (first on, at the nose):");
   for (const [idx, { city, n }] of [...bySeq].sort((a, b) => a[0] - b[0])) {
     lines.push(`  ${idx + 1}. ${city || "—"} — ${n} pallet${n === 1 ? "" : "s"}`);
   }

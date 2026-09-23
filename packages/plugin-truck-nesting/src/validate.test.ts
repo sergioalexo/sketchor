@@ -11,6 +11,7 @@ function placed(over: Partial<PlacedItem> & Pick<PlacedItem, "instanceId" | "ord
     state: "",
     color: "#000",
     shape: "rect" as const,
+    orientation: "auto" as const,
     y: 0,
     length: 1200,
     width: 800,
@@ -31,7 +32,7 @@ describe("validateNest", () => {
       unplaced: [],
       usedLength: 2500,
     };
-    expect(validateNest(result)).toEqual([{ level: "info", message: "No issues — the plan unloads cleanly." }]);
+    expect(validateNest(result)).toEqual([{ level: "info", message: "No issues — every drop comes off without moving another." }]);
   });
 
   it("flags a later drop parked between an earlier drop and the door", () => {
@@ -45,7 +46,7 @@ describe("validateNest", () => {
       usedLength: 2500,
     };
     const findings = validateNest(result);
-    expect(findings.some((f) => f.level === "error" && /blocks it from the door/.test(f.message))).toBe(true);
+    expect(findings.some((f) => f.level === "error" && /is buried behind it/.test(f.message))).toBe(true);
   });
 
   it("flags an overflowing load", () => {
