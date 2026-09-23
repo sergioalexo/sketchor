@@ -158,6 +158,29 @@ the worker imports the vendored `.mjs`/`.wasm` directly. So:
 
 Debug: `window.sketchor.openModel(name, arrayBuffer)` / `getModel()`.
 
+## Printing and autosave (`apps/web/src/print/`, `io/autosaveFolder.ts`)
+
+`printHtml(bodyHtml, { fileName })` is the one print path — the toolbar's
+Print, and every plugin's `sketchor.ui.print` (host API 0.6.0 carries the
+optional `fileName`). It renders an in-page preview rather than a popup,
+because popup blockers and the desktop webview both eat `window.open`.
+
+Its bar also **autosaves**: a folder the user picks once is kept as a
+`FileSystemDirectoryHandle` in IndexedDB (a path string wouldn't carry the
+browser's grant with it), and each printed sheet is written there as a
+standalone HTML document. Two rules that are easy to get wrong:
+
+- The write must happen **inside the click** that starts the print. A
+  restored handle comes back in the `prompt` permission state, and
+  `requestPermission` is only granted during a user gesture — and
+  `window.print()` blocks, so anything after it has missed the window.
+- A remembered folder can be renamed, unmounted or revoked. Every call
+  fails soft and reports why in the bar, rather than throwing into the
+  middle of printing.
+
+Chromium only (`showDirectoryPicker`); the controls are simply absent
+where the API isn't there, and printing behaves as before.
+
 ## Tools (`apps/web/src/tools/`)
 
 Drawing tools are state machines on the framework in `tools/tool.ts`

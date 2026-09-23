@@ -1724,6 +1724,7 @@ body.sketchor-printing #sketchor-print-root {
 
 .print-preview-actions {
   display: flex;
+  align-items: center;
   gap: 8px;
 }
 
@@ -2549,6 +2550,29 @@ kbd.shortcut-key-fixed {
 .structure-menu button:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+/* Autosave controls in the print preview bar. */
+.print-autosave {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.print-save-note {
+  max-width: 320px;
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.print-save-note.bad {
+  color: #e06c75;
 }
 
 /* Constraints panel (T-41): apply buttons, then the sketch's constraint list. */

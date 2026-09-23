@@ -144,9 +144,17 @@ export function dispatchPost(ctx: HostContext, method: string, args: unknown[]):
     case "ui.postMessage":
       postToPanel(ctx.pluginId, args[0]);
       return;
-    case "ui.print":
-      printHtml(String(args[0]));
+    case "ui.print": {
+      // args[1] is an optional { fileName } — what the autosaved copy is
+      // called. A plugin that doesn't pass one still prints as before.
+      const opts = args[1];
+      const fileName =
+        opts && typeof opts === "object" && typeof (opts as { fileName?: unknown }).fileName === "string"
+          ? (opts as { fileName: string }).fileName
+          : undefined;
+      printHtml(String(args[0]), { fileName });
       return;
+    }
     default:
       throw new Error(`Unhandled post method "${method}"`);
   }

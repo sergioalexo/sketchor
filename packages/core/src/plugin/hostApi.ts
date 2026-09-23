@@ -145,7 +145,15 @@ export interface UiApi {
    * both the browser and the desktop webview. `bodyHtml` is trusted markup
    * the plugin builds itself; escape any user-entered strings it contains.
    */
-  print(bodyHtml: string): void;
+  print(bodyHtml: string, options?: PrintOptions): void;
+}
+
+export interface PrintOptions {
+  /**
+   * A name for the sheet, used when the host is set to save a copy of every
+   * print into a folder (no extension, no path — the host sanitises it).
+   */
+  fileName?: string;
 }
 
 export interface UiShowOptions {
@@ -238,6 +246,8 @@ export interface ImporterContext {
  * `ui.show(html, options)` for the sandboxed-iframe panel — a breaking change to
  * the `ui` sub-API, hence the minor bump on a pre-1.0 line. 0.4.0 added the
  * ambient, permission-free {@link AppApi} (`app.displayUnit`) — additive.
- * 0.5.0 added `ui.print(bodyHtml)` — additive.
+ * 0.5.0 added `ui.print(bodyHtml)` — additive. 0.6.0 added its optional
+ * `options.fileName`, which names the copy the host saves into the user's
+ * chosen folder — additive again.
  */
-export const HOST_API_VERSION = "0.5.0";
+export const HOST_API_VERSION = "0.6.0";

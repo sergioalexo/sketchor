@@ -349,7 +349,10 @@ const plugin: PluginModule = {
           perMm: unit.perMm,
           unitLabel: unit.label,
         });
-        sketchor.ui.print(html);
+        // Name the autosaved copy after the load and its date, so a folder
+        // of them sorts and reads like the paperwork it replaces.
+        const stamp = /^\d{4}-\d{2}-\d{2}$/.test(loadDate) ? loadDate : new Date().toISOString().slice(0, 10);
+        sketchor.ui.print(html, { fileName: `${stamp} ${loadName}` });
       }
     });
   },
