@@ -9,7 +9,7 @@ import {
   type TrailerProfile,
 } from "@sketchor/plugin-truck-nesting";
 import type { Entity } from "@sketchor/plugin-sdk";
-import { buildPrintHtml, buildPrintPdf, PANEL_HTML } from "./truckNestingPlugin";
+import { autosaveFileName, buildPrintHtml, buildPrintPdf, PANEL_HTML } from "./truckNestingPlugin";
 
 /**
  * The printed load plan is the deliverable: it goes to a dock, on paper,
@@ -188,6 +188,42 @@ describe("the filed PDF", () => {
     const result = nestByOrders(trailer, awkward);
     const text = asText(buildPrintPdf(drawn(result), result, [], info));
     expect(text).toContain("(PO \\(rush\\) \\\\ 7)");
+  });
+});
+
+/**
+ * The autosaved copy is filed by filename alone — a dispatcher scans a
+ * folder of these without opening one, so the name has to carry when it was
+ * made and what's on the load: the states it crosses and its job numbers,
+ * each appearing once even when several pallets share a state or job.
+ */
+describe("the autosaved filename", () => {
+  it("carries the load name, every distinct state and every distinct job, each once", () => {
+    const withStates: Order[] = [
+      { ...orders[0], jobNumber: "PO-1", state: "NY" },
+      { ...orders[1], jobNumber: "PO-1", state: "NY" }, // same job & state as above — must not repeat
+      { id: "o3", jobNumber: "PO-2", city: "Denver", state: "CO", color: "#009e73", pallets: orders[0].pallets },
+    ];
+    const result = nestByOrders(trailer, withStates);
+    const name = autosaveFileName("Load 42", result);
+    expect(name).toContain("Load 42");
+    expect(name).toContain("NY-CO");
+    expect(name).toContain("PO-1-PO-2");
+    // Job/state each appear exactly once despite two pallets sharing them.
+    expect(name.match(/NY/g)).toHaveLength(1);
+    expect(name.match(/PO-1/g)).toHaveLength(1);
+  });
+
+  it("drops empty states/jobs instead of leaving a blank segment", () => {
+    const result = nestByOrders(trailer, orders); // orders[] has state: "" throughout
+    const name = autosaveFileName("Load", result);
+    expect(name).not.toMatch(/—\s*—/); // no adjacent separators from an empty segment
+  });
+
+  it("starts with a generated-at timestamp so a folder of these sorts by when they were made", () => {
+    const result = nestByOrders(trailer, orders);
+    const name = autosaveFileName("Load", result);
+    expect(name).toMatch(/^\d{4}-\d{2}-\d{2} \d{4}/);
   });
 });
 

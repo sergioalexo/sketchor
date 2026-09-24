@@ -364,10 +364,11 @@ const plugin: PluginModule = {
         const sheet = { loadName, truckInfo, loadDate, perMm: unit.perMm, unitLabel: unit.label };
         const html = buildPrintHtml(planEntities, liveResult, lastFindings, sheet);
         const pdf = buildPrintPdf(planEntities, liveResult, lastFindings, sheet);
-        // Name the autosaved copy after the load and its date, so a folder
-        // of them sorts and reads like the paperwork it replaces.
-        const stamp = /^\d{4}-\d{2}-\d{2}$/.test(loadDate) ? loadDate : new Date().toISOString().slice(0, 10);
-        sketchor.ui.print(html, { fileName: `${stamp} ${loadName}`, pdf });
+        // Name the autosaved copy after when it was actually generated plus
+        // everything a dispatcher scans a folder for — the load, the states
+        // it crosses and the jobs on it — so a folder of them sorts by time
+        // and reads like the paperwork it replaces without opening a file.
+        sketchor.ui.print(html, { fileName: autosaveFileName(loadName, liveResult), pdf });
         return;
       }
       if (msg.type === "pick-folder") {
@@ -400,6 +401,22 @@ function fmtIsoDate(iso: string): string {
 function jobDestination(p: { jobNumber?: string; city: string; state?: string }): string {
   const cityState = [p.city?.trim(), p.state?.trim()].filter(Boolean).join(", ");
   return [p.jobNumber?.trim(), cityState].filter(Boolean).join(" — ") || "—";
+}
+
+/**
+ * The autosaved filename: when the plan was generated, the load, every
+ * state/province the placed pallets cross and every job number on the
+ * load — so a folder of these sorts by time and is searchable by any of
+ * them without opening a file. Windows-safe (no `: / \ * ? " < > |`).
+ */
+export function autosaveFileName(loadName: string, result: NestResult): string {
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const generatedStamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}${pad(now.getMinutes())}`;
+  const dedupeInOrder = (values: (string | undefined)[]) => [...new Set(values.map((v) => v?.trim()).filter((v): v is string => !!v))];
+  const states = dedupeInOrder(result.placed.map((p) => p.state?.toUpperCase())).join("-");
+  const jobs = dedupeInOrder(result.placed.map((p) => p.jobNumber)).join("-");
+  return [generatedStamp, loadName, states, jobs].filter(Boolean).join(" — ");
 }
 
 export interface LoadSheetInfo {
