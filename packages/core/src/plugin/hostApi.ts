@@ -154,6 +154,25 @@ export interface UiApi {
    * gesture, and the grant it returns is what later writes depend on.
    */
   pickPrintFolder(): Promise<PrintFolderInfo>;
+  /**
+   * Opens a save-as dialog for `data` (binary or text), suggesting `name`.
+   * Like {@link pickPrintFolder}, must be called from a real click. Resolves
+   * `{ saved: false }` if the user cancels the picker rather than rejecting,
+   * so a plugin can tell "nothing happened" from a real failure.
+   */
+  saveFile(name: string, data: Uint8Array | string, filters?: SaveFileFilter[]): Promise<SaveFileResult>;
+}
+
+/** One entry of a save dialog's format filter, e.g. `{ description: "DXF", accept: { "application/dxf": [".dxf"] } }`. */
+export interface SaveFileFilter {
+  description: string;
+  accept: Record<string, string[]>;
+}
+
+export interface SaveFileResult {
+  saved: boolean;
+  /** The name actually saved as, when `saved` is true. */
+  name?: string;
 }
 
 export interface PrintOptions {
@@ -275,6 +294,8 @@ export interface ImporterContext {
  * chosen folder — additive again. 0.7.0 added `options.pdf` (the sheet as a
  * PDF, which is what the folder then receives) and the `ui.printFolder` /
  * `ui.pickPrintFolder` pair, so a plugin can offer that folder in its own
- * panel instead of only in the print bar — additive.
+ * panel instead of only in the print bar — additive. 0.8.0 added
+ * `ui.saveFile(name, data, filters)`, a save-as dialog a plugin can trigger
+ * directly — additive.
  */
-export const HOST_API_VERSION = "0.7.0";
+export const HOST_API_VERSION = "0.8.0";

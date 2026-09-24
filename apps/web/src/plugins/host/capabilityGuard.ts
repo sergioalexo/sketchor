@@ -29,6 +29,9 @@ const REQUIRED: Record<string, Permission | null> = {
   // path nor write anywhere but the sheet it just printed.
   "ui.printFolder": null,
   "ui.pickPrintFolder": null,
+  // Like ui.print, the plugin only hands the host bytes to write — it never
+  // gets a path or read access, so this needs no filesystem-style grant.
+  "ui.saveFile": null,
   "app.displayUnit": null,
   "app.onDisplayUnitChange": null,
 };

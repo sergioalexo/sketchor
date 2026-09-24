@@ -1,4 +1,12 @@
-import { projectDocument, type Command, type DisplayUnitInfo, type PrintFolderInfo, type UiShowOptions } from "@sketchor/core";
+import {
+  projectDocument,
+  type Command,
+  type DisplayUnitInfo,
+  type PrintFolderInfo,
+  type SaveFileFilter,
+  type SaveFileResult,
+  type UiShowOptions,
+} from "@sketchor/core";
 import { bus, doc, useApp } from "../../state/store";
 import { factorFromMm, type DisplayUnit } from "../../units";
 import { hidePanel, postToPanel, showPanel, subscribeToPanel } from "./uiManager";
@@ -9,6 +17,66 @@ import { autosaveEnabled, autosaveFolderLabel, pickAutosaveFolder, setAutosaveEn
 function printFolderInfo(): PrintFolderInfo {
   const folder = autosaveFolderLabel();
   return { supported: supportsAutosave(), folder, enabled: autosaveEnabled() && folder !== null };
+}
+
+// Minimal shape of the File System Access API's save side, declared locally
+// (as `io/drawingFile.ts` does for its own use) so we don't need the
+// `@types/wicg-file-system-access` package. Unlike that module's own local
+// type, `write` here also accepts binary data — a plugin's `ui.saveFile` can
+// save more than text.
+interface SaveFilePickerType {
+  description?: string;
+  accept: Record<string, string[]>;
+}
+interface SaveWritable {
+  write(data: Uint8Array | string): Promise<void>;
+  close(): Promise<void>;
+}
+interface SaveFileHandle {
+  name: string;
+  createWritable(): Promise<SaveWritable>;
+}
+interface WindowWithSaveDialog extends Window {
+  showSaveFilePicker?(opts: { suggestedName?: string; types?: SaveFilePickerType[] }): Promise<SaveFileHandle>;
+}
+
+/**
+ * `ui.saveFile` (host API 0.8.0): opens a save-as dialog for `data`. Reuses
+ * the same File System Access API `io/drawingFile.ts`'s `saveDrawing` does —
+ * that already works inside Tauri's WebView2 too, so there's no separate
+ * native-dialog path for desktop. Falls back to a `<a download>` click where
+ * the API is missing (older/non-Chromium browsers).
+ */
+async function hostSaveFile(name: string, data: Uint8Array | string, filters?: SaveFileFilter[]): Promise<SaveFileResult> {
+  const w = window as WindowWithSaveDialog;
+  if (typeof w.showSaveFilePicker === "function") {
+    try {
+      const handle = await w.showSaveFilePicker({
+        suggestedName: name,
+        types: filters?.map((f) => ({ description: f.description, accept: f.accept })),
+      });
+      const writable = await handle.createWritable();
+      await writable.write(data);
+      await writable.close();
+      return { saved: true, name: handle.name };
+    } catch (err) {
+      // The user dismissing the picker throws AbortError — treat as a cancel.
+      if ((err as DOMException)?.name === "AbortError") return { saved: false };
+      throw err;
+    }
+  }
+
+  // Uint8Array<ArrayBufferLike> vs. BlobPart's Uint8Array<ArrayBuffer> is a
+  // TS lib-typing artifact (SharedArrayBuffer backing is never actually
+  // possible here) — Blob accepts a Uint8Array at runtime regardless.
+  const blob = new Blob([data as BlobPart]);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  URL.revokeObjectURL(url);
+  return { saved: true, name };
 }
 
 /** The current display unit as the plugin-facing {@link DisplayUnitInfo}. */
@@ -111,6 +179,13 @@ export async function dispatchCall(ctx: HostContext, method: string, args: unkno
       // user to then also tick a box would be a second answer to one question.
       if (folder) setAutosaveEnabled(true);
       return printFolderInfo();
+    }
+    case "ui.saveFile": {
+      // Runs inside the click that came up from the panel iframe, same as
+      // ui.pickPrintFolder above — the save picker needs that transient
+      // activation too.
+      const data = args[1] as Uint8Array | string;
+      return hostSaveFile(String(args[0]), data, args[2] as SaveFileFilter[] | undefined);
     }
 
     case "app.displayUnit":

@@ -70,6 +70,8 @@ export type {
   UiShowOptions,
   PrintOptions,
   NotifyOptions,
+  SaveFileFilter,
+  SaveFileResult,
   Unsubscribe,
   Command,
   Entity,
