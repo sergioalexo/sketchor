@@ -4,12 +4,15 @@ import type { NestResult, PlacedItem } from "./types";
 
 const trailer = { name: "T", length: 13600, width: 2480 };
 
+/** Distinct by default — a drop's colour is checked too, and these tests are about load order. */
+const COLORS = ["#e69f00", "#56b4e9", "#009e73", "#0072b2", "#d55e00"];
+
 function placed(over: Partial<PlacedItem> & Pick<PlacedItem, "instanceId" | "orderIndex" | "x" | "city">): PlacedItem {
   const base = {
     orderId: `o${over.orderIndex}`,
     jobNumber: "",
     state: "",
-    color: "#000",
+    color: COLORS[over.orderIndex % COLORS.length],
     shape: "rect" as const,
     orientation: "auto" as const,
     y: 0,
@@ -33,6 +36,37 @@ describe("validateNest", () => {
       usedLength: 2500,
     };
     expect(validateNest(result)).toEqual([{ level: "info", message: "No issues — every drop comes off without moving another." }]);
+  });
+
+  it("flags two drops a reader couldn't tell apart", () => {
+    const result: NestResult = {
+      trailer,
+      placed: [
+        placed({ instanceId: "a", orderIndex: 0, city: "Leeds", x: 0, color: "#0072b2" }),
+        // A blue a shade off the first one: obviously different in a colour
+        // picker, the same pallet on a photocopied sheet.
+        placed({ instanceId: "b", orderIndex: 1, city: "Hull", x: 1300, color: "#0d76b4" }),
+      ],
+      unplaced: [],
+      usedLength: 2500,
+    };
+    const findings = validateNest(result);
+    expect(findings.some((f) => f.level === "warn" && /Leeds and Hull are almost the same colour/.test(f.message))).toBe(true);
+    // The load order is still fine, and still says so.
+    expect(findings.some((f) => f.level === "info" && /No issues/.test(f.message))).toBe(true);
+  });
+
+  it("says nothing about colours that are plainly different", () => {
+    const result: NestResult = {
+      trailer,
+      placed: [
+        placed({ instanceId: "a", orderIndex: 0, city: "Leeds", x: 0, color: "#e69f00" }),
+        placed({ instanceId: "b", orderIndex: 1, city: "Hull", x: 1300, color: "#0072b2" }),
+      ],
+      unplaced: [],
+      usedLength: 2500,
+    };
+    expect(validateNest(result).some((f) => /colour/.test(f.message))).toBe(false);
   });
 
   it("flags a later drop parked between an earlier drop and the door", () => {

@@ -1,3 +1,4 @@
+import { tooSimilar } from "./color";
 import type { NestResult, PlacedItem, ValidationFinding } from "./types";
 
 const EPS = 1e-6;
@@ -10,6 +11,28 @@ function rectsOverlap(a: PlacedItem, b: PlacedItem): boolean {
   return a.x < b.x + b.length - EPS && b.x < a.x + a.length - EPS && overlapsY(a, b);
 }
 
+/** Drops a reader could confuse for one another, one finding per clashing pair. */
+function colorFindings(placed: readonly PlacedItem[]): ValidationFinding[] {
+  const drops = new Map<number, { color: string; label: string }>();
+  for (const p of placed) {
+    if (!drops.has(p.orderIndex)) {
+      drops.set(p.orderIndex, { color: p.color, label: p.city?.trim() || p.jobNumber?.trim() || `drop ${p.orderIndex + 1}` });
+    }
+  }
+  const list = [...drops].sort((a, b) => a[0] - b[0]).map(([, d]) => d);
+  const out: ValidationFinding[] = [];
+  for (let i = 0; i < list.length; i++) {
+    for (let j = i + 1; j < list.length; j++) {
+      if (!tooSimilar(list[i].color, list[j].color)) continue;
+      out.push({
+        level: "warn",
+        message: `${list[i].label} and ${list[j].label} are almost the same colour — pick another, or they read as one drop on paper.`,
+      });
+    }
+  }
+  return out;
+}
+
 /**
  * Sanity-checks a nest result: pallets that didn't fit, a load longer than the
  * trailer, pallets overlapping, and the load-order rule — no later-loaded
@@ -17,6 +40,8 @@ function rectsOverlap(a: PlacedItem, b: PlacedItem): boolean {
  * it first. Overlap and blocked-access shouldn't
  * fire against `nestByOrders`'s own output (the banding rules them out), so they
  * pay off the moment anything can move a pallet independently of its band.
+ * Last, whether two drops are the same colour to look at — on a plan, that
+ * is as good as mislabelling them.
  */
 export function validateNest(result: NestResult): ValidationFinding[] {
   const { trailer, placed, unplaced } = result;
@@ -65,6 +90,11 @@ export function validateNest(result: NestResult): ValidationFinding[] {
       message: `Wall clearance ${Math.round(wall)} mm — usable floor ${Math.round(trailer.length - 2 * wall)} × ${Math.round(trailer.width - 2 * wall)} mm.`,
     });
   }
+
+  // Colour is how a plan says which pallet belongs to which drop, so two
+  // drops a reader can't tell apart is a real defect — checked after the
+  // "no issues" line above, which is about load order and stays true.
+  findings.push(...colorFindings(placed));
 
   const seen = new Set<string>();
   return findings.filter((f) => (seen.has(f.message) ? false : (seen.add(f.message), true)));

@@ -24,6 +24,11 @@ const REQUIRED: Record<string, Permission | null> = {
   "ui.onMessage": null,
   "ui.notify": null,
   "ui.print": null,
+  // The folder is the *host's* autosave setting, chosen by the user in an OS
+  // picker and named only by its display name — a plugin can neither see a
+  // path nor write anywhere but the sheet it just printed.
+  "ui.printFolder": null,
+  "ui.pickPrintFolder": null,
   "app.displayUnit": null,
   "app.onDisplayUnitChange": null,
 };

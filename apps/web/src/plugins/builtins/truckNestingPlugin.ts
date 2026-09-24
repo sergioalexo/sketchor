@@ -1,6 +1,8 @@
 import {
   buildNestLayout,
   clearPreviousLayout,
+  DEFAULT_ANNOTATION_COLOR,
+  forPaper,
   LOAD_PLAN_GUIDE_LAYER,
   LOAD_PLAN_LAYER,
   nestByOrders,
@@ -15,7 +17,15 @@ import {
   type TrailerProfile,
   type ValidationFinding,
 } from "@sketchor/plugin-truck-nesting";
-import { type DisplayUnitInfo, type PluginModule } from "@sketchor/plugin-sdk";
+import {
+  drawEntitiesToPdf,
+  entitiesToSvgDocument,
+  PDF_LETTER_LANDSCAPE,
+  PdfBuilder,
+  type DisplayUnitInfo,
+  type Entity,
+  type PluginModule,
+} from "@sketchor/plugin-sdk";
 
 /**
  * Order colours, deliberately *not* the app's shared entity palette.
@@ -40,27 +50,6 @@ const ORDER_COLORS: readonly string[] = [
   "#6a3d9a", // purple
   "#999999", // grey
 ];
-
-/**
- * Black or white, whichever reads on `background` — relative luminance per
- * WCAG. Half these colours are dark enough that black text on them is
- * unreadable at pallet-label size, which on a load plan means the item
- * number is illegible.
- */
-function inkOn(background: string): string {
-  const hex = background.trim().replace("#", "");
-  const full = hex.length === 3 ? hex.split("").map((c) => c + c).join("") : hex;
-  if (full.length !== 6) return "#111111";
-  const channel = (i: number) => {
-    const v = parseInt(full.slice(i * 2, i * 2 + 2), 16) / 255;
-    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
-  };
-  const luminance = 0.2126 * channel(0) + 0.7152 * channel(1) + 0.0722 * channel(2);
-  // 0.179 is where contrast against black and against white are equal
-  // ((L+0.05)/0.05 == 1.05/(L+0.05)); guessing a threshold higher than
-  // that puts white text on mid-tone oranges, which is the worst of both.
-  return luminance > 0.179 ? "#111111" : "#ffffff";
-}
 
 /**
  * First-party dogfood: the Truck Load Planner. All the nesting maths lives in
@@ -92,6 +81,11 @@ interface PersistedState {
   palletOn: boolean;
   /** Add a W×L dimension to every drawn pallet. */
   dimensions: boolean;
+  /**
+   * Ink for the plan's dimensions and NOSE / DOOR labels. Defaults to a light
+   * grey that reads on the dark workspace; printing inverts it (`forPaper`).
+   */
+  textColor: string;
   orders: Order[];
   /** Free-text label for the printed load plan — defaults to the trailer name when blank. */
   loadName: string;
@@ -230,6 +224,7 @@ function asState(v: unknown): PersistedState {
     wallOn: typeof o.wallOn === "boolean" ? o.wallOn : wallMargin > 0,
     palletOn: typeof o.palletOn === "boolean" ? o.palletOn : palletMargin > 0,
     dimensions: o.dimensions === true,
+    textColor: /^#[0-9a-fA-F]{6}$/.test(str(o.textColor)) ? str(o.textColor) : DEFAULT_ANNOTATION_COLOR,
     orders: orders.length > 0 ? orders : [seedOrder(resolvedDefaultPallet)],
     loadName: str(o.loadName),
     truckInfo: str(o.truckInfo),
@@ -272,6 +267,10 @@ const plugin: PluginModule = {
 
       if (msg.type === "ready") {
         pushInit();
+        void sketchor.ui
+          .printFolder()
+          .then((folder) => sketchor.ui.postMessage({ type: "folder", folder }))
+          .catch(() => undefined);
         return;
       }
       if (msg.type === "persist") {
@@ -293,6 +292,9 @@ const plugin: PluginModule = {
           : [];
         const palletMargin = Math.max(0, num(msg.palletMargin));
         const dimensions = msg.dimensions === true;
+        const annotationColor = /^#[0-9a-fA-F]{6}$/.test(str(msg.textColor))
+          ? str(msg.textColor)
+          : DEFAULT_ANNOTATION_COLOR;
         if (!trailer || orders.length === 0) {
           void sketchor.ui.postMessage({ type: "error", message: "Add a trailer size and at least one order." });
           return;
@@ -303,7 +305,13 @@ const plugin: PluginModule = {
           const model = await sketchor.document.read();
           await sketchor.document.apply([
             ...clearPreviousLayout(model),
-            ...buildNestLayout(result, { dimensions, perMm: unit.perMm, unitLabel: unit.label, findings }),
+            ...buildNestLayout(result, {
+              dimensions,
+              annotationColor,
+              perMm: unit.perMm,
+              unitLabel: unit.label,
+              findings,
+            }),
           ]);
           lastResult = result;
           lastFindings = findings;
@@ -325,7 +333,11 @@ const plugin: PluginModule = {
         // user has manually dragged since the last Auto-nest stay put.
         const dimensions = msg.dimensions === true;
         const model = await sketchor.document.read();
-        const commands = setDimensionsOnLayout(model, dimensions, { perMm: unit.perMm, unitLabel: unit.label });
+        const commands = setDimensionsOnLayout(model, dimensions, {
+          perMm: unit.perMm,
+          unitLabel: unit.label,
+          annotationColor: state.textColor,
+        });
         if (commands.length > 0) await sketchor.document.apply(commands);
         return;
       }
@@ -339,20 +351,31 @@ const plugin: PluginModule = {
         // solved position.
         const model = await sketchor.document.read();
         const liveResult: NestResult = { ...lastResult, placed: readLivePlacements(model, lastResult) };
+        // The drawing itself — the very entities `entitiesToDxf` writes — is
+        // what gets rendered onto the sheet and into the PDF. Nothing about
+        // the plan is drawn twice, so the paper and the DXF cannot disagree.
+        // `forPaper` only re-inks it: the dark-workspace lettering goes black
+        // and the white clearance guides drop out, everything else is the
+        // drawing untouched.
+        const planEntities = forPaper(model.entities.filter((e) => e.layer === LOAD_PLAN_LAYER)) as Entity[];
         const loadName = str(msg.loadName).trim() || liveResult.trailer.name;
         const truckInfo = str(msg.truckInfo).trim();
         const loadDate = str(msg.loadDate).trim();
-        const html = buildPrintHtml(liveResult, lastFindings, {
-          loadName,
-          truckInfo,
-          loadDate,
-          perMm: unit.perMm,
-          unitLabel: unit.label,
-        });
+        const sheet = { loadName, truckInfo, loadDate, perMm: unit.perMm, unitLabel: unit.label };
+        const html = buildPrintHtml(planEntities, liveResult, lastFindings, sheet);
+        const pdf = buildPrintPdf(planEntities, liveResult, lastFindings, sheet);
         // Name the autosaved copy after the load and its date, so a folder
         // of them sorts and reads like the paperwork it replaces.
         const stamp = /^\d{4}-\d{2}-\d{2}$/.test(loadDate) ? loadDate : new Date().toISOString().slice(0, 10);
-        sketchor.ui.print(html, { fileName: `${stamp} ${loadName}` });
+        sketchor.ui.print(html, { fileName: `${stamp} ${loadName}`, pdf });
+        return;
+      }
+      if (msg.type === "pick-folder") {
+        // Runs inside the panel's click, which is what lets the host open the
+        // OS folder picker at all.
+        const info = await sketchor.ui.pickPrintFolder().catch(() => null);
+        if (info) void sketchor.ui.postMessage({ type: "folder", folder: info });
+        return;
       }
     });
   },
@@ -374,92 +397,109 @@ function fmtIsoDate(iso: string): string {
   return d.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" });
 }
 
-/**
- * A printable load-plan report: a top-down SVG of the nest, a legend mapping
- * each drop's colour to its city, and a full pallet list — built from
- * the last solved {@link NestResult}, not the live canvas, so it always
- * matches what Auto-nest actually computed.
- */
 function jobDestination(p: { jobNumber?: string; city: string; state?: string }): string {
   const cityState = [p.city?.trim(), p.state?.trim()].filter(Boolean).join(", ");
   return [p.jobNumber?.trim(), cityState].filter(Boolean).join(" — ") || "—";
 }
 
-export function buildPrintHtml(
-  result: NestResult,
-  findings: ValidationFinding[],
-  info: { loadName: string; truckInfo: string; loadDate: string; perMm: number; unitLabel: string },
-): string {
-  const { trailer } = result;
-  const pad = Math.max(trailer.length, trailer.width) * 0.03;
-  // Extra room below the trailer for the (now much larger) NOSE / DOOR labels.
-  const vb = `${-pad} ${-pad} ${trailer.length + pad * 2} ${trailer.width + pad * 2 + Math.min(trailer.width * 0.11, 220) * 1.4}`;
+export interface LoadSheetInfo {
+  loadName: string;
+  truckInfo: string;
+  loadDate: string;
+  perMm: number;
+  unitLabel: string;
+}
 
-  const shapes = result.placed
-    .map((p, i) => {
-      const ink = inkOn(p.color);
-      const shape =
-        p.shape === "round"
-          ? `<circle cx="${p.x + p.width / 2}" cy="${p.y + p.width / 2}" r="${p.width / 2}" fill="${p.color}" stroke="#111" stroke-width="${pad * 0.05}" />`
-          : `<rect x="${p.x}" y="${p.y}" width="${p.length}" height="${p.width}" fill="${p.color}" stroke="#111" stroke-width="${pad * 0.05}" />`;
-      // The item number, big and bold — the same number as on the drawn plan
-      // and the pallet table below, since city/tag text is often too small
-      // to read once the trailer is zoomed to fit the page. The tag goes
-      // under it: it is the instruction for whoever is loading ("FRAGILE",
-      // "TOP LOAD"), and it has to be readable *on the nest*, not only in a
-      // table they'd have to cross-reference by number.
-      const tag = p.tag?.trim() ?? "";
-      const fontSize = Math.min(Math.min(p.length, p.width) * (tag ? 0.34 : 0.4), 160);
-      const tagSize = Math.min(Math.min(p.length, p.width) * 0.15, 64);
-      const cx = p.x + p.length / 2;
-      const cy = p.y + p.width / 2;
-      const numberY = tag ? cy - tagSize * 0.5 : cy;
-      const textEl = `<text x="${cx}" y="${numberY}" font-size="${fontSize}" font-weight="700" text-anchor="middle" dominant-baseline="middle" fill="${ink}">${i + 1}</text>`;
-      const tagEl = tag
-        ? `<text x="${cx}" y="${cy + fontSize * 0.55}" font-size="${tagSize}" font-weight="600" text-anchor="middle" dominant-baseline="middle" fill="${ink}">${escapeHtml(tag)}</text>`
-        : "";
-      return shape + textEl + tagEl;
-    })
-    .join("");
-
-  // NOSE (x = 0, against the cab, loaded first) and DOOR (x = length).
-  // Large: this is what tells the dock which way round the plan goes.
-  const endFontSize = Math.min(trailer.width * 0.11, 220);
-  const endLabels = `<text x="${endFontSize * 0.2}" y="${trailer.width + endFontSize * 1.05}" font-size="${endFontSize}" font-weight="700" fill="#111">NOSE</text>
-    <text x="${trailer.length - endFontSize * 0.2}" y="${trailer.width + endFontSize * 1.05}" font-size="${endFontSize}" font-weight="700" text-anchor="end" fill="#111">DOOR</text>`;
-
-  const svg = `<svg viewBox="${vb}" xmlns="http://www.w3.org/2000/svg">
-    <rect x="0" y="0" width="${trailer.length}" height="${trailer.width}" fill="none" stroke="#111" stroke-width="${pad * 0.08}" />
-    ${shapes}
-    ${endLabels}
-  </svg>`;
-
+function groupByOrder(result: NestResult): Map<number, { dest: string; color: string; n: number }> {
   const bySeq = new Map<number, { dest: string; color: string; n: number }>();
   for (const p of result.placed) {
     const e = bySeq.get(p.orderIndex) ?? { dest: jobDestination(p), color: p.color, n: 0 };
     e.n += 1;
     bySeq.set(p.orderIndex, e);
   }
-  const legend = [...bySeq]
-    .sort((a, b) => a[0] - b[0])
+  return bySeq;
+}
+
+/**
+ * The shared spine of both renderings of a load plan: the pallets in load
+ * order, the per-drop legend, and whatever went wrong.
+ *
+ * The plan *picture* is never rebuilt here — it comes from the drawing on the
+ * "Load Plan" layer, the same entity list the DXF export writes. So the sheet
+ * that goes to the printer, the PDF filed in the folder and the file the shop
+ * opens in CAD are three renderings of one drawing, not three drawings.
+ */
+function sheetContent(result: NestResult, findings: ValidationFinding[], info: LoadSheetInfo) {
+  const { trailer } = result;
+  const legend = [...groupByOrder(result)].sort((a, b) => a[0] - b[0]);
+  const rows = result.placed.map((p, i) => ({
+    n: i + 1,
+    color: p.color,
+    job: p.jobNumber || "—",
+    where: [p.city, p.state].filter(Boolean).join(", ") || "—",
+    size:
+      p.shape === "round"
+        ? `Ø ${fmtMm(p.width, info.perMm, info.unitLabel)}`
+        : `${fmtMm(p.width, info.perMm, info.unitLabel)} × ${fmtMm(p.length, info.perMm, info.unitLabel)}`,
+    tag: p.tag || "",
+  }));
+  const subtitle =
+    `${trailer.name} · ${fmtMm(trailer.length, info.perMm, info.unitLabel)} × ${fmtMm(trailer.width, info.perMm, info.unitLabel)}` +
+    ` · ${result.placed.length} pallets, ${fmtMm(result.usedLength, info.perMm, info.unitLabel)} used` +
+    (info.truckInfo ? ` · ${info.truckInfo}` : "") +
+    (fmtIsoDate(info.loadDate) ? ` · ${fmtIsoDate(info.loadDate)}` : "");
+  const unplaced = result.unplaced.map((u) => `${u.city || "—"}: ${u.count} — ${u.reason}`);
+  const problems = findings.filter((f) => f.level !== "info");
+  return { legend, rows, subtitle, unplaced, problems };
+}
+
+/** Padding and line weight scaled to the drawing, so a 13 m trailer and a 6 m van print alike. */
+function planScale(result: NestResult): { padding: number; strokeWidth: number } {
+  const span = Math.max(result.trailer.length, result.trailer.width, 1);
+  return { padding: span * 0.02, strokeWidth: span * 0.0012 };
+}
+
+/**
+ * A printable load-plan report: the drawn plan, a legend mapping each drop's
+ * colour to its destination, and the full pallet list.
+ *
+ * `entities` is the "Load Plan" layer straight out of the document — dragged
+ * pallets, hand edits and all — rendered by the same exporter behind the
+ * app's SVG files.
+ */
+export function buildPrintHtml(
+  entities: readonly Entity[],
+  result: NestResult,
+  findings: ValidationFinding[],
+  info: LoadSheetInfo,
+): string {
+  const { legend, rows, subtitle, unplaced, problems } = sheetContent(result, findings, info);
+  const { padding, strokeWidth } = planScale(result);
+  const svg = entitiesToSvgDocument([...entities], {
+    padding,
+    strokeWidth,
+    strokeColor: "#111111",
+    // Solid: the labels the plan drew on each pallet are black or white by how
+    // dark that pallet's colour is, which a washed-out fill would undo.
+    fillOpacity: 1,
+  }).replace(/^<\?xml[^>]*\?>\s*/, "");
+
+  const legendHtml = legend
     .map(
       ([idx, e]) =>
         `<div class="legend-row"><span class="swatch" style="background:${escapeHtml(e.color)}"></span>#${idx + 1} ${escapeHtml(e.dest)} &middot; ${e.n} pallet${e.n === 1 ? "" : "s"}</div>`,
     )
     .join("");
-
-  const rows = result.placed
-    .map((p, i) => {
-      const dims = p.shape === "round" ? `Ø ${fmtMm(p.width, info.perMm, info.unitLabel)}` : `${fmtMm(p.width, info.perMm, info.unitLabel)} × ${fmtMm(p.length, info.perMm, info.unitLabel)}`;
-      return `<tr><td>${i + 1}</td><td><span class="swatch" style="background:${escapeHtml(p.color)}"></span>${escapeHtml(p.jobNumber || "—")}</td><td>${escapeHtml([p.city, p.state].filter(Boolean).join(", ") || "—")}</td><td>${dims}</td><td>${escapeHtml(p.tag || "")}</td></tr>`;
-    })
+  const rowsHtml = rows
+    .map(
+      (r) =>
+        `<tr><td>${r.n}</td><td><span class="swatch" style="background:${escapeHtml(r.color)}"></span>${escapeHtml(r.job)}</td><td>${escapeHtml(r.where)}</td><td>${escapeHtml(r.size)}</td><td>${escapeHtml(r.tag)}</td></tr>`,
+    )
     .join("");
-
-  const unplaced =
-    result.unplaced.length > 0
-      ? `<h2>Unplaced</h2><ul class="unplaced">${result.unplaced.map((u) => `<li>${escapeHtml(u.city || "—")}: ${u.count} — ${escapeHtml(u.reason)}</li>`).join("")}</ul>`
+  const unplacedHtml =
+    unplaced.length > 0
+      ? `<h2>Unplaced</h2><ul class="unplaced">${unplaced.map((u) => `<li>${escapeHtml(u)}</li>`).join("")}</ul>`
       : "";
-  const problems = findings.filter((f) => f.level !== "info");
   const findingsHtml =
     problems.length > 0
       ? `<ul class="findings">${problems.map((f) => `<li class="${f.level}">${escapeHtml(f.message)}</li>`).join("")}</ul>`
@@ -469,7 +509,6 @@ export function buildPrintHtml(
     .load-plan, .load-plan * { -webkit-print-color-adjust: exact; print-color-adjust: exact; color-adjust: exact; }
     .load-plan h1 { font-size: 16px; margin: 0 0 2px; }
     .load-plan .sub { color: #444; font: 12px system-ui, sans-serif; margin-bottom: 10px; }
-    .load-plan .sub b { color: #111; }
     .load-plan svg { width: 100%; height: auto; max-height: 55vh; margin: 8px 0; }
     .load-plan h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; margin: 14px 0 6px; }
     .load-plan .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font: 12px system-ui, sans-serif; }
@@ -484,18 +523,136 @@ export function buildPrintHtml(
   </style>
   <div class="load-plan">
     <h1>${escapeHtml(info.loadName)}</h1>
-    <div class="sub"><b>${escapeHtml(trailer.name)}</b> &middot; ${fmtMm(trailer.length, info.perMm, info.unitLabel)} × ${fmtMm(trailer.width, info.perMm, info.unitLabel)} &middot; ${result.placed.length} pallets, ${fmtMm(result.usedLength, info.perMm, info.unitLabel)} used${info.truckInfo ? ` &middot; ${escapeHtml(info.truckInfo)}` : ""}${fmtIsoDate(info.loadDate) ? ` &middot; ${escapeHtml(fmtIsoDate(info.loadDate))}` : ""}</div>
+    <div class="sub">${escapeHtml(subtitle)}</div>
     ${svg}
     <h2>Legend — load sequence</h2>
-    <div class="legend">${legend}</div>
+    <div class="legend">${legendHtml}</div>
     <h2>Pallets</h2>
     <table>
       <thead><tr><th>#</th><th>Job Number</th><th>City / State</th><th>Size</th><th>Tag</th></tr></thead>
-      <tbody>${rows}</tbody>
+      <tbody>${rowsHtml}</tbody>
     </table>
-    ${unplaced}
+    ${unplacedHtml}
     ${findingsHtml}
   </div>`;
+}
+
+/**
+ * The same sheet as a PDF — the copy filed into the print folder.
+ *
+ * Landscape, because a trailer is: the plan takes the top of page one at the
+ * largest scale that fits, and the pallet list flows underneath and onto as
+ * many pages as it needs. Drawn from the same `entities` the HTML sheet
+ * renders and the DXF export writes.
+ */
+export function buildPrintPdf(
+  entities: readonly Entity[],
+  result: NestResult,
+  findings: ValidationFinding[],
+  info: LoadSheetInfo,
+): Uint8Array {
+  const { legend, rows, subtitle, unplaced, problems } = sheetContent(result, findings, info);
+  const pdf = new PdfBuilder(PDF_LETTER_LANDSCAPE);
+  const margin = 36;
+  const right = pdf.width - margin;
+  const bottom = pdf.height - margin;
+  const ink = "#111111";
+  const muted = "#555555";
+  let y = margin + 12;
+
+  pdf.text(margin, y, info.loadName, { size: 15, bold: true, color: ink });
+  y += 13;
+  pdf.text(margin, y, subtitle, { size: 8.5, color: muted });
+  y += 8;
+
+  // The plan, as large as the page allows without crowding out the list.
+  const planHeight = Math.min(pdf.height * 0.46, bottom - y - 60);
+  if (planHeight > 40 && entities.length > 0) {
+    drawEntitiesToPdf(
+      pdf,
+      [...entities],
+      { x: margin, y: y + 6, width: right - margin, height: planHeight },
+      // Page points, not world units: thin enough for a 48-pallet load, still
+      // visible on a laser printer.
+      { strokeColor: ink, strokeWidth: 0.4 },
+    );
+    y += planHeight + 18;
+  }
+
+  const need = (space: number, afterBreak?: () => void) => {
+    if (y + space <= bottom) return;
+    pdf.addPage();
+    y = margin + 12;
+    afterBreak?.();
+  };
+
+  // --- legend, wrapped across the page width ---
+  need(30);
+  pdf.text(margin, y, "LEGEND — LOAD SEQUENCE", { size: 8, bold: true, color: muted });
+  y += 13;
+  let x = margin;
+  for (const [idx, e] of legend) {
+    const label = `#${idx + 1} ${e.dest} · ${e.n} pallet${e.n === 1 ? "" : "s"}`;
+    const w = pdf.measure(label, 9) + 24;
+    if (x + w > right) {
+      x = margin;
+      y += 13;
+      need(13);
+    }
+    pdf.rect(x, y - 7, 8, 8, { fill: e.color, stroke: "#999999", width: 0.3 });
+    pdf.text(x + 12, y, label, { size: 9, color: ink });
+    x += w;
+  }
+  y += 20;
+
+  // --- pallet list ---
+  const cols = [margin, margin + 26, margin + 130, margin + 290, margin + 430];
+  const headers = ["#", "JOB NUMBER", "CITY / STATE", "SIZE", "TAG"];
+  const tableHeader = () => {
+    headers.forEach((h, i) => pdf.text(cols[i], y, h, { size: 8, bold: true, color: muted }));
+    y += 4;
+    pdf.line({ x: margin, y }, { x: right, y }, { stroke: "#999999", width: 0.5 });
+    y += 11;
+  };
+  need(46);
+  pdf.text(margin, y, "PALLETS", { size: 8, bold: true, color: muted });
+  y += 14;
+  tableHeader();
+  for (const r of rows) {
+    need(16, tableHeader);
+    pdf.rect(cols[1] - 11, y - 6.5, 7, 7, { fill: r.color, stroke: "#999999", width: 0.3 });
+    pdf.text(cols[0], y, String(r.n), { size: 9, color: ink });
+    pdf.text(cols[1], y, r.job, { size: 9, color: ink });
+    pdf.text(cols[2], y, r.where, { size: 9, color: ink });
+    pdf.text(cols[3], y, r.size, { size: 9, color: ink });
+    // The tag is an instruction to whoever loads it ("FRAGILE", "TOP LOAD"),
+    // so it carries the weight in the row.
+    pdf.text(cols[4], y, r.tag, { size: 9, bold: true, color: ink });
+    y += 6;
+    pdf.line({ x: margin, y }, { x: right, y }, { stroke: "#dddddd", width: 0.4 });
+    y += 10;
+  }
+
+  if (unplaced.length > 0) {
+    need(34);
+    y += 8;
+    pdf.text(margin, y, "UNPLACED", { size: 8, bold: true, color: muted });
+    y += 13;
+    for (const u of unplaced) {
+      need(13);
+      pdf.text(margin, y, u, { size: 9, color: "#b3261e" });
+      y += 13;
+    }
+  }
+
+  if (problems.length > 0) y += 8;
+  for (const f of problems) {
+    need(13);
+    pdf.text(margin, y, f.message, { size: 9, color: f.level === "error" ? "#b3261e" : "#8a5300" });
+    y += 13;
+  }
+
+  return pdf.bytes();
 }
 
 export const PANEL_HTML = `<!doctype html>
@@ -531,6 +688,13 @@ export const PANEL_HTML = `<!doctype html>
       .move { display: flex; flex-direction: column; }
       .move button { padding: 0 3px; line-height: 10px; font-size: 9px; background: none; border: none; color: #9aa0a6; cursor: pointer; }
       .dot { width: 12px; height: 12px; border-radius: 3px; flex: none; }
+      /* A colour input, shrunk to a swatch — the order's colour *is* how the
+         plan identifies its drop, so it is editable where it is shown. */
+      input[type="color"].swatch { width: 18px; height: 18px; flex: none; margin: 0; padding: 0; border: 1px solid #3a3d42; border-radius: 3px; background: none; cursor: pointer; }
+      input[type="color"].swatch::-webkit-color-swatch-wrapper { padding: 1px; }
+      input[type="color"].swatch::-webkit-color-swatch { border: none; border-radius: 2px; }
+      .folder { display: flex; align-items: center; gap: 6px; margin: 2px 0 6px; }
+      .folder .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: 0.7; }
       .order-head input.job { flex: 1; margin: 0; min-width: 0; }
       .seq { font-size: 10px; opacity: 0.5; flex: none; }
       .dest-line { display: flex; gap: 4px; margin: 0 0 6px; }
@@ -549,7 +713,8 @@ export const PANEL_HTML = `<!doctype html>
       .p-line input { margin-top: 0; padding: 4px; }
       .p-preset { flex: 1; min-width: 0; margin-top: 0; padding: 4px; }
       .p-num { width: 46px; text-align: center; }
-      .p-tag { flex: 1; min-width: 0; }
+      .p-tag { flex: 1 1 0; min-width: 0; }
+      .p-orient { flex: 1 1 0; width: auto; min-width: 0; margin-top: 0; padding: 4px; }
       .times { opacity: 0.5; }
       .icon { background: none; border: none; color: #9aa0a6; cursor: pointer; padding: 2px 3px; font-size: 12px; }
       .shape-btn { background: #2b2d31; border: 1px solid #3a3d42; border-radius: 4px; padding: 3px; cursor: pointer; display: inline-flex; flex: none; }
@@ -588,6 +753,11 @@ export const PANEL_HTML = `<!doctype html>
     <button class="ghost sm" id="order-add">+ Add order</button>
 
     <label class="chk"><input type="checkbox" id="dim-each" /> Dimension every pallet on the plan</label>
+    <div class="mrow">
+      <input type="color" id="text-color" class="swatch" title="Colour of the dimensions and the NOSE / DOOR labels" />
+      <span>Plan text colour</span>
+      <button class="ghost sm" id="text-color-reset" style="margin-left:auto">Reset</button>
+    </div>
 
     <div class="actions">
       <button id="nest">Auto-nest</button>
@@ -601,6 +771,10 @@ export const PANEL_HTML = `<!doctype html>
       <label>Load date<input id="load-date" type="date" /></label>
     </div>
     <label>Truck / driver info<input id="truck-info" placeholder="Truck #, driver, plate…" /></label>
+    <div class="folder" id="folder-row" hidden>
+      <button class="ghost sm" id="pick-folder">Choose folder…</button>
+      <span class="name" id="folder-name"></span>
+    </div>
     <div class="actions">
       <button class="ghost" id="print-load" disabled>Print load plan</button>
     </div>
@@ -656,7 +830,8 @@ export const PANEL_HTML = `<!doctype html>
 
       let unit = { unit: "mm", perMm: 1, label: "mm" };
       let palette = ["#4f86d6"];
-      let state = { presets: [], palletPresets: [], lastPresetName: "", defaultTrailerName: "", defaultPalletName: "", wallMargin: 0, palletMargin: 0, wallOn: false, palletOn: false, dimensions: false, orders: [], loadDate: "" };
+      const DEFAULT_TEXT_COLOR = "#e8eaed";
+      let state = { presets: [], palletPresets: [], lastPresetName: "", defaultTrailerName: "", defaultPalletName: "", wallMargin: 0, palletMargin: 0, wallOn: false, palletOn: false, dimensions: false, textColor: DEFAULT_TEXT_COLOR, orders: [], loadDate: "" };
       let saveTimer = 0;
       let nested = false; // a plan is currently drawn
 
@@ -685,10 +860,14 @@ export const PANEL_HTML = `<!doctype html>
         $("m-wall").disabled = !state.wallOn;
         $("m-pallet").disabled = !state.palletOn;
         $("dim-each").checked = !!state.dimensions;
+        $("text-color").value = state.textColor || DEFAULT_TEXT_COLOR;
         $("load-name").value = state.loadName || "";
         $("truck-info").value = state.truckInfo || "";
         $("load-date").value = state.loadDate || new Date().toISOString().slice(0, 10);
       }
+      $("text-color").addEventListener("input", () => { state.textColor = $("text-color").value; persist(); });
+      $("text-color-reset").addEventListener("click", () => { state.textColor = DEFAULT_TEXT_COLOR; $("text-color").value = DEFAULT_TEXT_COLOR; persist(); });
+      $("pick-folder").addEventListener("click", () => post({ type: "pick-folder" }));
       $("load-name").addEventListener("input", () => { state.loadName = $("load-name").value; persist(); });
       $("truck-info").addEventListener("input", () => { state.truckInfo = $("truck-info").value; persist(); });
       $("load-date").addEventListener("input", () => { state.loadDate = $("load-date").value; persist(); });
@@ -852,7 +1031,7 @@ export const PANEL_HTML = `<!doctype html>
             "<div class='order-head'>" +
             "<span class='handle' title='Drag to reorder'>&#10303;</span>" +
             "<span class='move'><button class='up' title='Move up'>&#9650;</button><button class='down' title='Move down'>&#9660;</button></span>" +
-            "<span class='dot' style='background:" + esc(order.color) + "'></span>" +
+            "<input type='color' class='swatch ocolor' value='" + esc(order.color) + "' title='Colour for this drop — re-nest to redraw'>" +
             "<input class='job' placeholder='Job Number' value='" + esc(order.jobNumber || "") + "'>" +
             "<span class='seq'>#" + (oi + 1) + "</span>" +
             "<button class='icon order-del' title='Remove order'>&#10005;</button>" +
@@ -889,6 +1068,7 @@ export const PANEL_HTML = `<!doctype html>
           card.querySelector(".up").addEventListener("click", () => move(oi, oi - 1));
           card.querySelector(".down").addEventListener("click", () => move(oi, oi + 1));
           card.querySelector(".job").addEventListener("input", (e) => { order.jobNumber = e.target.value; persist(); });
+          bindOrderColor(card, order);
           const cityEl = card.querySelector(".city");
           const stateEl = card.querySelector(".state");
           const suggestEl = card.querySelector(".city-suggest");
@@ -1026,8 +1206,23 @@ export const PANEL_HTML = `<!doctype html>
         });
       }
 
+      // The first palette colour no drop is already wearing — counting by
+      // position hands out a duplicate as soon as an order in the middle is
+      // deleted, and two drops the same colour is a plan that reads wrong.
+      function freeColor() {
+        const used = state.orders.map((o) => o.color);
+        return palette.find((c) => !used.includes(c)) || palette[state.orders.length % palette.length];
+      }
+
+      // Re-inking an order takes a re-nest to reach the drawing; the plan on
+      // screen is the one that was solved, and nothing here redraws behind
+      // the user's back.
+      function bindOrderColor(row, order) {
+        row.querySelector(".ocolor").addEventListener("input", (e) => { order.color = e.target.value; persist(); });
+      }
+
       $("order-add").addEventListener("click", () => {
-        state.orders.push({ id: rid("o"), jobNumber: "", city: "", state: "", color: palette[state.orders.length % palette.length], pallets: [newPallet()] });
+        state.orders.push({ id: rid("o"), jobNumber: "", city: "", state: "", color: freeColor(), pallets: [newPallet()] });
         renderOrders();
         persist();
       });
@@ -1035,7 +1230,7 @@ export const PANEL_HTML = `<!doctype html>
       function setNested(v) { nested = v; $("print-load").disabled = !v; }
 
       function runNest() {
-        post({ type: "nest", trailer: readTrailer(), orders: state.orders, palletMargin: effPallet(), dimensions: !!state.dimensions });
+        post({ type: "nest", trailer: readTrailer(), orders: state.orders, palletMargin: effPallet(), dimensions: !!state.dimensions, textColor: state.textColor || DEFAULT_TEXT_COLOR });
         $("results").innerHTML = "<div class='muted'>Nesting…</div>";
       }
       $("nest").addEventListener("click", runNest);
@@ -1081,6 +1276,15 @@ export const PANEL_HTML = `<!doctype html>
           renderTrailer();
           renderOrders();
           if (!$("presets").hidden) renderPresets();
+          return;
+        }
+        if (m.type === "folder") {
+          const f = m.folder || {};
+          $("folder-row").hidden = !f.supported;
+          $("folder-name").textContent = f.folder
+            ? (f.enabled ? "PDF filed in “" + f.folder + "”" : "Folder “" + f.folder + "” — saving is off")
+            : "No folder — no PDF is kept";
+          $("pick-folder").textContent = f.folder ? "Change…" : "Choose folder…";
           return;
         }
         if (m.type === "unit") {

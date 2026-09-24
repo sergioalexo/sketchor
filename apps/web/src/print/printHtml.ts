@@ -38,6 +38,12 @@ export interface PrintOptions {
    * load's name and date; without one the file is stamped with today's date.
    */
   fileName?: string;
+  /**
+   * The same sheet as a PDF. When given, that is what the autosave folder
+   * receives — a PDF is what an office files, and what opens the same on a
+   * phone in a yard. Without it the copy is standalone HTML, as before.
+   */
+  pdf?: Uint8Array;
 }
 
 /**
@@ -61,10 +67,11 @@ export function printHtml(bodyHtml: string, options: PrintOptions = {}): void {
   const title = options.fileName?.trim() || `Sketchor print ${new Date().toISOString().slice(0, 10)}`;
   const canSave = supportsAutosave();
   const folder = autosaveFolderLabel();
+  const kind = options.pdf ? "PDF" : "standalone HTML file";
   const autosave = `
-    <label class="print-autosave" title="Also write the sheet into a folder, as a standalone HTML file that prints the same way later">
+    <label class="print-autosave" title="Also write the sheet into a folder, as a ${kind}">
       <input type="checkbox" id="sketchor-print-autosave"${autosaveEnabled() && folder ? " checked" : ""}>
-      <span>Save a copy</span>
+      <span>Save a ${options.pdf ? "PDF" : "copy"}</span>
     </label>
     <button type="button" class="btn ghost sm" id="sketchor-print-folder">${folder ? escapeHtml(folder) : "Choose folder…"}</button>
     <span class="print-save-note" id="sketchor-print-note"></span>`;
@@ -119,7 +126,9 @@ export function printHtml(bodyHtml: string, options: PrintOptions = {}): void {
     // needs permission, and the browser only grants that during a gesture.
     // window.print() blocks, so anything after it would miss that window.
     if (checkbox?.checked) {
-      const outcome = await saveToAutosaveFolder(safeFileName(title), standalonePrintDocument(bodyHtml, title));
+      const outcome = options.pdf
+        ? await saveToAutosaveFolder(safeFileName(title, "pdf"), options.pdf)
+        : await saveToAutosaveFolder(safeFileName(title), standalonePrintDocument(bodyHtml, title));
       if (outcome.ok) say(`Saved ${outcome.file} to “${outcome.folder}”`);
       else say(outcome.message, true);
       if (!outcome.ok && outcome.reason !== "no-folder") return; // let them see why before printing

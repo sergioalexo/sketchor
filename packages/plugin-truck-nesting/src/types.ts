@@ -82,6 +82,15 @@ export interface LayoutOptions {
   perMm?: number;
   /** Display-unit suffix for labels ("mm", "in", …). Default "mm". */
   unitLabel?: string;
+  /**
+   * Colour of the plan's free-standing lettering — the dimensions and the
+   * NOSE / DOOR ends. These sit on the drawing canvas, not on a pallet, so
+   * the default is a light ink that reads on a dark workspace;
+   * {@link forPaper} swaps it back to black for printing. Labels *on* a
+   * pallet ignore this: they take black or white from the pallet's own
+   * colour, which is the only thing that keeps them legible on both.
+   */
+  annotationColor?: string;
 }
 
 /** One packed pallet — the unit the renderer draws and the summary lists. */

@@ -3,6 +3,7 @@ import {
   circle,
   polyline,
   text,
+  textWidth,
   type Command,
   type DocumentReadModel,
   type Entity,
@@ -30,6 +31,18 @@ export const LOAD_PLAN_GUIDE_LAYER = "Load Plan — margins";
 
 /** Construction guides (wall clearance, per-pallet spacing) are white + dashed, no fill. */
 const GUIDE_COLOR = "#ffffff";
+
+/**
+ * Default ink for the plan's free-standing lettering. The workspace is dark,
+ * so black lettering — which is what this was — disappears against it; this
+ * is near-white and {@link forPaper} turns it black again for printing.
+ */
+export const DEFAULT_ANNOTATION_COLOR = "#e8eaed";
+
+/** Ink for lettering that stands on the canvas rather than on a pallet. */
+function annotationInk(opts: LayoutOptions): string {
+  return opts.annotationColor?.trim() || DEFAULT_ANNOTATION_COLOR;
+}
 const EPS = 1e-6;
 
 let idCounter = 0;
@@ -128,6 +141,10 @@ const NAME_LABEL = "pallet-label";
 /** The big item-number label specifically — kept apart from NAME_LABEL (city/tag) so it can be found unambiguously by {@link readLivePlacements}, even if a city or tag happens to look numeric. */
 const NAME_NUMBER = "pallet-number";
 const NAME_GUIDE = "pallet-guide";
+/** The NOSE / DOOR end labels on the trailer outline. */
+const NAME_END = "trailer-end";
+/** The summary block beside the trailer — the same facts the printed sheet's header carries. */
+const NAME_SUMMARY = "plan-summary";
 
 /**
  * Black or white, whichever reads on `background` (WCAG relative
@@ -211,7 +228,7 @@ function dimensionEntitiesFor(geo: PalletGeometry, opts: LayoutOptions): { comma
   const h = Math.min(Math.max(Math.min(geo.length, geo.width) * 0.07, 12), 30);
   const gap = h * 0.4;
   const label = (at: { x: number; y: number }, str: string) => {
-    const t = text(at, str, { layer: LOAD_PLAN_LAYER, color: "#111111", height: h, name: NAME_DIM });
+    const t = text(at, str, { layer: LOAD_PLAN_LAYER, color: annotationInk(opts), height: h, name: NAME_DIM });
     push(add(t), t.id);
   };
 
@@ -311,6 +328,41 @@ function palletCommands(p: PlacedItem, itemNumber: number, opts: LayoutOptions):
 }
 
 /**
+ * The plan as it should look on **white paper**.
+ *
+ * The drawing is made for a dark workspace: the dimensions and the NOSE /
+ * DOOR labels are near-white, and the clearance guides are white dashes.
+ * Printed as-is they would be blank paper. This swaps that lettering to black
+ * and drops the guides, which is the same bargain every CAD plot style makes
+ * — and it is a *rendering* of the drawing, not a second drawing: the
+ * geometry, positions and pallet colours are untouched.
+ *
+ * Labels sitting on a pallet keep their colour: those are already black or
+ * white by how dark that pallet is, which is what works on both media.
+ */
+export function forPaper(entities: readonly Entity[]): Entity[] {
+  const out: Entity[] = [];
+  for (const e of entities) {
+    if (e.name === NAME_GUIDE) continue; // white dashes on white paper
+    // The summary block is the sheet's own header and legend, drawn beside
+    // the trailer for whoever opens the DXF instead. On the sheet it would
+    // be the same facts twice, shrinking the plan to make room.
+    if (e.name === NAME_SUMMARY) continue;
+    if (e.type === "text" && (e.name === NAME_DIM || e.name === NAME_END) && isLight(e.color)) {
+      out.push({ ...e, color: "#111111" });
+      continue;
+    }
+    out.push(e);
+  }
+  return out;
+}
+
+/** True for a colour too light to read on white paper (WCAG relative luminance). */
+function isLight(color: string | undefined): boolean {
+  return color === undefined || inkOn(color) === "#111111";
+}
+
+/**
  * Adds or removes the per-pallet dimension overlay on an already-drawn plan,
  * *without* re-running the nest solver — so pallets the user has manually
  * dragged stay exactly where they put them. Reads each pallet's current
@@ -363,15 +415,16 @@ export function buildNestLayout(
   // implicit in the plan, and these two words are how anyone reading the
   // plan on the dock knows which way round it goes — so they are drawn
   // large enough to read at arm's length on a printed sheet.
-  const endLabelH = Math.min(result.trailer.width * 0.09, 170);
+  const endLabelH = Math.min(result.trailer.width * 0.11, 220);
   const endLabel = (atX: number, str: string, alignRight: boolean) => {
-    const w = str.length * endLabelH * 0.6;
+    const w = textWidth(str, endLabelH);
     commands.push(
       add(
         text({ x: alignRight ? atX - w : atX, y: result.trailer.width + endLabelH * 0.4 }, str, {
           layer: LOAD_PLAN_LAYER,
-          color: "#111111",
+          color: annotationInk(opts),
           height: endLabelH,
+          name: NAME_END,
         }),
       ),
     );
@@ -399,8 +452,9 @@ export function buildNestLayout(
         add(
           text({ x: result.trailer.length + h * 2, y: result.trailer.width - i * h * 1.6 }, line, {
             layer: LOAD_PLAN_LAYER,
-            color: "#111111",
+            color: annotationInk(opts),
             height: h,
+            name: NAME_SUMMARY,
           }),
         ),
       );

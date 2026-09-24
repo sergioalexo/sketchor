@@ -140,11 +140,11 @@ export function safeFileName(name: string, extension = "html"): string {
 }
 
 /**
- * Writes `text` into the remembered folder. Must be called from within a
- * user gesture: a restored handle needs `requestPermission`, and browsers
- * only grant that to a real click.
+ * Writes `data` (sheet text, or PDF bytes) into the remembered folder. Must be
+ * called from within a user gesture: a restored handle needs
+ * `requestPermission`, and browsers only grant that to a real click.
  */
-export async function saveToAutosaveFolder(fileName: string, text: string): Promise<SaveOutcome> {
+export async function saveToAutosaveFolder(fileName: string, data: string | Uint8Array): Promise<SaveOutcome> {
   const dir = await get<DirectoryHandle>("printFolder");
   if (!dir) return { ok: false, reason: "no-folder", message: "No folder chosen yet" };
 
@@ -157,7 +157,10 @@ export async function saveToAutosaveFolder(fileName: string, text: string): Prom
     }
     const file = await dir.getFileHandle(fileName, { create: true });
     const writable = await file.createWritable();
-    await writable.write(text);
+    // A Uint8Array from the plugin sandbox arrives structured-cloned; write
+    // it through a fresh copy so a detached or subclassed buffer can't
+    // surprise the writer.
+    await writable.write(typeof data === "string" ? data : new Uint8Array(data));
     await writable.close();
     return { ok: true, folder: dir.name, file: fileName };
   } catch (err) {

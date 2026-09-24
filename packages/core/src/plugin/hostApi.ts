@@ -146,6 +146,14 @@ export interface UiApi {
    * the plugin builds itself; escape any user-entered strings it contains.
    */
   print(bodyHtml: string, options?: PrintOptions): void;
+  /** The folder printed copies are filed into, if the user has chosen one. */
+  printFolder(): Promise<PrintFolderInfo>;
+  /**
+   * Asks the user for that folder (an OS picker) and remembers it. Must be
+   * called from a real click — browsers only open the picker during a user
+   * gesture, and the grant it returns is what later writes depend on.
+   */
+  pickPrintFolder(): Promise<PrintFolderInfo>;
 }
 
 export interface PrintOptions {
@@ -154,6 +162,22 @@ export interface PrintOptions {
    * print into a folder (no extension, no path — the host sanitises it).
    */
   fileName?: string;
+  /**
+   * The same sheet as a PDF. When present it is what gets filed into the
+   * autosave folder (`<fileName>.pdf`) instead of a standalone HTML copy —
+   * the printer still gets `bodyHtml`, so the two are the same document by
+   * construction.
+   */
+  pdf?: Uint8Array;
+}
+
+export interface PrintFolderInfo {
+  /** False where the browser has no folder picker at all (Firefox, Safari). */
+  supported: boolean;
+  /** The chosen folder's display name, or null if there isn't one yet. */
+  folder: string | null;
+  /** Whether a copy is actually filed on each print. */
+  enabled: boolean;
 }
 
 export interface UiShowOptions {
@@ -248,6 +272,9 @@ export interface ImporterContext {
  * ambient, permission-free {@link AppApi} (`app.displayUnit`) — additive.
  * 0.5.0 added `ui.print(bodyHtml)` — additive. 0.6.0 added its optional
  * `options.fileName`, which names the copy the host saves into the user's
- * chosen folder — additive again.
+ * chosen folder — additive again. 0.7.0 added `options.pdf` (the sheet as a
+ * PDF, which is what the folder then receives) and the `ui.printFolder` /
+ * `ui.pickPrintFolder` pair, so a plugin can offer that folder in its own
+ * panel instead of only in the print bar — additive.
  */
-export const HOST_API_VERSION = "0.6.0";
+export const HOST_API_VERSION = "0.7.0";

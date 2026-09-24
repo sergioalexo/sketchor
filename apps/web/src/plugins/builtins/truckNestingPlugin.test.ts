@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
-import { nestByOrders, type Order, type TrailerProfile } from "@sketchor/plugin-truck-nesting";
-import { buildPrintHtml, PANEL_HTML } from "./truckNestingPlugin";
+import {
+  buildNestLayout,
+  forPaper,
+  LOAD_PLAN_LAYER,
+  nestByOrders,
+  type NestResult,
+  type Order,
+  type TrailerProfile,
+} from "@sketchor/plugin-truck-nesting";
+import type { Entity } from "@sketchor/plugin-sdk";
+import { buildPrintHtml, buildPrintPdf, PANEL_HTML } from "./truckNestingPlugin";
 
 /**
  * The printed load plan is the deliverable: it goes to a dock, on paper,
@@ -9,6 +18,11 @@ import { buildPrintHtml, PANEL_HTML } from "./truckNestingPlugin";
  * which, whether a pallet's instruction tag is on the nest itself rather
  * than only in a table, and that the size column survives (it has gone
  * missing before, when a pallet was turned on the canvas).
+ *
+ * The sheet is rendered from the *drawing* — the entities `buildNestLayout`
+ * puts on the "Load Plan" layer, which are also what the DXF export writes.
+ * These tests go through that same path, so a plan that prints right is a
+ * plan that exports right.
  */
 
 const trailer: TrailerProfile = { name: "Test 13.6m", length: 13600, width: 2480 };
@@ -32,14 +46,20 @@ const orders: Order[] = [
   },
 ];
 
-const html = () =>
-  buildPrintHtml(nestByOrders(trailer, orders), [], {
-    loadName: "Load",
-    truckInfo: "",
-    loadDate: "2026-09-23",
-    perMm: 1,
-    unitLabel: "mm",
-  });
+const info = { loadName: "Load", truckInfo: "", loadDate: "2026-09-23", perMm: 1, unitLabel: "mm" };
+
+/** The plan as drawn, then re-inked for white paper — what the sheet renders. */
+function drawn(result: NestResult, opts: { dimensions?: boolean } = {}): Entity[] {
+  const entities = buildNestLayout(result, { ...opts, perMm: 1, unitLabel: "mm" })
+    .flatMap((c) => (c.type === "add-entity" ? [c.entity] : []))
+    .filter((e) => e.layer === LOAD_PLAN_LAYER);
+  return forPaper(entities) as Entity[];
+}
+
+const html = () => {
+  const result = nestByOrders(trailer, orders);
+  return buildPrintHtml(drawn(result), result, [], info);
+};
 
 /** The x attribute of the `<text>` element carrying `label`. */
 function labelX(svg: string, label: string): number | null {
@@ -92,6 +112,82 @@ describe("the printed load plan", () => {
     // The dark blue order must not be labelled in near-black.
     expect(out).toMatch(/fill="#ffffff"/);
     expect(out).toMatch(/fill="#111111"/);
+  });
+
+  it("fills the pallets solid, or the labels chosen for those colours stop reading", () => {
+    expect(html()).toMatch(/fill="#0072b2" fill-opacity="1"/);
+  });
+
+  it("shows the plan that was drawn, not a second one built for the page", () => {
+    const result = nestByOrders(trailer, orders);
+    const moved = drawn(result).map((e) =>
+      e.type === "polyline" ? { ...e, points: e.points.map((pt) => ({ x: pt.x + 5000, y: pt.y })) } : e,
+    );
+    const out = buildPrintHtml(moved, result, [], info);
+    // The trailer outline moved 5 m to the right, so the sheet is 5 m wider:
+    // the picture follows the entities, with nothing re-derived from the nest.
+    const width = Number(/viewBox="0 0 ([\d.]+)/.exec(out)![1]);
+    expect(width).toBeGreaterThan(trailer.length + 4000);
+  });
+
+  it("leaves the white clearance guides and the on-canvas summary off the paper", () => {
+    const result = nestByOrders({ ...trailer, wallMargin: 100 }, orders);
+    const paper = drawn(result);
+    expect(paper.some((e) => "dashed" in e && e.dashed)).toBe(false);
+    expect(paper.some((e) => e.type === "text" && /load plan/i.test(e.text))).toBe(false);
+    // …while the plan itself is still there.
+    expect(paper.some((e) => e.type === "text" && e.text === "NOSE")).toBe(true);
+  });
+
+  it("turns the workspace's light lettering black for paper", () => {
+    const result = nestByOrders(trailer, orders);
+    const drawnDark = buildNestLayout(result, { dimensions: true, perMm: 1, unitLabel: "mm" })
+      .flatMap((c) => (c.type === "add-entity" ? [c.entity] : []))
+      .filter((e) => e.layer === LOAD_PLAN_LAYER);
+    const dims = drawnDark.filter((e) => e.name === "pallet-dim");
+    expect(dims.length).toBeGreaterThan(0);
+    for (const d of dims) expect(d.color).toBe("#e8eaed"); // reads on the dark canvas
+    const onPaper = forPaper(drawnDark).filter((e) => e.name === "pallet-dim");
+    for (const d of onPaper) expect(d.color).toBe("#111111");
+  });
+});
+
+/**
+ * The PDF is the copy that lands in the office's folder without anyone
+ * choosing a filename, so it has to be a *file a reader opens* — a truncated
+ * or mis-offset one fails silently, days later, when someone goes looking.
+ */
+describe("the filed PDF", () => {
+  const pdf = () => {
+    const result = nestByOrders(trailer, orders);
+    return buildPrintPdf(drawn(result), result, [], info);
+  };
+  const asText = (bytes: Uint8Array) => String.fromCharCode(...bytes);
+
+  it("is a well-formed PDF whose xref points at its objects", () => {
+    const text = asText(pdf());
+    expect(text.startsWith("%PDF-1.")).toBe(true);
+    expect(text.trimEnd().endsWith("%%EOF")).toBe(true);
+    const startxref = Number(/startxref\n(\d+)/.exec(text)![1]);
+    expect(text.slice(startxref, startxref + 4)).toBe("xref");
+    // Every offset in the table must land on the object it claims.
+    const offsets = [...text.matchAll(/^(\d{10}) 00000 n $/gm)].map((m) => Number(m[1]));
+    expect(offsets.length).toBeGreaterThan(4);
+    offsets.forEach((off, i) => expect(text.slice(off, off + 8)).toContain(`${i + 1} 0 obj`));
+  });
+
+  it("carries the load's own paperwork, not a blank page", () => {
+    const text = asText(pdf());
+    expect(text).toContain("(Load)");
+    expect(text).toContain("(FRAGILE)"); // the tag, in the pallet list
+    expect(text).toContain("(NOSE)"); // the drawing's own lettering
+  });
+
+  it("escapes a job number that would otherwise end the string early", () => {
+    const awkward: Order[] = [{ ...orders[0], jobNumber: "PO (rush) \\ 7" }];
+    const result = nestByOrders(trailer, awkward);
+    const text = asText(buildPrintPdf(drawn(result), result, [], info));
+    expect(text).toContain("(PO \\(rush\\) \\\\ 7)");
   });
 });
 

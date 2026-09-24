@@ -44,6 +44,12 @@ export {
   linearDimension,
 } from "@sketchor/core";
 
+// Renderers a plugin needs to put *the geometry it drew* on paper, rather than
+// redrawing the same plan a second way: both read the very entities that go
+// into the DXF, so the sheet and the exported file can never drift apart.
+export { entitiesToSvgDocument, drawEntitiesToPdf, PdfBuilder, PDF_LETTER, PDF_LETTER_LANDSCAPE, pdfTextWidth } from "@sketchor/core";
+export type { SvgExportOptions, PdfDrawBox, PdfDrawOptions, PdfPageSize, PdfPaint, PdfTextStyle } from "@sketchor/core";
+
 // Re-export the contract types authors need, so a plugin depends only on the SDK.
 export type {
   PluginHostApi,
@@ -62,6 +68,7 @@ export type {
   PluginFetchInit,
   PluginFetchResponse,
   UiShowOptions,
+  PrintOptions,
   NotifyOptions,
   Unsubscribe,
   Command,

@@ -23,6 +23,8 @@ export * from "./sketchtext";
 export * from "./dxf";
 export * from "./dxfExport";
 export * from "./svg";
+export * from "./pdf";
+export * from "./entitiesPdf";
 export * from "./font";
 export * from "./heal";
 export * from "./boxSelect";

@@ -1,8 +1,15 @@
-import { projectDocument, type Command, type DisplayUnitInfo, type UiShowOptions } from "@sketchor/core";
+import { projectDocument, type Command, type DisplayUnitInfo, type PrintFolderInfo, type UiShowOptions } from "@sketchor/core";
 import { bus, doc, useApp } from "../../state/store";
 import { factorFromMm, type DisplayUnit } from "../../units";
 import { hidePanel, postToPanel, showPanel, subscribeToPanel } from "./uiManager";
 import { printHtml } from "../../print/printHtml";
+import { autosaveEnabled, autosaveFolderLabel, pickAutosaveFolder, setAutosaveEnabled, supportsAutosave } from "../../io/autosaveFolder";
+
+/** The autosave folder, as the plugin-facing {@link PrintFolderInfo}. */
+function printFolderInfo(): PrintFolderInfo {
+  const folder = autosaveFolderLabel();
+  return { supported: supportsAutosave(), folder, enabled: autosaveEnabled() && folder !== null };
+}
 
 /** The current display unit as the plugin-facing {@link DisplayUnitInfo}. */
 function currentDisplayUnit(): DisplayUnitInfo {
@@ -94,6 +101,18 @@ export async function dispatchCall(ctx: HostContext, method: string, args: unkno
       hidePanel(ctx.pluginId);
       return undefined;
 
+    case "ui.printFolder":
+      return printFolderInfo();
+    case "ui.pickPrintFolder": {
+      // Runs inside the click that came up from the panel iframe: the picker
+      // needs that transient activation, and so does the write that follows.
+      const folder = await pickAutosaveFolder();
+      // Choosing a folder *is* the request to file copies there — asking the
+      // user to then also tick a box would be a second answer to one question.
+      if (folder) setAutosaveEnabled(true);
+      return printFolderInfo();
+    }
+
     case "app.displayUnit":
       return currentDisplayUnit();
 
@@ -145,14 +164,17 @@ export function dispatchPost(ctx: HostContext, method: string, args: unknown[]):
       postToPanel(ctx.pluginId, args[0]);
       return;
     case "ui.print": {
-      // args[1] is an optional { fileName } — what the autosaved copy is
-      // called. A plugin that doesn't pass one still prints as before.
+      // args[1] is an optional { fileName, pdf } — what the autosaved copy is
+      // called, and the sheet as a PDF to file instead of an HTML copy. A
+      // plugin that passes neither still prints as before.
       const opts = args[1];
-      const fileName =
-        opts && typeof opts === "object" && typeof (opts as { fileName?: unknown }).fileName === "string"
-          ? (opts as { fileName: string }).fileName
+      const read = <T>(key: string, ok: (v: unknown) => boolean): T | undefined =>
+        opts && typeof opts === "object" && ok((opts as Record<string, unknown>)[key])
+          ? ((opts as Record<string, T>)[key] as T)
           : undefined;
-      printHtml(String(args[0]), { fileName });
+      const fileName = read<string>("fileName", (v) => typeof v === "string");
+      const pdf = read<Uint8Array>("pdf", (v) => v instanceof Uint8Array);
+      printHtml(String(args[0]), { fileName, pdf });
       return;
     }
     default:

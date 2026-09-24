@@ -27,6 +27,12 @@ export interface SvgExportOptions {
   padding?: number;
   strokeColor?: string;
   strokeWidth?: number;
+  /**
+   * How solid a closed shape's `fill` is drawn (default 0.3 — the geometry
+   * still reads through it). A printed sheet passes 1: the load plan picks
+   * black or white labels from the fill colour, which only works on solid.
+   */
+  fillOpacity?: number;
 }
 
 /** Tessellates an arc into an SVG path's `d` attribute (sidesteps large-arc/sweep-flag sign risk entirely). */
@@ -77,6 +83,7 @@ export function entitiesToSvgDocument(entities: Entity[], opts: SvgExportOptions
   const padding = opts.padding ?? 5;
   const stroke = opts.strokeColor ?? "#000000";
   const strokeWidth = opts.strokeWidth ?? Math.max(0.2, padding / 20);
+  const fillOpacity = opts.fillOpacity ?? 0.3;
 
   const b = boundsOf(entities) ?? { minX: 0, minY: 0, maxX: 100, maxY: 100 };
   const minX = b.minX - padding;
@@ -100,7 +107,7 @@ export function entitiesToSvgDocument(entities: Entity[], opts: SvgExportOptions
     const closed = e.type === "circle" || (e.type === "polyline" && e.closed);
     let out = "";
     if (e.color) out += ` stroke="${escapeXml(e.color)}"`;
-    if (closed && "fill" in e && e.fill) out += ` fill="${escapeXml(e.fill)}" fill-opacity="0.3"`;
+    if (closed && "fill" in e && e.fill) out += ` fill="${escapeXml(e.fill)}" fill-opacity="${fmt(fillOpacity)}"`;
     if ("dashed" in e && e.dashed) out += ` stroke-dasharray="${fmt(strokeWidth * 4)} ${fmt(strokeWidth * 3)}"`;
     return out;
   };

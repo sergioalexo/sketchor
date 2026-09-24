@@ -12,6 +12,8 @@ import type {
   PluginFetchInit,
   PluginFetchResponse,
   PluginHostApi,
+  PrintFolderInfo,
+  PrintOptions,
   UiShowOptions,
   Unsubscribe,
 } from "@sketchor/core";
@@ -68,7 +70,9 @@ export function createClient(transport: RpcTransport): PluginHostApi {
       onMessage: (listener: (message: unknown) => void): Promise<Unsubscribe> =>
         transport.subscribe("ui.onMessage", [], (p) => listener(p)),
       notify: (message: string, options?: NotifyOptions) => transport.post("ui.notify", [message, options]),
-      print: (bodyHtml: string) => transport.post("ui.print", [bodyHtml]),
+      print: (bodyHtml: string, options?: PrintOptions) => transport.post("ui.print", [bodyHtml, options]),
+      printFolder: () => transport.call("ui.printFolder", []) as Promise<PrintFolderInfo>,
+      pickPrintFolder: () => transport.call("ui.pickPrintFolder", []) as Promise<PrintFolderInfo>,
     },
 
     app: {

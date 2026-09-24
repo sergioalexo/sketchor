@@ -160,15 +160,20 @@ Debug: `window.sketchor.openModel(name, arrayBuffer)` / `getModel()`.
 
 ## Printing and autosave (`apps/web/src/print/`, `io/autosaveFolder.ts`)
 
-`printHtml(bodyHtml, { fileName })` is the one print path — the toolbar's
-Print, and every plugin's `sketchor.ui.print` (host API 0.6.0 carries the
-optional `fileName`). It renders an in-page preview rather than a popup,
-because popup blockers and the desktop webview both eat `window.open`.
+`printHtml(bodyHtml, { fileName, pdf })` is the one print path — the
+toolbar's Print, and every plugin's `sketchor.ui.print` (host API 0.7.0
+carries `fileName` and the optional `pdf`). It renders an in-page preview
+rather than a popup, because popup blockers and the desktop webview both eat
+`window.open`.
 
 Its bar also **autosaves**: a folder the user picks once is kept as a
 `FileSystemDirectoryHandle` in IndexedDB (a path string wouldn't carry the
-browser's grant with it), and each printed sheet is written there as a
-standalone HTML document. Two rules that are easy to get wrong:
+browser's grant with it), and each printed sheet is written there on the
+Print click — as the caller's `pdf` when there is one, otherwise as a
+standalone HTML document. A plugin can offer that same folder inside its own
+panel through `ui.printFolder` / `ui.pickPrintFolder` (the load planner
+does); picking a folder is itself the request to file copies there, so there
+is no second checkbox to find. Two rules that are easy to get wrong:
 
 - The write must happen **inside the click** that starts the print. A
   restored handle comes back in the `prompt` permission state, and
@@ -180,6 +185,31 @@ standalone HTML document. Two rules that are easy to get wrong:
 
 Chromium only (`showDirectoryPicker`); the controls are simply absent
 where the API isn't there, and printing behaves as before.
+
+**The PDF is written here, not by the OS dialog** (`packages/core/src/pdf.ts`,
+`entitiesPdf.ts`): a hand-rolled PDF 1.4 writer — paths, solid fills and the
+base-14 Helvetica, no dependency — because `window.print()` can only reach a
+PDF through the dialog, where the user picks the folder every time, which is
+the whole thing autosave exists to avoid. `PdfBuilder` takes page points with
+Y **down** from the top-left and flips once on the way into the content
+stream; `drawEntitiesToPdf` fits an entity list into a box, mirroring
+`entitiesToSvgDocument`. Any change there needs `pdf.test.ts`'s structural
+assertions to still hold — a wrong xref offset produces a file that opens as
+"damaged" weeks later, when the load it recorded is long gone.
+
+### One drawing, three renderings
+
+The load planner's sheet is **not** a second drawing of the plan. It renders
+the entities on the "Load Plan" layer — the same list `entitiesToDxf` writes
+— so the printed sheet, the filed PDF and the exported DXF cannot drift
+apart. `forPaper()` (in `plugin-truck-nesting/src/layout.ts`) is the only
+thing between them, and it only *re-inks*: the dark-workspace lettering goes
+black, the white clearance guides and the on-canvas summary block drop out.
+Geometry, positions and pallet colours are never touched. The plan's own
+lettering is light (`DEFAULT_ANNOTATION_COLOR`) because the workspace is
+dark, and the panel lets the user change it — as it does each drop's colour,
+which defaults to the Okabe–Ito set (distinct for colour-blind readers and
+in grayscale).
 
 ## Tools (`apps/web/src/tools/`)
 
