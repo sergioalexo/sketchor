@@ -1,6 +1,6 @@
 import { useMemo, Fragment, lazy, Suspense, useEffect, useState } from "react";
 import { CONSTRAINT_LABELS, freeEndpointEntityIds } from "@sketchor/core";
-import { bus, doc, getSessions, isModelSession, measurementText, TOOL_HINTS, useApp, type ToolId } from "./state/store";
+import { bus, doc, entityMeasurement, getSessions, isModelSession, measurementText, TOOL_HINTS, useApp, type ToolId } from "./state/store";
 import { useTouchMode } from "./touchMode";
 import { SnapPopover } from "./SnapPopover";
 import { SelectByPopover } from "./SelectByPopover";
@@ -682,6 +682,20 @@ export function App() {
     return `${ids.length} selected (${parts.join(", ")})`;
   };
 
+  // Selecting exactly one line/circle/arc/polyline (with the select tool,
+  // not the measure tool) shows its size right there — no tool switch
+  // needed just to read a length off the drawing.
+  const selectedSingle = selection.length === 1 ? doc.get(selection[0]) : null;
+  const selectionMeasurement = selectedSingle ? entityMeasurement(selectedSingle) : null;
+  const [justCopiedSelection, setJustCopiedSelection] = useState(false);
+  const copySelectionMeasurement = () => {
+    if (!selectionMeasurement) return;
+    void navigator.clipboard.writeText(measurementText(selectionMeasurement, displayUnit)).then(() => {
+      setJustCopiedSelection(true);
+      setTimeout(() => setJustCopiedSelection(false), 1200);
+    });
+  };
+
   return (
     <div className={`app ${touchMode ? "touch" : ""}`}>
       <header className="topbar">
@@ -1330,6 +1344,17 @@ export function App() {
           </span>
         )}
         <span data-testid="selection-hint">{selectionLabel(selection)}</span>
+        {selectionMeasurement && (
+          <button
+            type="button"
+            className="measure-readout selection-readout"
+            title="Click to copy"
+            data-testid="selection-measure-readout"
+            onClick={copySelectionMeasurement}
+          >
+            {justCopiedSelection ? "Copied" : measurementText(selectionMeasurement, displayUnit)}
+          </button>
+        )}
         {measurement && (
           <span className="measure-readout" data-testid="measure-readout">
             {measurementText(measurement, displayUnit, referenceAngleDeg)}

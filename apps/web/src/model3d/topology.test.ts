@@ -83,6 +83,31 @@ function cylinder(radius: number, height: number, sides = 32): OcctMesh {
   return { name: "Cylinder", brep_faces, attributes: { position: { array: position } }, index: { array: index } };
 }
 
+/**
+ * An irregular tetrahedron — vertices A(0,0,0) B(4,0,0) C(0,2,0) D(0,0,6) —
+ * whose bounding-box centre (2, 1, 3) is deliberately *not* its centre of
+ * mass. A cube or cylinder can't tell "true volumetric centroid" apart from
+ * "average of the bounding box", since both coincide for a symmetric solid;
+ * this shape can. Any tetrahedron's centroid is the mean of its 4 vertices —
+ * (1, 0.5, 1.5) here — which is the independent check the topology.ts
+ * computation is verified against. Faces are wound outward by hand (checked
+ * against the tetrahedron's own centroid) since there's no per-quad helper
+ * this shape can reuse.
+ */
+function tetra(): OcctMesh {
+  const P: [number, number, number][] = [
+    [0, 0, 0], // A
+    [4, 0, 0], // B
+    [0, 2, 0], // C
+    [0, 0, 6], // D
+  ];
+  const position = P.flat();
+  // Outward-wound faces: BCD, ADC, ABD, ACB (opposite A, B, C, D respectively).
+  const index = [1, 2, 3, 0, 3, 2, 0, 1, 3, 0, 2, 1];
+  const brep_faces: OcctMesh["brep_faces"] = [0, 1, 2, 3].map((f) => ({ first: f, last: f, color: null }));
+  return { name: "Tetra", brep_faces, attributes: { position: { array: position } }, index: { array: index } };
+}
+
 const model = (...meshes: OcctMesh[]) => buildModel({ success: true, meshes } as OcctResult, "t.step", "h", "step");
 
 describe("topology of a cube", () => {
@@ -98,6 +123,20 @@ describe("topology of a cube", () => {
     }
     expect(m.parts[0].area).toBeCloseTo(6, 6);
     expect(m.parts[0].volume).toBeCloseTo(1, 6);
+  });
+
+  it("puts the centre of mass at the cube's own centre, wherever the cube sits", () => {
+    // Powers the mass-properties readout: a bounding-box centre would give
+    // the same answer for a cube, so this only really distinguishes itself
+    // on a shape whose mass isn't symmetric about its box (the cylinder
+    // below does that check). Still worth pinning here as the simple case.
+    expect(m.parts[0].centroid[0]).toBeCloseTo(0.5, 6);
+    expect(m.parts[0].centroid[1]).toBeCloseTo(0.5, 6);
+    expect(m.parts[0].centroid[2]).toBeCloseTo(0.5, 6);
+    const offset = model(cube(5)).parts[0];
+    expect(offset.centroid[0]).toBeCloseTo(5.5, 6);
+    expect(offset.centroid[1]).toBeCloseTo(0.5, 6);
+    expect(offset.centroid[2]).toBeCloseTo(0.5, 6);
   });
 
   it("finds twelve straight edges of length 1 and eight vertices", () => {
@@ -161,12 +200,30 @@ describe("topology of a cylinder", () => {
   });
 });
 
+describe("centre of mass of an asymmetric solid", () => {
+  it("lands on the mean of the tetrahedron's 4 vertices, not the bounding-box centre", () => {
+    const m = model(tetra());
+    expect(m.parts[0].volume).toBeCloseTo(8, 4);
+    expect(m.parts[0].centroid[0]).toBeCloseTo(1, 4);
+    expect(m.parts[0].centroid[1]).toBeCloseTo(0.5, 4);
+    expect(m.parts[0].centroid[2]).toBeCloseTo(1.5, 4);
+    // The bounding-box centre, (2, 1, 3), would be the wrong answer here —
+    // pinning that distinction is the point of this fixture.
+    const boxCenter = [0, 1, 2].map((k) => (m.parts[0].bounds.min[k] + m.parts[0].bounds.max[k]) / 2);
+    expect(boxCenter).toEqual([2, 1, 3]);
+    expect(m.parts[0].centroid[0]).not.toBeCloseTo(boxCenter[0], 2);
+  });
+});
+
 /* ------------------------------ measurements ------------------------------ */
 
 const fmt: Formatters = {
   length: (v) => `${Math.round(v * 1000) / 1000}mm`,
   area: (v) => `${Math.round(v * 1000) / 1000}mm²`,
   volume: (v) => `${Math.round(v * 1000) / 1000}mm³`,
+  // 1 g/mm³ makes the expected value equal to the volume, so a test can
+  // check the row exists without re-deriving a density conversion.
+  mass: (v) => `${Math.round(v * 1000) / 1000}g`,
 };
 const rowValue = (m: { rows: { label: string; value: string }[] }, label: string) => m.rows.find((r) => r.label === label)?.value;
 
@@ -284,10 +341,32 @@ describe("measureSelection", () => {
     expect(rowValue(rows, "Distance to plane")).toBe("1mm");
   });
 
-  it("a part reports its size, surface area and volume", () => {
+  it("a part reports its size, surface area, volume, mass and centre of mass", () => {
     const rows = measureSelection(m, [{ kind: "part", index: 0 }], fmt);
     expect(rowValue(rows, "Size")).toBe("1mm × 1mm × 1mm");
     expect(rowValue(rows, "Surface area")).toBe("6mm²");
     expect(rowValue(rows, "Volume")).toBe("1mm³");
+    // fmt.mass is 1g per mm³ here, so this also checks mass is derived from volume, not just echoing it.
+    expect(rowValue(rows, "Mass")).toBe("1g");
+    expect(rowValue(rows, "Center of mass")).toBe("0.5mm, 0.5mm, 0.5mm");
+  });
+
+  it("two parts report a combined surface area, volume and mass", () => {
+    const two = model(cube(), cube(5));
+    const rows = measureSelection(two, [{ kind: "part", index: 0 }, { kind: "part", index: 1 }], fmt);
+    expect(rowValue(rows, "Total surface area")).toBe("12mm²");
+    expect(rowValue(rows, "Total volume")).toBe("2mm³");
+    expect(rowValue(rows, "Total mass")).toBe("2g");
+  });
+
+  it("more than two parts also get a total, labelled with the count", () => {
+    const three = model(cube(), cube(5), cube(10));
+    const rows = measureSelection(
+      three,
+      [{ kind: "part", index: 0 }, { kind: "part", index: 1 }, { kind: "part", index: 2 }],
+      fmt,
+    );
+    expect(rowValue(rows, "Total volume (3)")).toBe("3mm³");
+    expect(rowValue(rows, "Total mass (3)")).toBe("3g");
   });
 });

@@ -1282,13 +1282,15 @@ export function Viewport() {
         // Alt-click is the explicit "measure this whole entity" gesture —
         // a plain click always measures point-to-point (see below), snapping
         // to endpoints/midpoints/centers/intersections/on-line points, so it
-        // isn't shadowed by clicking anywhere near a line. Shift-Alt-click
-        // chains a running total across lines AND arcs (a mixed profile);
-        // plain Alt-click always reports just the one entity clicked.
+        // isn't shadowed by clicking anywhere near a line. Once a running
+        // total is showing, every further Alt-click adds to it with no
+        // modifier needed — Shift used to be required here, but making
+        // multi-select the default (and dropping it via Esc or a
+        // double-click, see onDoubleClick) reads more like normal selection.
         if (e.altKey && hitEntity?.type === "arc") {
           const len = hitEntity.radius * arcSweep(hitEntity.startAngle, hitEntity.endAngle, hitEntity.ccw);
           const current = app.measurement;
-          if (e.shiftKey && current?.kind === "length") {
+          if (current?.kind === "length") {
             if (!current.ids.includes(hitEntity.id)) {
               app.setMeasurement({ kind: "length", ids: [...current.ids, hitEntity.id], total: current.total + len });
             }
@@ -1315,7 +1317,7 @@ export function Viewport() {
           const len =
             hitEntity.type === "line" ? dist(hitEntity.a, hitEntity.b) : polylineLength(hitEntity);
           const current = app.measurement;
-          if (e.shiftKey && current?.kind === "length") {
+          if (current?.kind === "length") {
             if (!current.ids.includes(hitEntity.id)) {
               app.setMeasurement({ kind: "length", ids: [...current.ids, hitEntity.id], total: current.total + len });
             }
@@ -1897,6 +1899,16 @@ export function Viewport() {
     const world = screenToWorld(viewRef.current, screen);
     const hit = hitTest(viewRef.current, world);
     const app = useApp.getState();
+
+    // In the measure tool, double-click anywhere is "drop what I've got" —
+    // the same job Esc does, but without falling back to the select tool.
+    // Takes priority over the zoom-to-fit fallback below, which a double
+    // click would otherwise trigger since "measure" has no Tool class.
+    if (app.tool === "measure") {
+      app.setMeasurement(null);
+      interactionRef.current = { kind: "idle" };
+      return;
+    }
 
     // Double-clicking a constraint mark removes that constraint — the
     // gesture is unambiguous (a mark is not geometry), and it undoes.

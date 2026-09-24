@@ -48,6 +48,8 @@ export interface Formatters {
   length(worldValue: number): string;
   area(worldValueSquared: number): string;
   volume(worldValueCubed: number): string;
+  /** Takes the same raw enclosed volume `volume` does — density and the display unit are both baked in by the caller, same as the others. */
+  mass(worldValueCubed: number): string;
 }
 
 const deg = (rad: number) => `${round(((rad * 180) / Math.PI), 2)}°`;
@@ -269,7 +271,28 @@ export function measureSelection(model: Model3D, refs: SelRef[], fmt: Formatters
     const total = refs.reduce((a, r) => a + model.edgeTable.length[r.index], 0);
     rows.push({ label: `Total length (${refs.length})`, value: fmt.length(total) });
   }
+  if (refs.length > 2 && refs.every((r) => r.kind === "part")) {
+    const { area, volume } = sumParts(model, refs.map((r) => r.index));
+    rows.push(
+      { label: `Total surface area (${refs.length})`, value: fmt.area(area) },
+      { label: `Total volume (${refs.length})`, value: fmt.volume(volume), approx: true },
+      { label: `Total mass (${refs.length})`, value: fmt.mass(volume), approx: true },
+    );
+  }
   return { rows, segment: pair.segment };
+}
+
+/** Combined surface area and volume of a set of whole parts — what "how much material is this subassembly" means. */
+function sumParts(model: Model3D, indices: number[]): { area: number; volume: number } {
+  let area = 0;
+  let volume = 0;
+  for (const i of indices) {
+    const p = model.parts[i];
+    if (!p) continue;
+    area += p.area;
+    volume += p.volume;
+  }
+  return { area, volume };
 }
 
 /**
@@ -365,6 +388,12 @@ function measureOne(model: Model3D, ref: SelRef, fmt: Formatters): Measurement {
           { label: "Size", value: size.map((v) => fmt.length(v)).join(" × ") },
           { label: "Surface area", value: fmt.area(p.area) },
           { label: "Volume", value: fmt.volume(p.volume), approx: true },
+          { label: "Mass", value: fmt.mass(p.volume), approx: true },
+          {
+            label: "Center of mass",
+            value: `${fmt.length(p.centroid[0])}, ${fmt.length(p.centroid[1])}, ${fmt.length(p.centroid[2])}`,
+            approx: true,
+          },
           { label: "Faces / edges", value: `${p.faceCount} / ${p.edgeRefCount}` },
         ],
         segment: null,
@@ -454,6 +483,20 @@ function measurePair(model: Model3D, a: SelRef, b: SelRef, fmt: Formatters): Mea
     }
     const measured = faceSpan(model, fb.index, faceSamplePoints(model, fa.index), fmt);
     return { rows: [...measured.rows, area], segment: measured.segment };
+  }
+
+  if (kinds === "part+part") {
+    const pa = a as Extract<SelRef, { kind: "part" }>;
+    const pb = b as Extract<SelRef, { kind: "part" }>;
+    const { area, volume } = sumParts(model, [pa.index, pb.index]);
+    return {
+      rows: [
+        { label: "Total surface area", value: fmt.area(area) },
+        { label: "Total volume", value: fmt.volume(volume), approx: true },
+        { label: "Total mass", value: fmt.mass(volume), approx: true },
+      ],
+      segment: null,
+    };
   }
 
   // Anything involving a whole part: report both, nothing clever.

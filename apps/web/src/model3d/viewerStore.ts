@@ -13,6 +13,28 @@ import { sameRef } from "./measure";
 
 const MAX_SELECTION = 8;
 
+const DENSITY_STORAGE_KEY = "sketchor.density.v1";
+/** Generic structural steel (g/cm³) — a reasonable default until the user says otherwise. */
+const DEFAULT_DENSITY = 7.85;
+
+function loadDensity(): number {
+  try {
+    const raw = localStorage.getItem(DENSITY_STORAGE_KEY);
+    const n = raw === null ? NaN : Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : DEFAULT_DENSITY;
+  } catch {
+    return DEFAULT_DENSITY;
+  }
+}
+
+function saveDensity(v: number): void {
+  try {
+    localStorage.setItem(DENSITY_STORAGE_KEY, String(v));
+  } catch {
+    /* storage unavailable */
+  }
+}
+
 interface ViewerState {
   /** Hash of the model this state belongs to; a different model resets it. */
   modelHash: string | null;
@@ -24,8 +46,11 @@ interface ViewerState {
   frameRequest: { part: number; n: number } | null;
   /** Bumped to ask the viewer to fit everything still visible — what isolating should end with. */
   fitRequest: number;
+  /** Material density (g/cm³) the mass-properties readout multiplies volume by — one value for the whole model, persisted across sessions. */
+  density: number;
 
   useModel(hash: string): void;
+  setDensity(v: number): void;
   setSelection(selection: SelRef[]): void;
   /** Click semantics: plain replaces, additive toggles. */
   pick(ref: SelRef | null, additive: boolean): void;
@@ -50,7 +75,13 @@ export const useViewer = create<ViewerState>((set, get) => ({
   hidden: new Set(),
   frameRequest: null,
   fitRequest: 0,
+  density: loadDensity(),
 
+  setDensity: (v) => {
+    if (!Number.isFinite(v) || v <= 0) return;
+    saveDensity(v);
+    set({ density: v });
+  },
   useModel: (hash) => {
     if (get().modelHash === hash) return;
     set({ modelHash: hash, selection: [], hover: null, hidden: new Set(), frameRequest: null, fitRequest: 0 });

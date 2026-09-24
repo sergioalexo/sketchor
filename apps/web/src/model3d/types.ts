@@ -79,6 +79,8 @@ export interface ModelPart {
   /** Surface area and enclosed volume of this part's mesh (volume is meaningless for an open shell). */
   area: number;
   volume: number;
+  /** Volumetric (mass) centre — not the bounding-box centre, and not a face's area-weighted centroid. */
+  centroid: Vec3;
   bounds: Bounds3;
 }
 
@@ -151,6 +153,8 @@ export interface MeshTopology {
   /** Enclosed volume and surface area of this mesh. */
   volume: number;
   area: number;
+  /** Volumetric (mass) centre of this mesh. */
+  centroid: Vec3;
 }
 
 export interface ModelNode {

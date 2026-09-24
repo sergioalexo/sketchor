@@ -146,6 +146,7 @@ export function buildModel(result: OcctResult, name: string, hash: string, forma
       nodeCount: t.vertices.length / 3,
       area: t.area,
       volume: t.volume,
+      centroid: t.centroid,
       bounds: m.bounds,
     });
     v += vertexCount;

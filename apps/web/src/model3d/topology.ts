@@ -351,7 +351,10 @@ export function faceAggregates(
   faceOfTri: Int32Array,
   faceCount: number,
   diag: number,
-): Pick<MeshTopology, "faceTriStart" | "faceTriCount" | "faceArea" | "faceCentroid" | "faceNormal" | "facePlanar" | "faceOfTriangle" | "volume" | "area"> {
+): Pick<
+  MeshTopology,
+  "faceTriStart" | "faceTriCount" | "faceArea" | "faceCentroid" | "faceNormal" | "facePlanar" | "faceOfTriangle" | "volume" | "area" | "centroid"
+> {
   const triCount = indices.length / 3;
   const faceOfTriangle = new Uint32Array(triCount);
   for (let t = 0; t < triCount; t++) faceOfTriangle[t] = Math.max(0, faceOfTri[t]);
@@ -365,6 +368,14 @@ export function faceAggregates(
   const started = new Uint8Array(faceCount);
   let volume = 0;
   let totalArea = 0;
+  // Centre of mass, by the same tetrahedron decomposition as `volume`: each
+  // triangle plus the origin forms a signed tetrahedron whose own centroid
+  // is the mean of its 4 vertices (the origin is 0, so 3 terms). Weighting
+  // by the *signed* volume before dividing by the *signed* total is what
+  // makes the origin's choice cancel out, same as it does for volume itself.
+  let cmx = 0;
+  let cmy = 0;
+  let cmz = 0;
 
   for (let t = 0; t < triCount; t++) {
     const f = faceOfTriangle[t];
@@ -386,7 +397,11 @@ export function faceAggregates(
     area[f] += triArea;
     totalArea += triArea;
     // Signed tetrahedron volume about the origin; sums to the solid's volume for a closed shell.
-    volume += dot(a, cross(b, c)) / 6;
+    const tetVolume = dot(a, cross(b, c)) / 6;
+    volume += tetVolume;
+    cmx += tetVolume * ((a[0] + b[0] + c[0]) / 4);
+    cmy += tetVolume * ((a[1] + b[1] + c[1]) / 4);
+    cmz += tetVolume * ((a[2] + b[2] + c[2]) / 4);
     const cx = (a[0] + b[0] + c[0]) / 3;
     const cy = (a[1] + b[1] + c[1]) / 3;
     const cz = (a[2] + b[2] + c[2]) / 3;
@@ -439,6 +454,8 @@ export function faceAggregates(
     planar[f] = flat ? 1 : 0;
   }
 
+  const centroidOfMass: Vec3 = Math.abs(volume) > 1e-12 ? [cmx / volume, cmy / volume, cmz / volume] : [0, 0, 0];
+
   return {
     faceTriStart: triStart,
     faceTriCount: triCounts,
@@ -449,6 +466,7 @@ export function faceAggregates(
     faceOfTriangle,
     volume: Math.abs(volume),
     area: totalArea,
+    centroid: centroidOfMass,
   };
 }
 

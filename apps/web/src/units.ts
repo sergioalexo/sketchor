@@ -47,6 +47,16 @@ export function formatVolume(worldValueCubed: number, unit: DisplayUnit): string
   return `${round(worldValueCubed * factor, 3)}${unit}³`;
 }
 
+/** A mass in grams, shown as kg/g or lb/oz to match the display unit's system (in/ft = imperial, everything else metric). */
+export function formatMass(grams: number, unit: DisplayUnit): string {
+  if (unit === "in" || unit === "ft") {
+    const lb = grams / 453.59237;
+    return lb >= 0.1 ? `${round(lb, 3)}lb` : `${round(grams / 28.349523125, 2)}oz`;
+  }
+  const kg = grams / 1000;
+  return kg >= 0.1 ? `${round(kg, 4)}kg` : `${round(grams, 2)}g`;
+}
+
 /**
  * DXF `$INSUNITS` codes this app can represent as a DisplayUnit (the spec
  * defines more — miles, mils, angstroms, US survey units, ... — which have

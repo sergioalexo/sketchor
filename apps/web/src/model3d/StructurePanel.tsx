@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { partOf } from "./measure";
 import type { Model3D, ModelNode } from "./types";
 import { useViewer } from "./viewerStore";
@@ -29,11 +29,23 @@ export function StructurePanel({ model }: { model: Model3D }) {
   const [filter, setFilter] = useState("");
   /** The right-click menu: where it is, and what it acts on. */
   const [menu, setMenu] = useState<{ x: number; y: number; label: string; parts: number[] } | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
   // Any click elsewhere, or Escape, closes the menu — it is a menu, not a mode.
+  // The close listener runs in the CAPTURE phase (so it also sees a click on
+  // the canvas behind the panel), which fires *before* a bubble-phase click
+  // inside the menu itself — a menu button's stopPropagation() can't undo
+  // that, it's already too late in the dispatch order. So the check has to
+  // be "was the target inside the menu", not "did something ask us to stop".
+  // Get this wrong (as it was) and every menu button closes the menu on
+  // pointerdown without ever running its own onClick, because React has
+  // already unmounted it by the time the click event follows.
   useEffect(() => {
     if (!menu) return;
-    const close = () => setMenu(null);
+    const close = (e: PointerEvent) => {
+      if (e.target instanceof Node && menuRef.current?.contains(e.target)) return;
+      setMenu(null);
+    };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         setMenu(null);
@@ -147,10 +159,10 @@ export function StructurePanel({ model }: { model: Model3D }) {
       </div>
       {menu && (
         <div
+          ref={menuRef}
           className="structure-menu"
           style={{ left: menu.x, top: menu.y }}
           data-testid="structure-menu"
-          onPointerDown={(e) => e.stopPropagation()}
         >
           <div className="structure-menu-head" title={menu.label}>
             {menu.label}

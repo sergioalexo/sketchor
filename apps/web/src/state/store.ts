@@ -8,6 +8,7 @@ import {
   DEFAULT_LAYER,
   SketchDocument,
   centroidOfEntities,
+  arcSweep,
   diffToCommands,
   dist,
   dxfToSvg,
@@ -24,6 +25,7 @@ import {
   parseCode,
   parseDxf,
   patternCommands,
+  polylineLength,
   polylineSegments,
   reduceToHalfTurn,
   scanForCrossings,
@@ -510,6 +512,35 @@ export function measurementText(m: MeasureResult, unit: DisplayUnit, referenceAn
       for (let i = 0; i < pts.length; i++) perimeter += dist(pts[i], pts[(i + 1) % pts.length]);
       return `area ${formatArea(m.region.area, unit)}  perimeter ${formatLength(perimeter, unit)}`;
     }
+  }
+}
+
+/**
+ * The natural dimension of a single entity — length for a line/polyline,
+ * radius/diameter(+arc length) for a circle/arc — same shape the measure
+ * tool's Alt-click ("whole entity") gesture produces. Null for entity types
+ * with no natural length (text, image, point, dimension). Powers the select
+ * tool's click-to-copy readout: selecting one line or circle/arc shows its
+ * size without switching to the measure tool at all.
+ */
+export function entityMeasurement(entity: Entity): MeasureResult | null {
+  switch (entity.type) {
+    case "line":
+      return { kind: "length", ids: [entity.id], total: dist(entity.a, entity.b) };
+    case "polyline":
+      return { kind: "length", ids: [entity.id], total: polylineLength(entity) };
+    case "circle":
+      return { kind: "radius", id: entity.id, center: entity.center, radius: entity.radius };
+    case "arc":
+      return {
+        kind: "radius",
+        id: entity.id,
+        center: entity.center,
+        radius: entity.radius,
+        arcLength: entity.radius * arcSweep(entity.startAngle, entity.endAngle, entity.ccw),
+      };
+    default:
+      return null;
   }
 }
 

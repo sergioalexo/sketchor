@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { DocSession } from "../state/store";
 import { useApp } from "../state/store";
-import { formatArea, formatLength, formatVolume } from "../units";
+import { formatArea, formatLength, formatMass, formatVolume } from "../units";
 import {
   buildLights,
   buildModelObjects,
@@ -180,6 +180,8 @@ function Viewer({ model }: { model: Model3D }) {
   const showAllParts = useViewer((v) => v.showAll);
   const isolate = useViewer((v) => v.isolate);
   const useModel = useViewer((v) => v.useModel);
+  const density = useViewer((v) => v.density);
+  const setDensity = useViewer((v) => v.setDensity);
   const [showEdges, setShowEdges] = useState(true);
   /** The span the current selection measures; the overlay re-projects it every frame. */
   const segmentRef = useRef<MeasureSegment | null>(null);
@@ -723,8 +725,10 @@ function Viewer({ model }: { model: Model3D }) {
         length: (v) => formatLength(v, displayUnit),
         area: (v) => formatArea(v, displayUnit),
         volume: (v) => formatVolume(v, displayUnit),
+        // volume (mm³) × density (g/cm³) / 1000 = grams — the mm³↔cm³ factor.
+        mass: (v) => formatMass((v * density) / 1000, displayUnit),
       }),
-    [model, selection, displayUnit],
+    [model, selection, displayUnit, density],
   );
   const rows = measurement.rows;
   const spanLength = measurement.segment
@@ -860,6 +864,29 @@ function Viewer({ model }: { model: Model3D }) {
               </span>
             </div>
           ))}
+          {/* Mass depends on a material nobody told the viewer — shown right
+              under the row it feeds, so the number and its assumption stay together. */}
+          {rows.some((r) => r.label === "Mass" || r.label.startsWith("Total mass")) && (
+            <div className="model-measure-row model-measure-density">
+              <span className="model-measure-key">Density</span>
+              <span>
+                <input
+                  type="number"
+                  className="model-density-input"
+                  data-testid="model-density-input"
+                  min={0.001}
+                  step={0.01}
+                  value={density}
+                  onChange={(e) => {
+                    const v = Number(e.target.value);
+                    if (Number.isFinite(v) && v > 0) setDensity(v);
+                  }}
+                  title="Material density used for Mass — assumed, not read from the file"
+                />{" "}
+                g/cm³
+              </span>
+            </div>
+          )}
         </div>
       )}
     </div>

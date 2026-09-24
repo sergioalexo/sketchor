@@ -718,6 +718,20 @@ body {
   background: rgba(90, 209, 197, 0.15);
 }
 
+/* The click-to-copy dimension readout shown for a single selected line/circle/arc — a plain <button> wearing .measure-readout's look. */
+.selection-readout {
+  border: none;
+  background: transparent;
+  padding: 1px 4px;
+  border-radius: 4px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.selection-readout:hover {
+  background: rgba(90, 209, 197, 0.15);
+}
+
 .save-notice {
   color: #5adc7a;
   font-weight: 600;
@@ -2006,6 +2020,24 @@ kbd.shortcut-key-fixed {
 .model-measure-value {
   color: var(--text);
   font-weight: 600;
+}
+
+.model-measure-density {
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.model-density-input {
+  width: 48px;
+  padding: 0 3px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 /* Touch: fingers need a bigger readout, and the bottom toolbar needs the room. */
