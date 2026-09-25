@@ -48,6 +48,10 @@ describe("parseCommand", () => {
     expect(parseCommand("x")).toEqual({ kind: "app", id: "explode" });
     expect(parseCommand("e")).toEqual({ kind: "app", id: "delete" });
   });
+
+  it("parses simplify (P-03)", () => {
+    expect(parseCommand("simplify")).toEqual({ kind: "app", id: "simplify" });
+  });
 });
 
 describe("the alias tables", () => {

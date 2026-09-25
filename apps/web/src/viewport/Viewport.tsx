@@ -9,6 +9,7 @@ import {
   type Grip,
   explodeCommands,
   joinCommands,
+  simplifyPolylineCommands,
   bulgeToArc,
   dist,
   distToArc,
@@ -151,6 +152,14 @@ const GROUP_HANDLE_OFFSET_PX = 26;
 const GROUP_HANDLE_HIT_PX = 8;
 /** How close (screen px) a click must be to a grip to grab it. */
 const GRIP_HIT_PX = 7;
+/**
+ * P-03 "Simplify polyline" (Shift+P / command line `simplify`): the
+ * deviation a simplified polyline is allowed from the original, in mm.
+ * 0.1mm is tight enough to be invisible on a laser/plasma-cut part but
+ * loose enough to actually collapse a dense import — no settings surface
+ * for this yet (fixed, not per-document or unit-aware).
+ */
+const DEFAULT_SIMPLIFY_TOLERANCE_MM = 0.1;
 
 function groupHandleScreenPos(view: View, bb: { minX: number; maxX: number; maxY: number }): Point {
   const s = worldToScreen(view, { x: (bb.minX + bb.maxX) / 2, y: bb.maxY });
@@ -1020,6 +1029,16 @@ export function Viewport() {
           bus.execute({ type: "batch", commands });
           app.setSelection(commands.filter((c) => c.type === "add-entity").map((c) => (c as { entity: Entity }).entity.id));
         }
+      } else if (matchesBinding(e, "edit.simplify")) {
+        e.preventDefault();
+        const commands = simplifyPolylineCommands(
+          app.selection.map((id) => doc.get(id)).filter((en): en is Entity => !!en),
+          DEFAULT_SIMPLIFY_TOLERANCE_MM,
+        );
+        if (commands.length > 0) {
+          bus.execute({ type: "batch", commands });
+          app.setSelection(commands.filter((c) => c.type === "add-entity").map((c) => (c as { entity: Entity }).entity.id));
+        }
       } else if (matchesBinding(e, "tool.straighten")) {
         app.setTool("straighten");
       } else if (matchesBinding(e, "tool.fill")) {
@@ -1850,6 +1869,13 @@ export function Viewport() {
         if (commands.length === 0) return "nothing to explode";
         bus.execute({ type: "batch", commands });
         return "exploded";
+      }
+      case "simplify": {
+        const commands = simplifyPolylineCommands(entitiesOf(app.selection), DEFAULT_SIMPLIFY_TOLERANCE_MM);
+        if (commands.length === 0) return "nothing to simplify";
+        bus.execute({ type: "batch", commands });
+        app.setSelection(commands.filter((c) => c.type === "add-entity").map((c) => (c as { entity: Entity }).entity.id));
+        return "simplified";
       }
       case "group":
         groupSelection();

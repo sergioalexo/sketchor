@@ -21,6 +21,7 @@ export type AppCommandId =
   | "selectSimilar"
   | "join"
   | "explode"
+  | "simplify"
   | "group"
   | "ungroup"
   | "fit"
@@ -130,6 +131,7 @@ export const APP_ALIASES: Record<string, AppCommandId> = {
   join: "join",
   x: "explode",
   explode: "explode",
+  simplify: "simplify",
   g: "group",
   group: "group",
   ung: "ungroup",
