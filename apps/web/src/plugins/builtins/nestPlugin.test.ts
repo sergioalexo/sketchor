@@ -137,6 +137,14 @@ describe("resolvePart", () => {
     expect(resolved!.area).toBeCloseTo(400, 6); // net area from partExtraction is the outer's own area (holes tracked separately)
   });
 
+  it("splits outer vs. hole source ids (N-31: routes each to its own DXF layer)", () => {
+    const outer = rectPolyline("outer", 0, 0, 20, 20);
+    const hole = rectPolyline("hole", 5, 5, 5, 5);
+    const resolved = resolvePart([outer, hole], ["outer", "hole"]);
+    expect(resolved!.outerSourceIds).toEqual(["outer"]);
+    expect(resolved!.holeSourceIds).toEqual([["hole"]]);
+  });
+
   it("returns null when the source entities no longer exist (e.g. deleted)", () => {
     expect(resolvePart([], ["gone"])).toBeNull();
   });
@@ -175,8 +183,9 @@ describe("the sheet metal nest panel", () => {
   });
 
   it("does not ship controls for features this pass doesn't back", () => {
-    // N-14 (search mode) and N-30/40 (PDF/G-code buttons) are explicitly
-    // out of scope for this pass — no inert UI for them.
+    // N-14 (search mode) and N-40 (G-code button) are explicitly out of
+    // scope for this pass — no inert UI for them. N-30's report is now
+    // real (there's no separate "export-pdf" — Print produces the PDF).
     expect(PANEL_HTML).not.toMatch(/search.?mode/i);
     expect(PANEL_HTML).not.toContain("export-pdf");
     expect(PANEL_HTML).not.toContain("export-gcode");
@@ -186,6 +195,12 @@ describe("the sheet metal nest panel", () => {
     for (const corner of ["bottom-left", "bottom-right", "top-left", "top-right"]) {
       expect(PANEL_HTML).toContain(`value="${corner}"`);
     }
+  });
+
+  it("offers a sheet picker for DXF export (N-31: all sheets or one), sent with the export request", () => {
+    expect(PANEL_HTML).toContain('id="dxf-sheet"');
+    expect(PANEL_HTML).toContain("All sheets");
+    expect(PANEL_HTML).toContain('post({ type: "export-dxf", sheetIndex: Number($("dxf-sheet").value) })');
   });
 });
 

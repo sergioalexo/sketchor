@@ -9,6 +9,21 @@ import type { NestResult, Point } from "./types";
  */
 export const NEST_LAYER = "Nest";
 
+/**
+ * The true-shape engine's own layer scheme (N-31): separate layers so DXF
+ * export can put outer-profile cuts, hole cuts and part-number labels on
+ * their own DXF layers, per this codebase's "one drawing, three renderings"
+ * rule — canvas, PDF and DXF all read the same entities, so the canvas
+ * drawing has to use these too, not a re-labeled copy made only at export
+ * time. Defined here (not in `trueLayout.ts`, which already imports from
+ * this file) so `clearPreviousLayout` can sweep them without an import cycle.
+ */
+export const NEST_SHEET_LAYER = "Nest Sheet";
+export const NEST_PARTS_LAYER = "Nest Parts";
+export const NEST_HOLES_LAYER = "Nest Holes";
+export const NEST_LABELS_LAYER = "Nest Labels";
+export const TRUE_NEST_LAYERS = new Set([NEST_SHEET_LAYER, NEST_PARTS_LAYER, NEST_HOLES_LAYER, NEST_LABELS_LAYER]);
+
 /** Sheets are stacked downward with this gap between them, in mm. */
 const SHEET_GAP = 200;
 
@@ -20,7 +35,9 @@ export function newGroupId(): string {
 }
 
 export function clearPreviousLayout(model: DocumentReadModel): Command[] {
-  const ids = new Set(model.entities.filter((e) => e.layer === NEST_LAYER).map((e) => e.id));
+  const ids = new Set(
+    model.entities.filter((e) => e.layer === NEST_LAYER || TRUE_NEST_LAYERS.has(e.layer ?? "")).map((e) => e.id),
+  );
   if (ids.size === 0) return [];
   const commands: Command[] = [];
   for (const group of model.groups) {

@@ -39,6 +39,8 @@ describe("extractParts", () => {
     expect(parts[0].name).toBe("Plate");
     expect(parts[0].holes).toHaveLength(1);
     expect(parts[0].sourceIds.sort()).toEqual(["hole", "outer"]);
+    expect(parts[0].outerSourceIds).toEqual(["outer"]);
+    expect(parts[0].holeSourceIds).toEqual([["hole"]]);
   });
 
   it("two separate holes in one outer shape both attach to it", () => {
@@ -49,6 +51,10 @@ describe("extractParts", () => {
     const parts = extractParts(entities, allIds(entities));
     expect(parts).toHaveLength(1);
     expect(parts[0].holes).toHaveLength(2);
+    expect(parts[0].outerSourceIds).toEqual(["outer"]);
+    expect(parts[0].holeSourceIds.map((ids) => ids.slice().sort())).toEqual(
+      expect.arrayContaining([["holeA"], ["holeB"]]),
+    );
   });
 
   it("a shape nested inside a hole becomes its own part, not a hole of a hole", () => {
@@ -88,6 +94,10 @@ describe("extractParts", () => {
     expect(parts).toHaveLength(1);
     expect(parts[0].sourceIds.sort()).toEqual(["l1", "l2", "l3", "l4"]);
     expect(parts[0].outer.length).toBeGreaterThanOrEqual(4);
+    // A closed outline joined from several entities: all of them are the
+    // outer boundary's own ids, none are holes.
+    expect(parts[0].outerSourceIds.slice().sort()).toEqual(["l1", "l2", "l3", "l4"]);
+    expect(parts[0].holeSourceIds).toEqual([]);
   });
 
   it("a washer (circle with a circular hole) extracts correctly", () => {

@@ -22,6 +22,10 @@ export interface ExtractedPart {
   holes: Point[][];
   /** Every original entity id (outer + holes) this part was built from. */
   sourceIds: string[];
+  /** Just the outer boundary's own entity ids — a subset of `sourceIds` (N-31: routes outer-profile cuts to their own DXF layer, separate from holes). */
+  outerSourceIds: string[];
+  /** Same, one array per hole, index-aligned with `holes`. */
+  holeSourceIds: string[][];
 }
 
 interface Region {
@@ -55,11 +59,14 @@ export function extractParts(
 
   const buildPart = (outerIdx: number): void => {
     const outerRegion = regions[outerIdx];
-    const sourceIds = [...outerRegion.entityIds];
+    const outerSourceIds = [...outerRegion.entityIds];
+    const sourceIds = [...outerSourceIds];
     const holes: Point[][] = [];
+    const holeSourceIds: string[][] = [];
     for (const holeIdx of children.get(outerIdx) ?? []) {
       const holeRegion = regions[holeIdx];
       holes.push(holeRegion.points);
+      holeSourceIds.push([...holeRegion.entityIds]);
       sourceIds.push(...holeRegion.entityIds);
       for (const nestedPartIdx of children.get(holeIdx) ?? []) buildPart(nestedPartIdx);
     }
@@ -70,6 +77,8 @@ export function extractParts(
       outer: outerRegion.points,
       holes,
       sourceIds,
+      outerSourceIds,
+      holeSourceIds,
     });
   };
 

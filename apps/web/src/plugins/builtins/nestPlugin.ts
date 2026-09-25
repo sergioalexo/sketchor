@@ -8,19 +8,23 @@ import {
   extractParts,
   materializeInstance,
   nestTrueShape,
-  NEST_LAYER,
+  NEST_HOLES_LAYER,
+  NEST_LABELS_LAYER,
+  NEST_PARTS_LAYER,
   placementTransform,
+  sheetOffsets,
+  sheetOutlineEntities,
   type CutTableRow,
   type Gravity,
-  type SheetPlacementEntities,
+  type JobMetrics,
   type StockRow,
   type TrueNestPart,
   type TrueNestSheet,
 } from "@sketchor/plugin-nest";
-import type { Entity } from "@sketchor/core";
-import { type DisplayUnitInfo, type DocumentReadModel, type PluginModule } from "@sketchor/plugin-sdk";
+import { entitiesToDxf, entityPoints, textWidth, translated, type Entity } from "@sketchor/core";
+import { text, type DisplayUnitInfo, type PluginModule } from "@sketchor/plugin-sdk";
 import { displayUnitToDxfCode, factorFromMm } from "../../units";
-import { entitiesToDxf, entitiesToSvgDocument } from "@sketchor/core";
+import { buildNestReportHtml, buildNestReportPdf, type LastNest, type LastNestPlacement } from "./nestReport";
 
 /**
  * First-party dogfood: sheet metal nesting. The true-shape (no-fit-polygon)
@@ -171,6 +175,10 @@ export interface ResolvedPart {
   outer: Point[];
   holes: Point[][];
   sourceIds: string[];
+  /** N-31: just the outer boundary's own entity ids — routes outer-profile cuts to their own DXF layer. */
+  outerSourceIds: string[];
+  /** Same, one array per hole, index-aligned with `holes`. */
+  holeSourceIds: string[][];
   area: number;
   w: number;
   h: number;
@@ -192,6 +200,8 @@ export function resolvePart(entities: Entity[], sourceIds: string[]): ResolvedPa
     outer: part.outer,
     holes: part.holes,
     sourceIds: part.sourceIds,
+    outerSourceIds: part.outerSourceIds,
+    holeSourceIds: part.holeSourceIds,
     area: polygonArea(part.outer),
     w: b.maxX - b.minX,
     h: b.maxY - b.minY,
@@ -209,6 +219,11 @@ const plugin: PluginModule = {
 
     const stored = await sketchor.storage.get(STORAGE_KEY).catch(() => undefined);
     let state = asState(stored);
+    // Export DXF / Print / the report all read this rather than the live
+    // canvas — a manual drag needs a re-Nest to show up in an export
+    // (deliberate scope: no live-canvas reconciliation this pass, unlike
+    // "Check nest" which exists specifically to validate a drag in place).
+    let lastNest: LastNest | null = null;
 
     const persist = async () => {
       await sketchor.storage.set(STORAGE_KEY, state).catch(() => undefined);
@@ -318,6 +333,7 @@ const plugin: PluginModule = {
         const model = await sketchor.document.read();
         const commands = clearPreviousLayout(model);
         if (commands.length > 0) await sketchor.document.apply(commands);
+        lastNest = null; // Export DXF/Print must not silently use a result whose canvas layout no longer exists.
         void sketchor.ui.postMessage({ type: "cleared" });
         return;
       }
@@ -382,19 +398,43 @@ const plugin: PluginModule = {
           });
 
           const geometryByKey = new Map(withSettings.map((p) => [p.key, p]));
-          const bySheet = new Map<number, Entity[]>();
+          const placements: LastNestPlacement[] = [];
+          let number = 0;
           for (const placement of result.placed) {
             const p = geometryByKey.get(placement.partId);
             if (!p) continue;
-            const originalEntities = p.sourceIds.map((id) => entityById.get(id)).filter((e): e is Entity => e !== undefined);
-            if (originalEntities.length === 0) continue;
+            const outerSource = p.outerSourceIds.map((id) => entityById.get(id)).filter((e): e is Entity => e !== undefined);
+            if (outerSource.length === 0) continue;
+            const holeSource = p.holeSourceIds.flat().map((id) => entityById.get(id)).filter((e): e is Entity => e !== undefined);
             const transform = placementTransform(p.outer, placement);
-            const materialized = materializeInstance(originalEntities, transform);
-            const list = bySheet.get(placement.sheet) ?? [];
-            list.push(...materialized);
-            bySheet.set(placement.sheet, list);
+            // materializeInstance() preserves each source entity's own
+            // .layer — stamp the real layer here, once, so every consumer
+            // (canvas commands, DXF export, the PDF/print report) sees it
+            // correctly without each having to re-apply the override.
+            const outerEntities = materializeInstance(outerSource, transform).map((e) => ({ ...e, layer: NEST_PARTS_LAYER }));
+            const holeEntities = holeSource.length > 0 ? materializeInstance(holeSource, transform).map((e) => ({ ...e, layer: NEST_HOLES_LAYER })) : [];
+
+            const pts = outerEntities.flatMap((e) => entityPoints(e));
+            const b = bounds(pts);
+            const labelHeight = Math.max(1, Math.min(Math.min(b.maxX - b.minX, b.maxY - b.minY) * 0.3, 12));
+            const cx = (b.minX + b.maxX) / 2;
+            const cy = (b.minY + b.maxY) / 2;
+            number += 1;
+
+            const holesArea = p.holes.reduce((sum, h) => sum + polygonArea(h), 0);
+            placements.push({
+              sheet: placement.sheet,
+              number,
+              outerEntities,
+              holeEntities,
+              label: { at: { x: cx - textWidth(String(number), labelHeight) / 2, y: cy - labelHeight / 2 }, height: labelHeight },
+              partId: placement.partId,
+              name: p.name,
+              rotationDeg: placement.rotationDeg,
+              mirrored: placement.mirrored,
+              area: Math.max(0, polygonArea(p.outer) - holesArea),
+            });
           }
-          const placementEntities: SheetPlacementEntities[] = Array.from(bySheet, ([sheet, entities]) => ({ sheet, entities }));
 
           const toDisplay = (mm: number) => mm * unit.perMm;
           const sheetLabel = (sheet: TrueNestSheet, i: number): string => {
@@ -403,13 +443,23 @@ const plugin: PluginModule = {
             const dims = `${Math.round(toDisplay(sheet.width))}×${Math.round(toDisplay(sheet.height))} ${unit.label}`;
             return `Sheet ${i + 1}/${result.sheets.length} – ${dims}${bits.length ? " " + bits.join(" ") : ""}`;
           };
+          const sheetLabels = result.sheets.map((s, i) => sheetLabel(s, i));
 
-          const layoutCommands = buildTrueNestLayout(result.sheets, placementEntities, sheetLabel);
+          const layoutCommands = buildTrueNestLayout(result.sheets, placements, sheetLabel);
           await sketchor.document.apply([...clearPreviousLayout(model), ...layoutCommands]);
 
           const metricsGeoMap = new Map(withSettings.map((p) => [p.key, { outer: p.outer, holes: p.holes }]));
-          const jobMetrics = computeJobMetrics(result, metricsGeoMap, state.stock, DEFAULT_CUT_TABLE, { gravity: state.gravity });
-          const sheetLabels = result.sheets.map((s, i) => sheetLabel(s, i));
+          const jobMetrics: JobMetrics = computeJobMetrics(result, metricsGeoMap, state.stock, DEFAULT_CUT_TABLE, { gravity: state.gravity });
+
+          lastNest = {
+            sheets: result.sheets,
+            sheetLabels,
+            placements,
+            metrics: jobMetrics,
+            result,
+            ordered: withSettings.filter((p) => p.settings.quantity > 0).map((p) => ({ key: p.key, name: p.name, quantity: p.settings.quantity })),
+            unit: { perMm: unit.perMm, label: unit.label },
+          };
 
           void sketchor.ui.postMessage({ type: "result", result, metrics: jobMetrics, sheetLabels });
           const unplacedCount = result.unplaced.reduce((n, u) => n + u.count, 0);
@@ -426,27 +476,58 @@ const plugin: PluginModule = {
       }
 
       if (msg.type === "export-dxf") {
-        const model = await sketchor.document.read();
-        const nestEntities = [...model.entities].filter((e) => e.layer === NEST_LAYER);
-        if (nestEntities.length === 0) {
+        if (!lastNest) {
           void sketchor.ui.postMessage({ type: "error", message: "Nothing to export — nest some parts first." });
           return;
         }
-        const dxf = entitiesToDxf(nestEntities, displayUnitToDxfCode(unit.unit), factorFromMm(unit.unit));
-        const res = await sketchor.ui.saveFile("nest.dxf", dxf, [{ description: "DXF Drawing", accept: { "application/dxf": [".dxf"] } }]);
-        if (res.saved) sketchor.ui.notify(`Saved ${res.name ?? "nest.dxf"}.`);
+        // sheetIndex: -1 (or absent) = all sheets, stacked exactly like the
+        // canvas (via translated(), the same shift buildTrueNestLayout
+        // applies); a real index = that one sheet alone, in its own local
+        // (unshifted) coordinates — a file meant for one physical sheet.
+        const sheetIndex = typeof msg.sheetIndex === "number" ? msg.sheetIndex : -1;
+        if (sheetIndex >= lastNest.sheets.length) {
+          void sketchor.ui.postMessage({ type: "error", message: "That sheet no longer exists — nest again." });
+          return;
+        }
+
+        const labelEntity = (p: LastNestPlacement, dy: number): Entity =>
+          translated(text(p.label.at, String(p.number), { layer: NEST_LABELS_LAYER, height: p.label.height }), 0, dy);
+
+        let entities: Entity[];
+        let fileName: string;
+        if (sheetIndex < 0) {
+          const offsets = sheetOffsets(lastNest.sheets);
+          entities = lastNest.sheets.flatMap((sheet, i) => {
+            const { outline, title } = sheetOutlineEntities(sheet, lastNest!.sheetLabels[i]);
+            return [translated(outline, 0, offsets[i]), translated(title, 0, offsets[i])];
+          });
+          for (const p of lastNest.placements) {
+            const dy = offsets[p.sheet];
+            entities.push(...p.outerEntities.map((e) => translated(e, 0, dy)), ...p.holeEntities.map((e) => translated(e, 0, dy)), labelEntity(p, dy));
+          }
+          fileName = "nest-all.dxf";
+        } else {
+          const { outline, title } = sheetOutlineEntities(lastNest.sheets[sheetIndex], lastNest.sheetLabels[sheetIndex]);
+          entities = [outline, title];
+          for (const p of lastNest.placements.filter((p) => p.sheet === sheetIndex)) {
+            entities.push(...p.outerEntities, ...p.holeEntities, labelEntity(p, 0));
+          }
+          fileName = `nest-sheet-${sheetIndex + 1}.dxf`;
+        }
+        const dxf = entitiesToDxf(entities, displayUnitToDxfCode(unit.unit), factorFromMm(unit.unit));
+        const res = await sketchor.ui.saveFile(fileName, dxf, [{ description: "DXF Drawing", accept: { "application/dxf": [".dxf"] } }]);
+        if (res.saved) sketchor.ui.notify(`Saved ${res.name ?? fileName}.`);
         return;
       }
 
       if (msg.type === "print") {
-        const model = await sketchor.document.read();
-        const nestEntities = [...model.entities].filter((e) => e.layer === NEST_LAYER);
-        if (nestEntities.length === 0) {
+        if (!lastNest) {
           void sketchor.ui.postMessage({ type: "error", message: "Nothing to print — nest some parts first." });
           return;
         }
-        const svg = entitiesToSvgDocument(nestEntities, { strokeColor: "#111111" });
-        sketchor.ui.print(svg, { fileName: "nest" });
+        const html = buildNestReportHtml(lastNest);
+        const pdf = buildNestReportPdf(lastNest);
+        sketchor.ui.print(html, { fileName: "nest-report", pdf });
         return;
       }
     });
@@ -557,9 +638,12 @@ export const PANEL_HTML = String.raw`<!doctype html>
       </div>
       <div id="summary"></div>
       <div id="sheet-cards"></div>
-      <div class="actions">
+      <div class="row" style="margin-bottom:8px">
+        <select id="dxf-sheet" style="margin-top:0"><option value="-1">All sheets</option></select>
         <button class="ghost sm" id="export-dxf">Export DXF</button>
-        <button class="ghost sm" id="print">Print</button>
+      </div>
+      <div class="actions">
+        <button class="ghost sm" id="print">Print report</button>
       </div>
     </div>
 
@@ -698,9 +782,14 @@ export const PANEL_HTML = String.raw`<!doctype html>
         $("sheet-cards").innerHTML = "";
         post({ type: "nest" });
       });
-      $("clear").addEventListener("click", () => { post({ type: "clear" }); $("summary").innerHTML = ""; $("sheet-cards").innerHTML = ""; });
+      $("clear").addEventListener("click", () => {
+        post({ type: "clear" });
+        $("summary").innerHTML = "";
+        $("sheet-cards").innerHTML = "";
+        $("dxf-sheet").innerHTML = "<option value='-1'>All sheets</option>";
+      });
       $("check-nest").addEventListener("click", () => post({ type: "check-nest" }));
-      $("export-dxf").addEventListener("click", () => post({ type: "export-dxf" }));
+      $("export-dxf").addEventListener("click", () => post({ type: "export-dxf", sheetIndex: Number($("dxf-sheet").value) }));
       $("print").addEventListener("click", () => post({ type: "print" }));
 
       function renderResult(r, metrics, sheetLabels) {
@@ -708,6 +797,9 @@ export const PANEL_HTML = String.raw`<!doctype html>
         $("summary").innerHTML =
           "<div class='f " + (unplaced ? "error" : "ok") + "'>" + r.placed.length + " placed on " + r.sheets.length +
           " sheet(s), " + Math.round(r.utilisation * 100) + "% used" + (unplaced ? " · " + unplaced + " didn't fit" : "") + ".</div>";
+        $("dxf-sheet").innerHTML =
+          "<option value='-1'>All sheets</option>" +
+          (sheetLabels || []).map((l, i) => "<option value='" + i + "'>" + esc(l) + "</option>").join("");
         const cards = (metrics ? metrics.sheets : []).map((m, i) => {
           const label = (sheetLabels && sheetLabels[i]) || "Sheet " + (i + 1);
           const time = m.cuttingTimeSec != null ? Math.round(m.cuttingTimeSec / 6) / 10 + " min (est.)" : "—";
