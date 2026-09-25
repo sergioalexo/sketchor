@@ -300,7 +300,18 @@ const plugin: PluginModule = {
       }
 
       if (msg.type === "persist") {
-        state = asState(msg.state);
+        // NF-01: the panel only tracks stock/spacing/settings itself — its
+        // own copy of `workingParts` is whatever it last got handed (often
+        // stale or empty, e.g. right after opening the panel), never
+        // updated as parts are added/removed. A naive `state = asState(msg.state)`
+        // here replaced the real working set with that stale copy on every
+        // settings/stock edit, which looked like "adding another part
+        // deletes the previous one". workingParts is only ever mutated by
+        // its own dedicated handlers below (add-selection/remove-part/
+        // update-part-settings), so keep the live value here regardless of
+        // what the panel sent.
+        const incoming = asState(msg.state);
+        state = { ...incoming, workingParts: state.workingParts };
         await persist();
         return;
       }
@@ -313,14 +324,26 @@ const plugin: PluginModule = {
           void sketchor.ui.postMessage({ type: "error", message: "Select one or more closed shapes first." });
           return;
         }
+        // NF-02: always additive — a part already in the working set (same
+        // sourceIds key) is refreshed in place, everything else is appended.
+        // Nothing already added is ever dropped by adding more.
+        let added = 0;
+        let updated = 0;
         for (const part of extracted) {
           const key = stableKey(part.sourceIds);
           const existing = state.workingParts.find((w) => w.key === key);
-          if (existing) existing.sourceIds = part.sourceIds;
-          else state.workingParts.push({ key, sourceIds: part.sourceIds, settings: { quantity: 1, rotationMode: "quarter", mirror: false, allowInHoles: false } });
+          if (existing) {
+            existing.sourceIds = part.sourceIds;
+            updated += 1;
+          } else {
+            state.workingParts.push({ key, sourceIds: part.sourceIds, settings: { quantity: 1, rotationMode: "quarter", mirror: false, allowInHoles: false } });
+            added += 1;
+          }
         }
         await persist();
         await pushWorkingParts(entities);
+        const bits = [added > 0 ? `${added} added` : null, updated > 0 ? `${updated} already in the list, refreshed` : null].filter(Boolean);
+        sketchor.ui.notify(bits.join(", ") + ` — ${state.workingParts.length} part(s) in the job.`);
         return;
       }
 
@@ -381,13 +404,45 @@ const plugin: PluginModule = {
         const entities = [...model.entities];
         const entityById = new Map(entities.map((e) => [e.id, e]));
 
+        // NF-04: resolve every entry, but name what's missing instead of a
+        // blanket failure, and drop the dead entries the same way
+        // pushWorkingParts() does — so a stale part doesn't keep blocking
+        // Nest forever once the user has seen it.
         const withSettings: (ResolvedPart & { settings: PartSettings })[] = [];
+        const missing: WorkingPartEntry[] = [];
         for (const entry of state.workingParts) {
           const r = resolvePart(entities, entry.sourceIds);
           if (r) withSettings.push({ ...r, settings: entry.settings });
+          else missing.push(entry);
+        }
+        if (missing.length > 0) {
+          state.workingParts = state.workingParts.filter((w) => !missing.includes(w));
+          await persist();
+          await pushWorkingParts(entities);
         }
         if (withSettings.length === 0) {
-          void sketchor.ui.postMessage({ type: "error", message: "None of the added parts could be found — they may have been deleted." });
+          void sketchor.ui.postMessage({
+            type: "error",
+            message: missing.length > 0
+              ? `${missing.length} added part(s) no longer exist on the drawing (deleted, or on another tab) and were removed from the list. Select shapes and "Add selection" again.`
+              : "None of the added parts could be found — they may have been deleted.",
+          });
+          return;
+        }
+
+        // NF-04: a part whose bounding box can't fit on ANY stock sheet in
+        // either orientation will otherwise just come back "0 placed" with
+        // no explanation of why — name it up front instead.
+        const oversized = withSettings.filter((p) => p.settings.quantity > 0 && p.settings.rotationMode !== "any" && !state.stock.some((s) => {
+          const w = s.size.width - 2 * state.edgeMargin;
+          const h = s.size.height - 2 * state.edgeMargin;
+          return (p.w <= w && p.h <= h) || (p.settings.rotationMode !== "locked" && p.w <= h && p.h <= w);
+        }));
+        if (oversized.length > 0) {
+          void sketchor.ui.postMessage({
+            type: "error",
+            message: `${oversized.map((p) => p.name).join(", ")} ${oversized.length === 1 ? "is" : "are"} bigger than every stock sheet (after edge margin) and can never be placed. Add a larger sheet size or check the part's rotation mode.`,
+          });
           return;
         }
 
@@ -496,7 +551,11 @@ const plugin: PluginModule = {
             { error: unplacedCount > 0 },
           );
         } catch (err) {
-          void sketchor.ui.postMessage({ type: "error", message: err instanceof Error ? err.message : String(err) });
+          // NF-04: don't just show a raw JS error — the user still has
+          // parts and stock loaded, so say that plainly before whatever
+          // detail the engine threw.
+          const detail = err instanceof Error ? err.message : String(err);
+          void sketchor.ui.postMessage({ type: "error", message: `Nesting failed: ${detail}` });
         }
         return;
       }
