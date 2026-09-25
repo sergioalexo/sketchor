@@ -1,0 +1,186 @@
+import { describe, expect, it } from "vitest";
+import type { Entity } from "@sketchor/plugin-sdk";
+import {
+  asPartSettings,
+  asState,
+  asStockRow,
+  DEFAULT_CUT_TABLE,
+  PANEL_HTML,
+  resolvePart,
+  SEED_STOCK,
+  stableKey,
+  type PersistedState,
+} from "./nestPlugin";
+
+/**
+ * The panel runs inside the plugin sandbox, where a test can't reach it (see
+ * `truckNestingPlugin.test.ts`'s own note on this) — so these test the pure
+ * state/geometry helpers the message handlers are built on directly, plus
+ * shallow `PANEL_HTML` content checks for the UI wiring. The one place a
+ * bug here is expensive: `asState` silently discarding a user's stock list
+ * or working set on a persisted-data shape it doesn't recognize.
+ */
+
+function rectPolyline(id: string, x: number, y: number, w: number, h: number): Entity {
+  return {
+    id,
+    type: "polyline",
+    closed: true,
+    points: [
+      { x, y },
+      { x: x + w, y },
+      { x: x + w, y: y + h },
+      { x, y: y + h },
+    ],
+  };
+}
+
+describe("asState", () => {
+  it("seeds fresh defaults from nothing", () => {
+    const state = asState(undefined);
+    expect(state.stock).toEqual(SEED_STOCK.map((s) => ({ ...s, size: { ...s.size } })));
+    expect(state.workingParts).toEqual([]);
+    expect(state.gravity).toBe("bottom-left");
+  });
+
+  it("treats the previous panel's data shape as absent rather than crashing", () => {
+    // The old PersistedState: presets/lastPresetName/rotation/maxSheets —
+    // a genuinely different model, not something to field-map from.
+    const old = { presets: [{ name: "Ply", width: 2440, height: 1220 }], lastPresetName: "Ply", spacing: 3, rotation: "flip", maxSheets: 2 };
+    const state = asState(old);
+    expect(state.stock).toEqual(SEED_STOCK.map((s) => ({ ...s, size: { ...s.size } })));
+    expect(state.workingParts).toEqual([]);
+  });
+
+  it("round-trips a valid stored state", () => {
+    const valid: PersistedState = {
+      stock: [{ size: { name: "Custom", width: 1000, height: 2000 }, material: "steel", thickness: 3, qty: 5, cost: 40 }],
+      workingParts: [{ key: "a,b", sourceIds: ["a", "b"], settings: { quantity: 2, rotationMode: "any", stepDeg: 5, mirror: true } }],
+      spacing: 2,
+      edgeMargin: 5,
+      kerf: 0.2,
+      gravity: "top-right",
+    };
+    expect(asState(valid)).toEqual(valid);
+  });
+
+  it("never lets stock quantity or spacing go negative", () => {
+    const state = asState({ stock: [{ size: { name: "x", width: 100, height: 100 }, qty: -5 }], spacing: -10, edgeMargin: -1, kerf: -1 });
+    expect(state.stock[0].qty).toBe(0);
+    expect(state.spacing).toBe(0);
+    expect(state.edgeMargin).toBe(0);
+    expect(state.kerf).toBe(0);
+  });
+});
+
+describe("asStockRow", () => {
+  it("null quantity means unlimited, and survives round-tripping", () => {
+    const row = asStockRow({ size: { name: "Big", width: 1000, height: 2000 }, qty: null });
+    expect(row?.qty).toBeNull();
+  });
+
+  it("drops empty optional fields instead of storing them as empty strings", () => {
+    const row = asStockRow({ size: { name: "s", width: 1, height: 1 }, material: "", thickness: "", cost: "", qty: "" });
+    expect(row?.material).toBeUndefined();
+    expect(row?.thickness).toBeUndefined();
+    expect(row?.cost).toBeUndefined();
+    expect(row?.qty).toBeNull();
+  });
+});
+
+describe("asPartSettings", () => {
+  it("falls back to quarter-turn rotation for an unrecognized mode", () => {
+    expect(asPartSettings({ rotationMode: "sideways" }).rotationMode).toBe("quarter");
+  });
+
+  it("defaults quantity to 1 when absent, never negative", () => {
+    expect(asPartSettings({}).quantity).toBe(1);
+    expect(asPartSettings({ quantity: -5 }).quantity).toBe(0);
+  });
+});
+
+describe("stableKey", () => {
+  it("is order-independent", () => {
+    expect(stableKey(["b", "a", "c"])).toBe(stableKey(["c", "a", "b"]));
+  });
+
+  it("distinguishes different id sets", () => {
+    expect(stableKey(["a"])).not.toBe(stableKey(["a", "b"]));
+  });
+});
+
+describe("resolvePart", () => {
+  it("resolves a plain rectangle's outline, bbox and area", () => {
+    const rect = rectPolyline("r1", 0, 0, 20, 10);
+    const resolved = resolvePart([rect], ["r1"]);
+    expect(resolved).not.toBeNull();
+    expect(resolved!.w).toBeCloseTo(20, 6);
+    expect(resolved!.h).toBeCloseTo(10, 6);
+    expect(resolved!.area).toBeCloseTo(200, 6);
+    expect(resolved!.holes).toHaveLength(0);
+  });
+
+  it("resolves a rectangle with a hole nested inside it", () => {
+    const outer = rectPolyline("outer", 0, 0, 20, 20);
+    const hole = rectPolyline("hole", 5, 5, 5, 5);
+    const resolved = resolvePart([outer, hole], ["outer", "hole"]);
+    expect(resolved).not.toBeNull();
+    expect(resolved!.holes).toHaveLength(1);
+    expect(resolved!.area).toBeCloseTo(400, 6); // net area from partExtraction is the outer's own area (holes tracked separately)
+  });
+
+  it("returns null when the source entities no longer exist (e.g. deleted)", () => {
+    expect(resolvePart([], ["gone"])).toBeNull();
+  });
+
+  it("is keyed the same way regardless of which entities array instance is passed, given the same ids", () => {
+    const rect = rectPolyline("r1", 0, 0, 20, 10);
+    const a = resolvePart([rect], ["r1"]);
+    const b = resolvePart([{ ...rect }], ["r1"]);
+    expect(a!.key).toBe(b!.key);
+    expect(a!.key).toBe(stableKey(["r1"]));
+  });
+});
+
+describe("the sheet metal nest panel", () => {
+  it("has all four tabs", () => {
+    for (const tab of ["parts", "sheets", "settings", "results"]) {
+      expect(PANEL_HTML).toContain(`data-tab="${tab}"`);
+    }
+  });
+
+  it("sends the message types the plugin side actually handles", () => {
+    for (const type of ["ready", "persist", "add-selection", "remove-part", "update-part-settings", "clear", "check-nest", "nest", "export-dxf", "print"]) {
+      expect(PANEL_HTML).toContain(`type: "${type}"`);
+    }
+  });
+
+  it("offers locked/quarter/any rotation and a mirror toggle, not a placeholder", () => {
+    expect(PANEL_HTML).toContain("value='locked'");
+    expect(PANEL_HTML).toContain("value='quarter'");
+    expect(PANEL_HTML).toContain("value='any'");
+    expect(PANEL_HTML).toContain("class='mirror'");
+  });
+
+  it("does not ship controls for features this pass doesn't back", () => {
+    // N-12 (in-holes), N-14 (search mode) and N-30/40 (PDF/G-code buttons)
+    // are explicitly out of scope for this pass — no inert UI for them.
+    expect(PANEL_HTML).not.toMatch(/search.?mode/i);
+    expect(PANEL_HTML).not.toContain("in-holes");
+    expect(PANEL_HTML).not.toContain("export-pdf");
+    expect(PANEL_HTML).not.toContain("export-gcode");
+  });
+
+  it("offers all four gravity corners", () => {
+    for (const corner of ["bottom-left", "bottom-right", "top-left", "top-right"]) {
+      expect(PANEL_HTML).toContain(`value="${corner}"`);
+    }
+  });
+});
+
+describe("DEFAULT_CUT_TABLE", () => {
+  it("marks every seed row as an estimate", () => {
+    expect(DEFAULT_CUT_TABLE.length).toBeGreaterThan(0);
+    for (const row of DEFAULT_CUT_TABLE) expect(row.estimated).toBe(true);
+  });
+});

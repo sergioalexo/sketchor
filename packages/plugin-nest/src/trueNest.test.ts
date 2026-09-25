@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { nestTrueShape, type TrueNestPart } from "./trueNest";
+import { localFrame, nestTrueShape, placementTransform, type TrueNestPart } from "./trueNest";
 import type { StockRow } from "./stock";
-import { normalize, polygonsClash, rotate, translate, insideSheet } from "./geometry";
+import { bounds, normalize, polygonsClash, rotate, translate, insideSheet } from "./geometry";
 import type { Point } from "./types";
 
 /**
@@ -105,6 +105,21 @@ describe("nestTrueShape", () => {
     }
   });
 
+  it.each([
+    ["bottom-left", { x: 0, y: 0 }],
+    ["bottom-right", { x: 80, y: 0 }],
+    ["top-left", { x: 0, y: 80 }],
+    ["top-right", { x: 80, y: 80 }],
+  ] as const)("gravity %s puts the first part in that sheet corner", (gravity, expected) => {
+    const parts: TrueNestPart[] = [
+      { id: "p", name: "p", outer: rect(20, 20), holes: [], quantity: 1, rotation: { mode: "locked" } },
+    ];
+    const stock: StockRow[] = [{ size: { name: "sheet", width: 100, height: 100 }, qty: 1 }];
+    const result = nestTrueShape(parts, stock, { gravity });
+    expect(result.placed).toHaveLength(1);
+    expect(result.placed[0].translation).toEqual(expected);
+  });
+
   it("stops opening sheets once stock quantity is exhausted, reporting the rest unplaced", () => {
     const parts: TrueNestPart[] = [
       { id: "p", name: "p", outer: rect(80, 80), holes: [], quantity: 5, rotation: { mode: "locked" } },
@@ -136,5 +151,45 @@ describe("nestTrueShape", () => {
     expect(result.sheets).toHaveLength(0);
     expect(result.placed).toHaveLength(0);
     expect(result.utilisation).toBe(0);
+  });
+
+  it("placementTransform, applied to the original un-normalized outline, reproduces the exact placed polygon", () => {
+    // Drawn far from the origin — the point of this test is that a part's
+    // own original-drawing position must not leak into where it lands.
+    const original = [
+      { x: 500, y: 700 },
+      { x: 540, y: 700 },
+      { x: 540, y: 730 },
+      { x: 500, y: 730 },
+    ];
+    const parts: TrueNestPart[] = [
+      { id: "p", name: "p", outer: original, holes: [], quantity: 1, rotation: { mode: "quarter" } },
+    ];
+    const stock: StockRow[] = [{ size: { name: "sheet", width: 200, height: 200 }, qty: 1 }];
+    const result = nestTrueShape(parts, stock);
+    expect(result.placed).toHaveLength(1);
+    const placement = result.placed[0];
+
+    // What trueNest.ts itself placed (its internal local-frame + translation).
+    const expectedPlaced = translate(
+      localFrame(original, placement.rotationDeg, placement.mirrored),
+      placement.translation.x,
+      placement.translation.y,
+    );
+
+    // The same result, reconstructed via placementTransform applied to the
+    // ORIGINAL (un-normalized) outline — the path materializeInstance takes.
+    const transform = placementTransform(original, placement);
+    const mirroredOriginal = transform.mirrored ? original.map((p) => ({ x: -p.x, y: p.y })) : original;
+    const reconstructed = translate(rotate(mirroredOriginal, transform.rotationDeg), transform.translation.x, transform.translation.y);
+
+    for (let i = 0; i < expectedPlaced.length; i++) {
+      expect(reconstructed[i].x).toBeCloseTo(expectedPlaced[i].x, 6);
+      expect(reconstructed[i].y).toBeCloseTo(expectedPlaced[i].y, 6);
+    }
+    // And it's actually on the sheet, not still off at (500, 700).
+    const box = bounds(reconstructed);
+    expect(box.minX).toBeGreaterThanOrEqual(-1e-6);
+    expect(box.minY).toBeGreaterThanOrEqual(-1e-6);
   });
 });

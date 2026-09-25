@@ -13,7 +13,8 @@ export const NEST_LAYER = "Nest";
 const SHEET_GAP = 200;
 
 let groupCounter = 0;
-function newGroupId(): string {
+/** Group ids are minted separately from `newEntityId()` — a group's id and an entity's id must never collide. */
+export function newGroupId(): string {
   groupCounter += 1;
   return `nest-g-${Date.now().toString(36)}-${groupCounter.toString(36)}`;
 }
@@ -31,7 +32,8 @@ export function clearPreviousLayout(model: DocumentReadModel): Command[] {
   return commands;
 }
 
-function rectPoly(x: number, y: number, w: number, h: number): Point[] {
+/** An axis-aligned rectangle's outline, `(x,y)` at its min corner. */
+export function rectPoly(x: number, y: number, w: number, h: number): Point[] {
   return [
     { x, y },
     { x: x + w, y },

@@ -23,11 +23,15 @@ export interface TrueNestPart {
   rotation: PartRotationSpec;
 }
 
+/** Which sheet corner placement gravitates toward. Default "bottom-left". */
+export type Gravity = "bottom-left" | "bottom-right" | "top-left" | "top-right";
+
 export interface TrueNestOptions {
   /** Gap kept clear between parts, mm. Default 0. */
   spacing?: number;
   /** Gap kept clear from every sheet edge, mm. Default 0. */
   edgeMargin?: number;
+  gravity?: Gravity;
 }
 
 export interface TrueNestPlacement {
@@ -65,14 +69,45 @@ interface SheetItem {
 }
 
 /** A part's outline rotated (and mirrored) then bbox-normalized to the origin — the frame NFPs are cached and placed in. */
-function localFrame(outer: Point[], deg: number, mirrored: boolean): Point[] {
+export function localFrame(outer: Point[], deg: number, mirrored: boolean): Point[] {
   const mirroredPoly = mirrored ? outer.map((p) => ({ x: -p.x, y: p.y })) : outer;
   return normalize(rotate(mirroredPoly, deg));
+}
+
+/** Sorts candidates toward the chosen corner first — the only thing "gravity direction" changes; the feasible region itself is unaffected. */
+function gravityComparator(gravity: Gravity): (a: Point, b: Point) => number {
+  const ySign = gravity.startsWith("top") ? -1 : 1;
+  const xSign = gravity.endsWith("right") ? -1 : 1;
+  return (a, b) => ySign * (a.y - b.y) || xSign * (a.x - b.x);
+}
+
+/**
+ * The rigid transform (rotate/mirror about the origin, then translate) that
+ * carries a part's *original, un-normalized* outline to where a placement
+ * put it. `TrueNestPlacement.translation` positions the placement search's
+ * local frame — the rotated outline re-normalized so its own bbox-min sits
+ * at the origin — not the original polygon directly, so materializing a
+ * placement onto real (un-flattened) source entities needs this adjustment:
+ * `translation` minus the rotated original's own bbox-min. Feed the result
+ * straight into `materializeInstance` (`materialize.ts`)'s `InstanceTransform`.
+ */
+export function placementTransform(
+  outer: Point[],
+  placement: { rotationDeg: number; mirrored: boolean; translation: Point },
+): { rotationDeg: number; mirrored: boolean; translation: Point } {
+  const mirroredPoly = placement.mirrored ? outer.map((p) => ({ x: -p.x, y: p.y })) : outer;
+  const box = bounds(rotate(mirroredPoly, placement.rotationDeg));
+  return {
+    rotationDeg: placement.rotationDeg,
+    mirrored: placement.mirrored,
+    translation: { x: placement.translation.x - box.minX, y: placement.translation.y - box.minY },
+  };
 }
 
 export function nestTrueShape(parts: TrueNestPart[], stock: StockRow[], opts: TrueNestOptions = {}): TrueNestResult {
   const spacing = opts.spacing ?? 0;
   const margin = opts.edgeMargin ?? 0;
+  const compareCandidates = gravityComparator(opts.gravity ?? "bottom-left");
 
   const instances: { part: TrueNestPart; area: number }[] = [];
   for (const part of parts) {
@@ -127,7 +162,7 @@ export function nestTrueShape(parts: TrueNestPart[], stock: StockRow[], opts: Tr
         if (p.x < minX - 1e-6 || p.x > maxX + 1e-6 || p.y < minY - 1e-6 || p.y > maxY + 1e-6) return false;
         return !forbidden.some((loop) => loop.length >= 3 && pointInPolygon(p, loop));
       });
-      valid.sort((a, b) => a.y - b.y || a.x - b.x); // gravity: bottom, then left
+      valid.sort(compareCandidates);
 
       for (const candidate of valid) {
         const placedPolygon = translate(local, candidate.x, candidate.y);
