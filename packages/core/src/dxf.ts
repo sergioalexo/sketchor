@@ -114,19 +114,39 @@ function collectBlocks(pairs: Pair[]): Map<string, BlockDef> {
   return blocks;
 }
 
-/**
- * Reads the HEADER section's `$INSUNITS` variable (group 70): the drawing's
- * real-world unit, per the DXF spec (0 unitless, 1 in, 2 ft, 4 mm, 5 cm,
- * 6 m, plus values for other units this app doesn't otherwise support).
- * 0 if the file doesn't specify one.
- */
-function parseInsUnits(pairs: Pair[]): number {
+/** The group-70 value of a HEADER variable (e.g. `$INSUNITS`), or null if absent. */
+function headerInt(pairs: Pair[], name: string): number | null {
   for (let i = 0; i < pairs.length; i++) {
-    if (pairs[i].code === 9 && pairs[i].value.trim() === "$INSUNITS") {
+    if (pairs[i].code === 9 && pairs[i].value.trim() === name) {
       const next = pairs[i + 1];
-      if (next && next.code === 70) return parseInt(next.value, 10) || 0;
+      if (next && next.code === 70) {
+        const v = parseInt(next.value, 10);
+        return Number.isFinite(v) ? v : null;
+      }
+      return null;
     }
   }
+  return null;
+}
+
+/**
+ * The drawing's real-world unit as an `$INSUNITS` code (0 unitless, 1 in,
+ * 2 ft, 4 mm, 5 cm, 6 m, plus values for other units this app doesn't
+ * otherwise support); 0 if the file gives no usable hint.
+ *
+ * `$INSUNITS` wins when it names a unit. When it's missing (it only exists
+ * from AC1015 / R2000 on — Onshape's R14 exports never carry it) or 0
+ * "unitless", falls back to `$MEASUREMENT` (0 imperial → inches, 1 metric →
+ * mm), which is what AutoCAD itself does for unitless drawings. Without
+ * that fallback an inch drawing was read as millimetres: a 23" part showed
+ * up as 0.9".
+ */
+function parseInsUnits(pairs: Pair[]): number {
+  const insUnits = headerInt(pairs, "$INSUNITS");
+  if (insUnits) return insUnits;
+  const measurement = headerInt(pairs, "$MEASUREMENT");
+  if (measurement === 0) return 1;
+  if (measurement === 1) return 4;
   return 0;
 }
 
@@ -393,7 +413,7 @@ export interface DxfParseResult {
   entities: Entity[];
   warnings: string[];
   report: DxfImportReport;
-  /** The HEADER section's `$INSUNITS` code (0 if unspecified) — see {@link parseInsUnits}. */
+  /** The drawing's unit as an `$INSUNITS` code — from `$INSUNITS`, else `$MEASUREMENT`; 0 if unspecified — see {@link parseInsUnits}. */
   insUnits: number;
 }
 

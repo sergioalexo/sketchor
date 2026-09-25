@@ -410,6 +410,33 @@ describe("$INSUNITS", () => {
     }
   });
 
+  it("falls back to $MEASUREMENT when $INSUNITS is missing or unitless", () => {
+    const measurement = (m: number, ins?: number): string =>
+      section(
+        "HEADER",
+        `9
+$ACADVER
+1
+AC1014
+` + (ins === undefined ? "" : `9
+$INSUNITS
+70
+${ins}
+`) + `9
+$MEASUREMENT
+70
+${m}
+`,
+      );
+    const imperial = parse(dxf(measurement(0), oneMetreLine));
+    expect(imperial.insUnits).toBe(1);
+    expect((imperial.entities[0] as LineEntity).b.x).toBeCloseTo(25.4, 9);
+    expect(parse(dxf(measurement(0, 0), oneMetreLine)).insUnits).toBe(1);
+    expect(parse(dxf(measurement(1), oneMetreLine)).insUnits).toBe(4);
+    // An explicit $INSUNITS always beats $MEASUREMENT.
+    expect(parse(dxf(measurement(0, 4), oneMetreLine)).insUnits).toBe(4);
+  });
+
   it("scales radii and block-placed geometry too", () => {
     const text = dxf(header(1), section("ENTITIES", rec("CIRCLE", [[10, 0], [20, 0], [40, 2]])));
     expect((parse(text).entities[0] as CircleEntity).radius).toBeCloseTo(50.8, 9);
