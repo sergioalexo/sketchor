@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { CircleEntity, Entity, LineEntity, PolylineEntity } from "@sketchor/core";
-import { extractParts } from "./partExtraction";
+import { extractParts, extractPartsWithDiagnostics } from "./partExtraction";
 
 /**
  * N-01: the panel's part list has to reflect what a laser actually cuts —
@@ -116,5 +116,55 @@ describe("extractParts", () => {
     const parts = extractParts(entities, new Set(["outer"]));
     expect(parts).toHaveLength(1);
     expect(parts[0].sourceIds).toEqual(["outer"]);
+  });
+});
+
+/**
+ * NF-03: a real DXF is rarely perfectly closed — nestPlugin.ts's "Add
+ * selection" needs to say *why* it found nothing (or fewer parts than
+ * expected) instead of a flat "select closed shapes", and a small
+ * `joinTolerance` needs to actually close a near-miss.
+ */
+describe("extractPartsWithDiagnostics — open chains (NF-03)", () => {
+  it("a near-square with a small gap reports one open chain instead of silently vanishing", () => {
+    const lines: LineEntity[] = [
+      { id: "l1", type: "line", a: { x: 0, y: 0 }, b: { x: 20, y: 0 } },
+      { id: "l2", type: "line", a: { x: 20, y: 0 }, b: { x: 20, y: 20 } },
+      { id: "l3", type: "line", a: { x: 20, y: 20 }, b: { x: 0, y: 20 } },
+      // l4 stops 0.2mm short of closing back to l1's start.
+      { id: "l4", type: "line", a: { x: 0, y: 20 }, b: { x: 0, y: 0.2 } },
+    ];
+    const { parts, openChains } = extractPartsWithDiagnostics(lines, allIds(lines));
+    expect(parts).toHaveLength(0);
+    expect(openChains).toHaveLength(1);
+    expect(openChains[0].entityIds.slice().sort()).toEqual(["l1", "l2", "l3", "l4"]);
+    expect(openChains[0].gap).toBeCloseTo(0.2, 6);
+  });
+
+  it("a larger joinTolerance closes that same gap into a real part", () => {
+    const lines: LineEntity[] = [
+      { id: "l1", type: "line", a: { x: 0, y: 0 }, b: { x: 20, y: 0 } },
+      { id: "l2", type: "line", a: { x: 20, y: 0 }, b: { x: 20, y: 20 } },
+      { id: "l3", type: "line", a: { x: 20, y: 20 }, b: { x: 0, y: 20 } },
+      { id: "l4", type: "line", a: { x: 0, y: 20 }, b: { x: 0, y: 0.2 } },
+    ];
+    const { parts, openChains } = extractPartsWithDiagnostics(lines, allIds(lines), { joinTolerance: 0.5 });
+    expect(parts).toHaveLength(1);
+    expect(openChains).toHaveLength(0);
+  });
+
+  it("a lone selected line with nothing to connect to is reported as its own open chain", () => {
+    const strayLine: LineEntity = { id: "stray", type: "line", a: { x: 200, y: 200 }, b: { x: 210, y: 210 } };
+    const { parts, openChains } = extractPartsWithDiagnostics([strayLine], allIds([strayLine]));
+    expect(parts).toHaveLength(0);
+    expect(openChains).toHaveLength(1);
+    expect(openChains[0].entityIds).toEqual(["stray"]);
+  });
+
+  it("a fully closed selection reports no open chains", () => {
+    const outer = rectPolyline("outer", 0, 0, 100, 50);
+    const { parts, openChains } = extractPartsWithDiagnostics([outer], allIds([outer]));
+    expect(parts).toHaveLength(1);
+    expect(openChains).toHaveLength(0);
   });
 });

@@ -7,6 +7,7 @@ import {
   computeJobMetrics,
   cutTableRowFor,
   extractParts,
+  extractPartsWithDiagnostics,
   materializeInstance,
   nestTrueShapeSearch,
   NEST_HOLES_LAYER,
@@ -18,6 +19,7 @@ import {
   type CutTableRow,
   type Gravity,
   type JobMetrics,
+  type OpenChainInfo,
   type SearchLevel,
   type StockRow,
   type TrueNestPart,
@@ -74,9 +76,20 @@ export interface PersistedState {
   minHoleArea: number;
   /** N-14: how long to spend trying alternate orderings for a denser packing. Default "quick" (today's single deterministic pass). */
   searchLevel: SearchLevel;
+  /**
+   * NF-03: how close two ends have to be (mm) for "Add selection" to treat
+   * them as meeting — real DXFs routinely have a gap of a few hundredths to
+   * a few tenths of a millimetre where a part "should" close. Defaults to
+   * the engine's own near-exact tolerance (`undefined` — see
+   * `extractPartsWithDiagnostics`'s `joinTolerance` default) so existing
+   * jobs behave exactly as before until the user raises it.
+   */
+  joinTolerance?: number;
 }
 
 const STORAGE_KEY = "state";
+/** NF-03: upper bound for the Join tolerance setting — past this a "small gap" stops being a plausible drafting error and starts silently merging unrelated shapes. */
+const MAX_JOIN_TOLERANCE = 0.5;
 
 export const SEED_STOCK: StockRow[] = [
   { size: { name: "48×96 in", width: 1219.2, height: 2438.4 }, qty: null },
@@ -170,6 +183,7 @@ export function asState(v: unknown): PersistedState {
     gravity,
     minHoleArea: Math.max(0, num(o.minHoleArea, 0)),
     searchLevel,
+    joinTolerance: o.joinTolerance === undefined || o.joinTolerance === null ? undefined : Math.max(0, Math.min(MAX_JOIN_TOLERANCE, num(o.joinTolerance, 0))),
   };
 }
 
@@ -196,9 +210,17 @@ export function stableKey(sourceIds: string[]): string {
   return [...sourceIds].sort().join(",");
 }
 
-/** Re-derives a working-set entry's current outline from the live document — geometry is never persisted, only the `sourceIds` that identify it, so an edited shape is always re-read fresh. */
-export function resolvePart(entities: Entity[], sourceIds: string[]): ResolvedPart | null {
-  const extracted = extractParts(entities, new Set(sourceIds));
+/**
+ * Re-derives a working-set entry's current outline from the live document —
+ * geometry is never persisted, only the `sourceIds` that identify it, so an
+ * edited shape is always re-read fresh. `joinTolerance` must match whatever
+ * was in effect when the part was added (NF-03): a part that only closed
+ * because the user raised Join tolerance would otherwise silently fail to
+ * re-resolve here (and look "deleted") every time it's read back with the
+ * engine's default near-exact tolerance.
+ */
+export function resolvePart(entities: Entity[], sourceIds: string[], joinTolerance?: number): ResolvedPart | null {
+  const extracted = extractParts(entities, new Set(sourceIds), { joinTolerance });
   if (extracted.length === 0) return null;
   const part = extracted[0];
   const b = bounds(part.outer);
@@ -247,7 +269,7 @@ const plugin: PluginModule = {
       const resolved: (ResolvedPart & { settings: PartSettings })[] = [];
       const survivors: WorkingPartEntry[] = [];
       for (const entry of state.workingParts) {
-        const r = resolvePart(entities, entry.sourceIds);
+        const r = resolvePart(entities, entry.sourceIds, state.joinTolerance);
         if (r) {
           resolved.push({ ...r, settings: entry.settings });
           survivors.push(entry);
@@ -266,12 +288,34 @@ const plugin: PluginModule = {
     const pushSelectionHint = async () => {
       const selection = await sketchor.selection.read();
       if (selection.length === 0) {
-        void sketchor.ui.postMessage({ type: "selection-hint", count: 0 });
+        void sketchor.ui.postMessage({ type: "selection-hint", count: 0, openCount: 0 });
         return;
       }
       const model = await sketchor.document.read();
-      const extracted = extractParts([...model.entities], new Set(selection));
-      void sketchor.ui.postMessage({ type: "selection-hint", count: extracted.length });
+      const { parts, openChains } = extractPartsWithDiagnostics([...model.entities], new Set(selection), { joinTolerance: state.joinTolerance });
+      // NF-03: surface open chains even in the live hint (before the user
+      // clicks Add) — "2 shapes selected, 1 doesn't close" is a much
+      // earlier signal than only finding out after Add says "select closed
+      // shapes first".
+      void sketchor.ui.postMessage({ type: "selection-hint", count: parts.length, openCount: openChains.length });
+    };
+
+    /** NF-03: turns raw open-chain findings into one readable sentence for the panel. */
+    const describeOpenChains = (openChains: OpenChainInfo[]): string => {
+      const gapped = openChains.filter((c) => c.entityIds.length > 1);
+      const solo = openChains.filter((c) => c.entityIds.length === 1);
+      const bits: string[] = [];
+      if (gapped.length > 0) {
+        const worst = gapped.reduce((a, b) => (b.gap > a.gap ? b : a));
+        const toDisplay = (mm: number) => mm * unit.perMm;
+        bits.push(
+          `${gapped.length} shape${gapped.length === 1 ? "" : "s"} almost close${gapped.length === 1 ? "s" : ""} but ${gapped.length === 1 ? "has" : "have"} a gap (largest ${toDisplay(worst.gap).toFixed(3)}${unit.label}, near ${Math.round(toDisplay(worst.start.x))},${Math.round(toDisplay(worst.start.y))})`,
+        );
+      }
+      if (solo.length > 0) {
+        bits.push(`${solo.length} shape${solo.length === 1 ? "" : "s"} ${solo.length === 1 ? "is" : "are"} open with nothing nearby to connect to`);
+      }
+      return bits.join("; ") + (gapped.length > 0 ? " — try raising Join tolerance in Settings, or close the gap in the drawing." : ".");
     };
 
     const pushInit = () => {
@@ -319,9 +363,18 @@ const plugin: PluginModule = {
       if (msg.type === "add-selection") {
         const [model, selection] = await Promise.all([sketchor.document.read(), sketchor.selection.read()]);
         const entities = [...model.entities];
-        const extracted = extractParts(entities, new Set(selection));
+        const { parts: extracted, openChains } = extractPartsWithDiagnostics(entities, new Set(selection), { joinTolerance: state.joinTolerance });
         if (extracted.length === 0) {
-          void sketchor.ui.postMessage({ type: "error", message: "Select one or more closed shapes first." });
+          // NF-03: say *why* — a selection with nothing but open chains
+          // used to get the same flat "select closed shapes first" as an
+          // empty selection, which gives no clue that the shape was almost
+          // right.
+          void sketchor.ui.postMessage({
+            type: "error",
+            message: openChains.length > 0
+              ? `No closed shape found. ${describeOpenChains(openChains)}`
+              : "Select one or more closed shapes first.",
+          });
           return;
         }
         // NF-02: always additive — a part already in the working set (same
@@ -343,7 +396,13 @@ const plugin: PluginModule = {
         await persist();
         await pushWorkingParts(entities);
         const bits = [added > 0 ? `${added} added` : null, updated > 0 ? `${updated} already in the list, refreshed` : null].filter(Boolean);
-        sketchor.ui.notify(bits.join(", ") + ` — ${state.workingParts.length} part(s) in the job.`);
+        let summary = bits.join(", ") + ` — ${state.workingParts.length} part(s) in the job.`;
+        // NF-03: some parts still came in fine here (extracted.length > 0,
+        // or we'd have returned above) — this is the "found N, but M more
+        // were this close" case, worth a heads-up without blocking the
+        // parts that did work.
+        if (openChains.length > 0) summary += ` Also: ${describeOpenChains(openChains)}`;
+        sketchor.ui.notify(summary);
         return;
       }
 
@@ -411,7 +470,7 @@ const plugin: PluginModule = {
         const withSettings: (ResolvedPart & { settings: PartSettings })[] = [];
         const missing: WorkingPartEntry[] = [];
         for (const entry of state.workingParts) {
-          const r = resolvePart(entities, entry.sourceIds);
+          const r = resolvePart(entities, entry.sourceIds, state.joinTolerance);
           if (r) withSettings.push({ ...r, settings: entry.settings });
           else missing.push(entry);
         }
@@ -743,6 +802,7 @@ export const PANEL_HTML = String.raw`<!doctype html>
         <label>Edge margin (<span class="u"></span>)<input id="set-margin" type="number" min="0" step="any" /></label>
         <label>Kerf (<span class="u"></span>)<input id="set-kerf" type="number" min="0" step="any" /></label>
         <label>Min hole size (<span class="u"></span>)<input id="set-minhole" type="number" min="0" step="any" title="Holes smaller than this aren't offered to in-hole parts" /></label>
+        <label>Join tolerance (<span class="u"></span>)<input id="set-jointol" type="number" min="0" step="any" placeholder="exact" title="How close two ends have to be for &quot;Add selection&quot; to treat a shape as closed — raise this if real DXFs come in with small gaps. Blank = exact match only." /></label>
         <label>Gravity
           <select id="set-gravity">
             <option value="bottom-left">Bottom-left</option>
@@ -906,6 +966,10 @@ export const PANEL_HTML = String.raw`<!doctype html>
         // Stored as an area (mm²) but shown/edited as a side length — much
         // easier to reason about ("holes under 10mm across") than mm².
         $("set-minhole").value = toU(Math.sqrt(state.minHoleArea || 0));
+        // Blank means "exact match only" (the engine's own near-zero
+        // default) rather than a literal 0 — an explicit 0 would reject
+        // even floating-point-identical endpoints (dist < 0 is never true).
+        $("set-jointol").value = state.joinTolerance == null ? "" : toU(state.joinTolerance);
         $("set-gravity").value = state.gravity;
         $("set-search").value = state.searchLevel;
       }
@@ -913,6 +977,11 @@ export const PANEL_HTML = String.raw`<!doctype html>
       $("set-margin").addEventListener("input", () => { state.edgeMargin = fromU($("set-margin").value); persist(); });
       $("set-kerf").addEventListener("input", () => { state.kerf = fromU($("set-kerf").value); persist(); });
       $("set-minhole").addEventListener("input", () => { const side = fromU($("set-minhole").value); state.minHoleArea = Math.max(0, side * side); persist(); });
+      $("set-jointol").addEventListener("input", () => {
+        const raw = $("set-jointol").value;
+        state.joinTolerance = raw === "" ? undefined : Math.max(0, fromU(raw));
+        persist();
+      });
       $("set-gravity").addEventListener("change", () => { state.gravity = $("set-gravity").value; persist(); });
       $("set-search").addEventListener("change", () => { state.searchLevel = $("set-search").value; persist(); });
 
@@ -978,7 +1047,12 @@ export const PANEL_HTML = String.raw`<!doctype html>
         if (m.type === "init") { state = m.state; unit = m.unit || unit; renderStock(); renderSettings(); return; }
         if (m.type === "unit") { unit = m.unit; renderStock(); renderSettings(); renderParts(); return; }
         if (m.type === "selection-hint") {
-          $("selection-hint").textContent = m.count > 0 ? m.count + " shape(s) selected" : "";
+          // NF-03: an open shape in the current selection is worth flagging
+          // before the user even clicks Add, not just after.
+          const bits = [];
+          if (m.count > 0) bits.push(m.count + " shape(s) selected");
+          if (m.openCount > 0) bits.push(m.openCount + " open");
+          $("selection-hint").textContent = bits.join(", ");
           return;
         }
         if (m.type === "working-parts") {
