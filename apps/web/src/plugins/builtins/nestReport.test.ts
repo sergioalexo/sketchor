@@ -38,6 +38,7 @@ function placements(): LastNestPlacement[] {
     {
       sheet: 0,
       number: 1,
+      id: "0",
       outerEntities: [rectEntity("a-outer", 10, 10, 30, 20)],
       holeEntities: [],
       label: { at: { x: 20, y: 15 }, height: 5 },
@@ -50,6 +51,7 @@ function placements(): LastNestPlacement[] {
     {
       sheet: 1,
       number: 2,
+      id: "1",
       outerEntities: [rectEntity("b-outer", 5, 5, 10, 10)],
       holeEntities: [rectEntity("b-hole", 7, 7, 2, 2)],
       label: { at: { x: 8, y: 8 }, height: 3 },

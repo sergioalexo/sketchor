@@ -166,7 +166,7 @@ describe("the sheet metal nest panel", () => {
   });
 
   it("sends the message types the plugin side actually handles", () => {
-    for (const type of ["ready", "persist", "add-selection", "remove-part", "update-part-settings", "clear", "check-nest", "nest", "export-dxf", "print"]) {
+    for (const type of ["ready", "persist", "add-selection", "remove-part", "update-part-settings", "clear", "check-nest", "nest", "export-dxf", "export-gcode", "print"]) {
       expect(PANEL_HTML).toContain(`type: "${type}"`);
     }
   });
@@ -183,12 +183,11 @@ describe("the sheet metal nest panel", () => {
   });
 
   it("does not ship controls for features this pass doesn't back", () => {
-    // N-14 (search mode) and N-40 (G-code button) are explicitly out of
-    // scope for this pass — no inert UI for them. N-30's report is now
-    // real (there's no separate "export-pdf" — Print produces the PDF).
+    // N-14 (search mode) is explicitly out of scope for this pass — no
+    // inert UI for it. N-30's report is now real (no separate "export-pdf"
+    // — Print produces the PDF), and N-40's G-code export is now real too.
     expect(PANEL_HTML).not.toMatch(/search.?mode/i);
     expect(PANEL_HTML).not.toContain("export-pdf");
-    expect(PANEL_HTML).not.toContain("export-gcode");
   });
 
   it("offers all four gravity corners", () => {
@@ -201,6 +200,11 @@ describe("the sheet metal nest panel", () => {
     expect(PANEL_HTML).toContain('id="dxf-sheet"');
     expect(PANEL_HTML).toContain("All sheets");
     expect(PANEL_HTML).toContain('post({ type: "export-dxf", sheetIndex: Number($("dxf-sheet").value) })');
+  });
+
+  it("offers a per-sheet G-code export (N-40/43: one .nc per sheet, no all-sheets option)", () => {
+    expect(PANEL_HTML).toContain('id="gcode-sheet"');
+    expect(PANEL_HTML).toContain('post({ type: "export-gcode", sheetIndex: Number($("gcode-sheet").value) })');
   });
 });
 

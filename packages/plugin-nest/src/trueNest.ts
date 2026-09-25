@@ -47,6 +47,14 @@ export interface TrueNestPlacement {
   mirrored: boolean;
   /** Where the rotated part's own bbox-min corner lands in sheet space. */
   translation: Point;
+  /**
+   * N-40: set when this placement landed inside another placement's hole
+   * (an `allowInHoles` part) — the index into this result's own `placed`
+   * array of the part whose hole it's in. A toolpath must cut this part
+   * completely before cutting that hole, or the disc of material around it
+   * comes free (and can shift or fall) before its own profile is cut.
+   */
+  insideOfPlacementIndex?: number;
 }
 
 export interface TrueNestSheet {
@@ -79,6 +87,8 @@ interface HoleRegion {
   sheet: number;
   polygon: Point[];
   area: number;
+  /** Index into `placed` of the part this hole belongs to (N-40 toolpath ordering). */
+  containerPlacementIndex: number;
 }
 
 /** Rotates/mirrors/translates a polygon the same rigid way {@link placementTransform}'s result carries original geometry — used to bring a part's *hole* (still in the part's own original coordinate frame) into sheet space alongside its outer. */
@@ -211,7 +221,12 @@ export function nestTrueShape(parts: TrueNestPart[], stock: StockRow[], opts: Tr
   }
 
   /** After a part with holes lands on a sheet (N-12): each hole, brought into sheet space and shrunk inward by spacing, becomes a free region `allowInHoles` parts can be tried in. Only for ordinary sheet placements — a part placed inside a hole doesn't itself offer its own holes as further nested regions. */
-  function registerHoles(sheetIdx: number, part: TrueNestPart, result: { deg: number; mirrored: boolean; translation: Point; local: Point[] }): void {
+  function registerHoles(
+    sheetIdx: number,
+    part: TrueNestPart,
+    result: { deg: number; mirrored: boolean; translation: Point; local: Point[] },
+    containerPlacementIndex: number,
+  ): void {
     if (part.holes.length === 0) return;
     const transform = placementTransform(part.outer, { rotationDeg: result.deg, mirrored: result.mirrored, translation: result.translation });
     for (const hole of part.holes) {
@@ -225,7 +240,7 @@ export function nestTrueShape(parts: TrueNestPart[], stock: StockRow[], opts: Tr
         if (loop.length < 3) continue;
         const loopArea = area(loop);
         if (loopArea < minHoleArea) continue;
-        holeRegions.push({ sheet: sheetIdx, polygon: loop, area: loopArea });
+        holeRegions.push({ sheet: sheetIdx, polygon: loop, area: loopArea, containerPlacementIndex });
         holeItems.push([]);
       }
     }
@@ -279,7 +294,14 @@ export function nestTrueShape(parts: TrueNestPart[], stock: StockRow[], opts: Tr
       translation: result.translation,
       placedPolygon: translate(result.local, result.translation.x, result.translation.y),
     });
-    placed.push({ partId: part.id, sheet: holeRegions[holeIdx].sheet, rotationDeg: result.deg, mirrored: result.mirrored, translation: result.translation });
+    placed.push({
+      partId: part.id,
+      sheet: holeRegions[holeIdx].sheet,
+      rotationDeg: result.deg,
+      mirrored: result.mirrored,
+      translation: result.translation,
+      insideOfPlacementIndex: holeRegions[holeIdx].containerPlacementIndex,
+    });
   }
 
   for (const instance of instances) {
@@ -304,7 +326,7 @@ export function nestTrueShape(parts: TrueNestPart[], stock: StockRow[], opts: Tr
       const result = tryPlaceOnSheet(sheetIdx, part);
       if (result) {
         commitPlacement(sheetIdx, part, result);
-        registerHoles(sheetIdx, part, result);
+        registerHoles(sheetIdx, part, result, placed.length - 1);
         placedArea += instance.area;
         done = true;
       }
@@ -324,7 +346,7 @@ export function nestTrueShape(parts: TrueNestPart[], stock: StockRow[], opts: Tr
       const result = tryPlaceOnSheet(sheetIdx, part);
       if (result) {
         commitPlacement(sheetIdx, part, result);
-        registerHoles(sheetIdx, part, result);
+        registerHoles(sheetIdx, part, result, placed.length - 1);
         placedArea += instance.area;
         stockUsed[i] += 1;
         opened = true;

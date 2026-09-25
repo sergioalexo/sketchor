@@ -15,6 +15,10 @@ export interface LastNestPlacement {
   sheet: number;
   /** 1-based, matches the on-drawing label. */
   number: number;
+  /** Index into `TrueNestResult.placed` this came from (N-40: a stable id for G-code toolpath ordering, independent of any entries skipped here for missing geometry). */
+  id: string;
+  /** Another placement's `id` this one nests inside (N-12's allowInHoles) — the G-code writer cuts it first. */
+  insideOfId?: string;
   /** materializeInstance() output, sheet-local (unshifted) coordinates. */
   outerEntities: Entity[];
   holeEntities: Entity[];

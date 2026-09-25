@@ -234,6 +234,16 @@ describe("nestTrueShape — N-12 part-in-hole", () => {
     expect(small.translation.y + 20).toBeLessThanOrEqual(60 + 1e-6);
   });
 
+  it("N-40: tags a hole-filling placement with the index of the part whose hole it's in", () => {
+    const { parts, stock } = scenario(true);
+    const result = nestTrueShape(parts, stock);
+
+    const bigIndex = result.placed.findIndex((p) => p.partId === "big");
+    const small = result.placed.find((p) => p.partId === "small")!;
+    expect(result.placed[bigIndex].insideOfPlacementIndex).toBeUndefined();
+    expect(small.insideOfPlacementIndex).toBe(bigIndex);
+  });
+
   it("never places a part inside a hole unless allowInHoles is set", () => {
     const { parts, stock } = scenario(false);
     const result = nestTrueShape(parts, stock);

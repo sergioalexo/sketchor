@@ -8,10 +8,27 @@ working 4-tab panel; canvas output now lives on four layers (`Nest Sheet`/`Nest
 Parts`/`Nest Holes`/`Nest Labels`) so DXF export (all sheets, stacked like the
 canvas, or one sheet in local coordinates) and the PDF/print report (cover summary,
 one page per sheet with a numbered part table, parts ordered-vs-placed) read the
-exact same entities as the drawing — no separate re-derivation. Remaining:
-**N-40–44** (G-code) and **N-14** (time-budgeted Quick/Normal/Thorough search —
-every pass so far is one deterministic placement, not that search layered on top
-of it).
+exact same entities as the drawing — no separate re-derivation.
+
+**N-40/41/44** (`packages/plugin-gcode/src/toolpath.ts`, `write.ts`) — a real
+toolpath builder and G-code writer, wired to a per-sheet "Export G-code" button.
+Ordering: a part's holes are cut before its outer profile, a part nested inside
+another part's hole (N-12) is cut completely before that hole is opened, and
+everything else is visited by a nearest-neighbour walk. Kerf is baked into the
+path itself (`offsetPath`, not G41/G42) — outward on outer profiles, inward on
+holes — and every cut pierces off the true edge with a straight lead-in onto it,
+on the longest straight edge (or, lacking one, into the hole's own centre).
+Chosen this pass (per user decision): laser process, a single **generic** post
+(`GENERIC_LASER_PROFILE` — plain G0/G1/G2/G3, G20/G21, M3/M5, no Z axis), and
+G-code follows the app's own global unit. N-44's round-trip (emit → the existing
+`gcodeToEntities` reader → compare) is a real test in `write.test.ts`. Deferred:
+**arc lead-ins** (line only — the plan's own default anyway), **other N-42 post
+profiles** (LinuxCNC/Mach3/4/plasma — no profile picker or editor UI yet), and
+**N-43's on-canvas toolpath preview** with dashed rapids (export-only, no preview).
+
+Remaining: those N-42/43 deferrals above, and **N-14** (time-budgeted
+Quick/Normal/Thorough search — every pass so far is one deterministic placement,
+not that search layered on top of it).
 
 Goal: select parts, enter quantities, nest them true-shape onto any number of sheets drawn from a library of standard sizes, with per-part rotation freedom (locked / 90° / any), part-in-part filling of large cut-outs, and output as a printed/PDF report (cutting time, utilisation, scrap), DXF, and G-code.
 

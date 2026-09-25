@@ -5,6 +5,7 @@ import {
   checkNestOverlaps,
   clearPreviousLayout,
   computeJobMetrics,
+  cutTableRowFor,
   extractParts,
   materializeInstance,
   nestTrueShape,
@@ -21,6 +22,7 @@ import {
   type TrueNestPart,
   type TrueNestSheet,
 } from "@sketchor/plugin-nest";
+import { buildCutPlan, writeGcode, type GcodePlacement } from "@sketchor/plugin-gcode";
 import { entitiesToDxf, entityPoints, textWidth, translated, type Entity } from "@sketchor/core";
 import { text, type DisplayUnitInfo, type PluginModule } from "@sketchor/plugin-sdk";
 import { displayUnitToDxfCode, factorFromMm } from "../../units";
@@ -400,7 +402,8 @@ const plugin: PluginModule = {
           const geometryByKey = new Map(withSettings.map((p) => [p.key, p]));
           const placements: LastNestPlacement[] = [];
           let number = 0;
-          for (const placement of result.placed) {
+          for (let placedIdx = 0; placedIdx < result.placed.length; placedIdx++) {
+            const placement = result.placed[placedIdx];
             const p = geometryByKey.get(placement.partId);
             if (!p) continue;
             const outerSource = p.outerSourceIds.map((id) => entityById.get(id)).filter((e): e is Entity => e !== undefined);
@@ -425,6 +428,8 @@ const plugin: PluginModule = {
             placements.push({
               sheet: placement.sheet,
               number,
+              id: String(placedIdx),
+              insideOfId: placement.insideOfPlacementIndex !== undefined ? String(placement.insideOfPlacementIndex) : undefined,
               outerEntities,
               holeEntities,
               label: { at: { x: cx - textWidth(String(number), labelHeight) / 2, y: cy - labelHeight / 2 }, height: labelHeight },
@@ -516,6 +521,47 @@ const plugin: PluginModule = {
         }
         const dxf = entitiesToDxf(entities, displayUnitToDxfCode(unit.unit), factorFromMm(unit.unit));
         const res = await sketchor.ui.saveFile(fileName, dxf, [{ description: "DXF Drawing", accept: { "application/dxf": [".dxf"] } }]);
+        if (res.saved) sketchor.ui.notify(`Saved ${res.name ?? fileName}.`);
+        return;
+      }
+
+      if (msg.type === "export-gcode") {
+        if (!lastNest) {
+          void sketchor.ui.postMessage({ type: "error", message: "Nothing to export — nest some parts first." });
+          return;
+        }
+        // Unlike DXF, G-code is always one sheet at a time — each is its own
+        // physical job run on the machine, not something to stack in one file.
+        const sheetIndex = typeof msg.sheetIndex === "number" ? msg.sheetIndex : 0;
+        if (sheetIndex < 0 || sheetIndex >= lastNest.sheets.length) {
+          void sketchor.ui.postMessage({ type: "error", message: "That sheet no longer exists — nest again." });
+          return;
+        }
+
+        const gcodePlacements: GcodePlacement[] = lastNest.placements
+          .filter((p) => p.sheet === sheetIndex)
+          .map((p) => ({ id: p.id, number: p.number, outerEntities: p.outerEntities, holeEntities: p.holeEntities, insideOfId: p.insideOfId }));
+        const plan = buildCutPlan(gcodePlacements, { kerf: state.kerf });
+        for (const warning of plan.warnings) sketchor.ui.notify(warning, { error: true });
+
+        const stockRow = state.stock[lastNest.sheets[sheetIndex].stockIndex];
+        const cutRow = cutTableRowFor(stockRow, DEFAULT_CUT_TABLE);
+        if (!cutRow) {
+          sketchor.ui.notify("No cut-table match for this sheet's material/thickness — using a default feed rate; check it before running the program.", { error: true });
+        }
+        const feedRateMmPerMin = cutRow?.feedRateMmPerMin ?? 2000;
+        const pierceTimeSec = cutRow?.pierceTimeSec ?? 0.5;
+
+        const gcodeUnit = unit.unit === "in" ? "in" : "mm";
+        const gcode = writeGcode(plan.features, {
+          unit: gcodeUnit,
+          scale: gcodeUnit === "in" ? factorFromMm("in") : 1,
+          feedRateMmPerMin,
+          pierceTimeSec,
+          sheetLabel: lastNest.sheetLabels[sheetIndex],
+        });
+        const fileName = `nest-sheet-${sheetIndex + 1}.nc`;
+        const res = await sketchor.ui.saveFile(fileName, gcode, [{ description: "G-code", accept: { "text/plain": [".nc", ".gcode", ".tap"] } }]);
         if (res.saved) sketchor.ui.notify(`Saved ${res.name ?? fileName}.`);
         return;
       }
@@ -641,6 +687,10 @@ export const PANEL_HTML = String.raw`<!doctype html>
       <div class="row" style="margin-bottom:8px">
         <select id="dxf-sheet" style="margin-top:0"><option value="-1">All sheets</option></select>
         <button class="ghost sm" id="export-dxf">Export DXF</button>
+      </div>
+      <div class="row" style="margin-bottom:8px">
+        <select id="gcode-sheet" style="margin-top:0"></select>
+        <button class="ghost sm" id="export-gcode">Export G-code</button>
       </div>
       <div class="actions">
         <button class="ghost sm" id="print">Print report</button>
@@ -787,9 +837,11 @@ export const PANEL_HTML = String.raw`<!doctype html>
         $("summary").innerHTML = "";
         $("sheet-cards").innerHTML = "";
         $("dxf-sheet").innerHTML = "<option value='-1'>All sheets</option>";
+        $("gcode-sheet").innerHTML = "";
       });
       $("check-nest").addEventListener("click", () => post({ type: "check-nest" }));
       $("export-dxf").addEventListener("click", () => post({ type: "export-dxf", sheetIndex: Number($("dxf-sheet").value) }));
+      $("export-gcode").addEventListener("click", () => post({ type: "export-gcode", sheetIndex: Number($("gcode-sheet").value) }));
       $("print").addEventListener("click", () => post({ type: "print" }));
 
       function renderResult(r, metrics, sheetLabels) {
@@ -800,6 +852,7 @@ export const PANEL_HTML = String.raw`<!doctype html>
         $("dxf-sheet").innerHTML =
           "<option value='-1'>All sheets</option>" +
           (sheetLabels || []).map((l, i) => "<option value='" + i + "'>" + esc(l) + "</option>").join("");
+        $("gcode-sheet").innerHTML = (sheetLabels || []).map((l, i) => "<option value='" + i + "'>" + esc(l) + "</option>").join("");
         const cards = (metrics ? metrics.sheets : []).map((m, i) => {
           const label = (sheetLabels && sheetLabels[i]) || "Sheet " + (i + 1);
           const time = m.cuttingTimeSec != null ? Math.round(m.cuttingTimeSec / 6) / 10 + " min (est.)" : "—";

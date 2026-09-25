@@ -70,7 +70,8 @@ function netArea(part: PartGeometry): number {
   return Math.max(0, area(part.outer) - holesArea);
 }
 
-function cutTableRowFor(stockRow: StockRow | undefined, cutTable: CutTableRow[]): CutTableRow | undefined {
+/** Exported for N-40 (the G-code writer): the same material/thickness match the cutting-time estimate uses, so feed rate and pierce time never disagree between the report and the emitted program. */
+export function cutTableRowFor(stockRow: StockRow | undefined, cutTable: CutTableRow[]): CutTableRow | undefined {
   if (!stockRow?.material || stockRow.thickness === undefined) return undefined;
   // Case/whitespace-insensitive material match and a small thickness
   // tolerance — a user's stock row is free-typed text and a converted unit
