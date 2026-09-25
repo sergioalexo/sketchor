@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { boundsOf, dxfToSvg, entitiesToSvg, parseDxf } from "./dxf";
+import { boundsOf, dxfToSvg, entitiesToSvg, parseDxf, type DxfParseOptions } from "./dxf";
 import type { ArcEntity, CircleEntity, Entity, LineEntity, PointEntity, PolylineEntity, TextEntity } from "./entities";
 
 /**
@@ -29,7 +29,7 @@ const header = (insUnits: number): string =>
 const block = (name: string, base: [number, number], body: string): string =>
   rec("BLOCK", [[2, name], [10, base[0]], [20, base[1]]]) + body + rec("ENDBLK", []);
 
-const parse = (text: string) => parseDxf(text);
+const parse = (text: string, options?: DxfParseOptions) => parseDxf(text, options);
 const entitiesOf = (text: string): Entity[] => parseDxf(text).entities;
 
 const closeTo = (p: { x: number; y: number }, x: number, y: number, digits = 9) => {
@@ -403,38 +403,61 @@ describe("$INSUNITS", () => {
     }
   });
 
-  it("leaves coordinates untouched for an unspecified or unmapped unit", () => {
-    for (const code of [0, 3, 9, 21]) {
+  it("leaves coordinates untouched for an unspecified or unknown code", () => {
+    for (const code of [0, 99]) {
       const [e] = parse(dxf(header(code), oneMetreLine)).entities as LineEntity[];
       expect(e.b.x).toBe(1);
     }
   });
 
+  it("scales every unit code the DXF spec defines", () => {
+    const expected: [number, number][] = [
+      [3, 1609344], [7, 1e6], [8, 25.4e-6], [9, 0.0254], [10, 914.4], [11, 1e-7], [12, 1e-6],
+      [13, 1e-3], [14, 100], [15, 1e4], [16, 1e5], [21, 304.8006096], [22, 25.4000508], [23, 914.4018288],
+    ];
+    for (const [code, mm] of expected) {
+      const r = parse(dxf(header(code), oneMetreLine));
+      expect(r.unitSource).toBe("insunits");
+      expect((r.entities[0] as LineEntity).b.x / mm).toBeCloseTo(1, 6);
+    }
+  });
+
+  /** A HEADER with the given `[name, code, value]` variables (after an `$ACADVER`). */
+  const headerVars = (...vars: [string, number, number | string][]): string =>
+    section("HEADER", ["9", "$ACADVER", "1", "AC1014", ...vars.flatMap(([n, c, v]) => ["9", n, String(c), String(v)])].join("\n") + "\n");
+
   it("falls back to $MEASUREMENT when $INSUNITS is missing or unitless", () => {
-    const measurement = (m: number, ins?: number): string =>
-      section(
-        "HEADER",
-        `9
-$ACADVER
-1
-AC1014
-` + (ins === undefined ? "" : `9
-$INSUNITS
-70
-${ins}
-`) + `9
-$MEASUREMENT
-70
-${m}
-`,
-      );
-    const imperial = parse(dxf(measurement(0), oneMetreLine));
-    expect(imperial.insUnits).toBe(1);
+    const imperial = parse(dxf(headerVars(["$MEASUREMENT", 70, 0]), oneMetreLine));
+    expect(imperial).toMatchObject({ insUnits: 1, unitSource: "measurement" });
     expect((imperial.entities[0] as LineEntity).b.x).toBeCloseTo(25.4, 9);
-    expect(parse(dxf(measurement(0, 0), oneMetreLine)).insUnits).toBe(1);
-    expect(parse(dxf(measurement(1), oneMetreLine)).insUnits).toBe(4);
+    expect(parse(dxf(headerVars(["$INSUNITS", 70, 0], ["$MEASUREMENT", 70, 0]), oneMetreLine)).insUnits).toBe(1);
+    expect(parse(dxf(headerVars(["$MEASUREMENT", 70, 1]), oneMetreLine)).insUnits).toBe(4);
     // An explicit $INSUNITS always beats $MEASUREMENT.
-    expect(parse(dxf(measurement(0, 4), oneMetreLine)).insUnits).toBe(4);
+    expect(parse(dxf(headerVars(["$INSUNITS", 70, 4], ["$MEASUREMENT", 70, 0]), oneMetreLine)).insUnits).toBe(4);
+  });
+
+  it("guesses from template defaults when no unit variable exists, and says so", () => {
+    // Values straight from AutoCAD's acad.dwt (imperial) and acadiso.dwt (metric).
+    const imperial = parse(dxf(headerVars(["$DIMTXT", 40, 0.18], ["$DIMALTF", 40, 25.4]), oneMetreLine));
+    expect(imperial).toMatchObject({ insUnits: 1, unitSource: "inferred" });
+    expect((imperial.entities[0] as LineEntity).b.x).toBeCloseTo(25.4, 9);
+    const metric = parse(dxf(headerVars(["$DIMTXT", 40, 2.5], ["$TEXTSIZE", 40, 2.5]), oneMetreLine));
+    expect(metric).toMatchObject({ insUnits: 4, unitSource: "inferred" });
+    // Conflicting hints are not a guess.
+    const mixed = parse(dxf(headerVars(["$DIMTXT", 40, 0.18], ["$TEXTSIZE", 40, 2.5]), oneMetreLine));
+    expect(mixed.unitSource).toBe("none");
+  });
+
+  it("reads a file with no unit hint in the caller's assumed unit", () => {
+    const r = parse(dxf(oneMetreLine), { assumeUnits: 1 });
+    expect(r).toMatchObject({ insUnits: 1, unitSource: "none" });
+    expect((r.entities[0] as LineEntity).b.x).toBeCloseTo(25.4, 9);
+    // A declared unit is never overridden by the assumption.
+    expect(parse(dxf(header(4), oneMetreLine), { assumeUnits: 1 }).insUnits).toBe(4);
+  });
+
+  it("warns instead of silently failing on binary DXF", () => {
+    expect(parse("AutoCAD Binary DXF" + String.fromCharCode(13, 10, 26, 0)).warnings[0]).toMatch(/binary DXF/);
   });
 
   it("scales radii and block-placed geometry too", () => {

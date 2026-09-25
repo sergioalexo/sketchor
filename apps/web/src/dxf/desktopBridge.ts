@@ -1,5 +1,5 @@
 import { importDxfText, importEntities, openIntoSession, useApp } from "../state/store";
-import { importDwgBuffer } from "../browser/dwgImport";
+import { DWG_UNREADABLE, dwgToDxfText } from "../browser/dwgImport";
 import { bindSavePath, openModelBytes } from "../io/drawingFile";
 import { parseSvgText } from "@sketchor/core";
 
@@ -78,8 +78,8 @@ export function initDesktopFileOpen(): void {
 
   tauri.event.listen("open-dwg", ({ payload }) => {
     if (!payload?.base64) return;
-    importDwgBuffer(base64ToArrayBuffer(payload.base64)).then(({ entities, warnings }) => {
-      openIntoSession(payload.name, () => importEntities(entities, warnings));
+    dwgToDxfText(base64ToArrayBuffer(payload.base64)).then((text) => {
+      openIntoSession(payload.name, () => (text ? importDxfText(text) : importEntities([], [DWG_UNREADABLE])));
       revealFolder(payload.dir);
     });
   });

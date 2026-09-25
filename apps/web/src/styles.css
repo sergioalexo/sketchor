@@ -788,6 +788,22 @@ body {
   min-width: 0;
 }
 
+.import-banner-units {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+.import-banner-units .btn {
+  padding: 2px 6px;
+  font-size: 12px;
+}
+
+.import-banner-units .btn.active {
+  outline: 1px solid currentColor;
+}
+
 /* ---------- straighten tool panel ---------- */
 
 .straighten-panel {

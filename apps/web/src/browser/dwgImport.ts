@@ -1,5 +1,3 @@
-import { parseDxf, type Entity } from "@sketchor/core";
-
 /**
  * DWG import via @mlightcad/libredwg-web (GNU LibreDWG compiled to
  * WebAssembly). This is a GPL-3.0 dependency — see NOTICE.md at the repo
@@ -17,10 +15,8 @@ import { parseDxf, type Entity } from "@sketchor/core";
  * regardless of deployment base path.
  */
 
-export interface DwgImportResult {
-  entities: Entity[];
-  warnings: string[];
-}
+/** Shown when LibreDWG can't convert a file. */
+export const DWG_UNREADABLE = "could not read this DWG file (unsupported version or corrupt data)";
 
 interface LibreDwgInstance {
   dwg_write_dxf(fileContent: ArrayBuffer): Uint8Array | null;
@@ -38,14 +34,14 @@ async function getLibreDwg(): Promise<LibreDwgInstance> {
   return libredwgPromise;
 }
 
-/** Converts a DWG file's raw bytes to Sketchor entities via DXF (see module doc above). */
-export async function importDwgBuffer(buffer: ArrayBuffer): Promise<DwgImportResult> {
+/**
+ * Converts a DWG file's raw bytes to DXF text (see module doc above), or null
+ * if LibreDWG can't read it. Callers hand the text to the normal DXF import,
+ * so a DWG gets exactly the same unit detection as a DXF.
+ */
+export async function dwgToDxfText(buffer: ArrayBuffer): Promise<string | null> {
   const libredwg = await getLibreDwg();
   const dxfBytes = libredwg.dwg_write_dxf(buffer);
-  if (!dxfBytes || dxfBytes.length === 0) {
-    return { entities: [], warnings: ["could not read this DWG file (unsupported version or corrupt data)"] };
-  }
-  const dxfText = new TextDecoder("utf-8").decode(dxfBytes);
-  const { entities, warnings } = parseDxf(dxfText);
-  return { entities, warnings };
+  if (!dxfBytes || dxfBytes.length === 0) return null;
+  return new TextDecoder("utf-8").decode(dxfBytes);
 }

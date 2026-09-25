@@ -178,8 +178,10 @@ round-trip tests assert against that bound rather than a fixed epsilon.
 
 864 lines, the most complex file in the repo.
 
-- `$INSUNITS` scaling: in/ft/cm/m/mm files all land as mm; unspecified (0) or
-  unmapped codes are left unscaled.
+- Unit detection: all 24 `$INSUNITS` codes land as mm; missing/unitless
+  `$INSUNITS` falls back to `$MEASUREMENT`, then to a unanimous vote of
+  acad.dwt/acadiso.dwt template defaults (`unitSource: "inferred"`), then to
+  the caller's `assumeUnits` (`"none"`); binary DXF warns.
 - LWPOLYLINE with bulges: correct per-segment `bulges` indices, `closed` from
   group code 70.
 - Legacy `POLYLINE`/`VERTEX`/`SEQEND` stitching.

@@ -1,5 +1,5 @@
 import { entitiesToDxf, entitiesToSvgDocument, parseSvgText } from "@sketchor/core";
-import { importDwgBuffer } from "../browser/dwgImport";
+import { DWG_UNREADABLE, dwgToDxfText } from "../browser/dwgImport";
 import { isModelFile, loadModel } from "../model3d/stepImport";
 import {
   doc,
@@ -281,9 +281,8 @@ export async function loadDrawingFile(name: string, file: File): Promise<void> {
     const { entities, warnings } = parseSvgText(text);
     openIntoSession(name, () => importEntities(entities, warnings));
   } else if (/\.dwg$/i.test(name)) {
-    const buffer = await file.arrayBuffer();
-    const { entities, warnings } = await importDwgBuffer(buffer);
-    openIntoSession(name, () => importEntities(entities, warnings));
+    const text = await dwgToDxfText(await file.arrayBuffer());
+    openIntoSession(name, () => (text ? importDxfText(text) : importEntities([], [DWG_UNREADABLE])));
   } else {
     const text = await file.text();
     openIntoSession(name, () => importDxfText(text));
@@ -345,10 +344,10 @@ export async function overlayDrawingFile(name: string, file: File): Promise<{ co
     return { ...overlayEntities(entities, label), warnings };
   }
   if (/\.dwg$/i.test(name)) {
-    const buffer = await file.arrayBuffer();
-    const { entities, warnings } = await importDwgBuffer(buffer);
-    useApp.getState().setFileWarnings(warnings);
-    return { ...overlayEntities(entities, label), warnings };
+    const text = await dwgToDxfText(await file.arrayBuffer());
+    if (text) return overlayDxfText(text, label);
+    useApp.getState().setFileWarnings([DWG_UNREADABLE]);
+    return { ...overlayEntities([], label), warnings: [DWG_UNREADABLE] };
   }
   const text = await file.text();
   return overlayDxfText(text, label);

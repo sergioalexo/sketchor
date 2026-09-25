@@ -148,7 +148,7 @@ function entityDxf(e: Entity): string {
 
 /**
  * @param insUnits The HEADER's `$INSUNITS` code to write (0 unitless, 1 in,
- * 2 ft, 4 mm, 5 cm, 6 m — see dxf.ts's `parseInsUnits`). Defaults to 0
+ * 2 ft, 4 mm, 5 cm, 6 m — see dxf.ts's `MM_PER_INSUNIT`). Defaults to 0
  * (unspecified) when the caller doesn't track a real-world unit.
  * @param scale Factor applied to every coordinate/radius before writing, so
  * the file's numbers actually match the unit declared in `insUnits`.

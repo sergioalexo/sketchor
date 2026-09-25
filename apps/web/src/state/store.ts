@@ -1,6 +1,14 @@
 import { create } from "zustand";
 import type { Model3D } from "../model3d/types";
-import { dxfCodeToDisplayUnit, formatArea, formatLength, loadDisplayUnit, saveDisplayUnit, type DisplayUnit } from "../units";
+import {
+  displayUnitToDxfCode,
+  dxfCodeToDisplayUnit,
+  formatArea,
+  formatLength,
+  loadDisplayUnit,
+  saveDisplayUnit,
+  type DisplayUnit,
+} from "../units";
 import {
   CommandBus,
   DEFAULT_DUPLICATE_OPTIONS,
@@ -23,6 +31,7 @@ import {
   newGroupId,
   PALETTE,
   parseCode,
+  MM_PER_INSUNIT,
   parseDxf,
   patternCommands,
   polylineLength,
@@ -32,6 +41,7 @@ import {
   scanForDuplicates,
   scanForIssues,
   toCode,
+  transformed,
   wholeGroupSelected,
   type ClosedRegion,
   type Command,
@@ -39,6 +49,8 @@ import {
   type DuplicateIssue,
   type DuplicateOptions,
   type DxfImportReport,
+  type DxfParseResult,
+  type DxfUnitSource,
   type Entity,
   type EntityId,
   type GroupId,
@@ -202,21 +214,71 @@ export function ungroupSelection(): boolean {
 }
 
 /**
+ * The unit a DXF/DWG import was read in, shown on the import banner. A
+ * guessed unit (`inferred` / `none`) comes with buttons that re-read the
+ * geometry in another unit — see {@link reinterpretImportUnits}.
+ */
+export interface ImportUnits {
+  /** `$INSUNITS` code the coordinates were read in (0 = left as-is). */
+  code: number;
+  source: DxfUnitSource | "user";
+  /** Set for an overlay import: only that layer is re-read. */
+  layer?: string;
+}
+
+/** `$INSUNITS` code of the active tab's display unit — what a file with no unit hint is read in, so its numbers show up exactly as written. */
+function currentUnitCode(): number {
+  return displayUnitToDxfCode(useApp.getState().displayUnit);
+}
+
+/**
  * Imports DXF text: replaces the drawing with the file's geometry as one
  * undoable step. Returns the entity count and any parse warnings.
  */
 export function importDxfText(text: string, replace = true): { count: number; warnings: string[] } {
-  const { entities, warnings, report, insUnits } = parseDxf(text);
+  return importParsedDxf(parseDxf(text, { assumeUnits: currentUnitCode() }), replace);
+}
+
+/** {@link importDxfText} for an already-parsed file. */
+function importParsedDxf(result: DxfParseResult, replace: boolean): { count: number; warnings: string[] } {
+  const { entities, warnings, report, insUnits, unitSource } = result;
   applyImportedEntities(entities, replace);
   useApp.getState().setImportReport(report);
-  // The file's own $INSUNITS becomes the document's saved unit; unspecified/
-  // unmapped units leave it as-is. Only a real open (replace) may do this —
-  // the document keeps its own unit unless the user explicitly changes it
-  // (via the display-unit picker) or opens a new file over it; an overlay
-  // add (see overlayEntities) never reaches this branch.
+  useApp.getState().setFileWarnings(warnings.filter((w) => !w.startsWith("unsupported entity")));
+  useApp.getState().setImportUnits({ code: insUnits, source: unitSource });
+  // The file's own unit becomes the document's saved unit; unmapped units
+  // leave it as-is. Only a real open (replace) may do this — the document
+  // keeps its own unit unless the user explicitly changes it (via the
+  // display-unit picker) or opens a new file over it; an overlay add (see
+  // overlayEntities) never reaches this branch.
   const unit = dxfCodeToDisplayUnit(insUnits);
   if (replace && unit) useApp.getState().setDisplayUnit(unit);
   return { count: entities.length, warnings };
+}
+
+/**
+ * Re-reads the last import's geometry as if the file had been in `to`
+ * instead of the unit it was read in — the fix for a file that didn't say
+ * (or lied about) its unit. One undoable batch; a replace import also
+ * switches the display unit so the numbers read the same as in the file.
+ */
+export function reinterpretImportUnits(to: DisplayUnit): void {
+  const { importUnits } = useApp.getState();
+  if (!importUnits) return;
+  const toCode = displayUnitToDxfCode(to);
+  const factor = (MM_PER_INSUNIT[toCode] ?? 1) / (MM_PER_INSUNIT[importUnits.code] ?? 1);
+  if (factor !== 1) {
+    const targets = doc.all().filter((e) => importUnits.layer === undefined || layerOf(e) === importUnits.layer);
+    const origin = { x: 0, y: 0 };
+    const commands: Command[] = targets.map((e) => ({
+      type: "update-entity",
+      entity: transformed(e, origin, 0, 0, 0, factor),
+    }));
+    if (commands.length) bus.execute({ type: "batch", commands });
+  }
+  if (importUnits.layer === undefined) useApp.getState().setDisplayUnit(to);
+  useApp.getState().setImportUnits({ ...importUnits, code: toCode, source: "user" });
+  useApp.getState().requestFit();
 }
 
 /** Layer name for {@link overlayEntities}: `base` if free, else `base (2)`, `base (3)`, ... */
@@ -245,11 +307,13 @@ export function overlayEntities(entities: Entity[], label: string): { count: num
   return { count: entities.length, layer };
 }
 
-/** DXF-specific overlay: parses `text` and adds it via {@link overlayEntities}. The file's own `$INSUNITS` still scales its coordinates into the shared millimeter space (see dxf.ts) — only the document's own saved unit is left alone. */
+/** DXF-specific overlay: parses `text` and adds it via {@link overlayEntities}. The file's own unit still scales its coordinates into the shared millimeter space (see dxf.ts) — only the document's own saved unit is left alone. A file with no unit hint is read in the document's unit. */
 export function overlayDxfText(text: string, label: string): { count: number; warnings: string[]; layer: string } {
-  const { entities, warnings, report } = parseDxf(text);
+  const { entities, warnings, report, insUnits, unitSource } = parseDxf(text, { assumeUnits: currentUnitCode() });
   useApp.getState().setImportReport(report);
-  return { ...overlayEntities(entities, label), warnings };
+  const added = overlayEntities(entities, label);
+  useApp.getState().setImportUnits({ code: insUnits, source: unitSource, layer: added.layer });
+  return { ...added, warnings };
 }
 
 export type ToolId =
@@ -603,6 +667,9 @@ interface AppState {
   /** Parsed-vs-skipped tally from the most recent DXF import; null once dismissed. */
   importReport: DxfImportReport | null;
   setImportReport: (report: DxfImportReport | null) => void;
+  /** The unit the most recent DXF/DWG import was read in; null once dismissed. */
+  importUnits: ImportUnits | null;
+  setImportUnits: (units: ImportUnits | null) => void;
   /** Warnings from the most recent SVG/DWG import (e.g. curve approximation, unreadable file); [] once dismissed. */
   fileWarnings: string[];
   setFileWarnings: (warnings: string[]) => void;
@@ -727,6 +794,8 @@ export const useApp = create<AppState>((set, get) => ({
   sessionsVersion: 0,
   importReport: null,
   setImportReport: (report) => set({ importReport: report }),
+  importUnits: null,
+  setImportUnits: (importUnits) => set({ importUnits }),
   fileWarnings: [],
   setFileWarnings: (warnings) => set({ fileWarnings: warnings }),
   referenceEdgeId: null,
@@ -980,6 +1049,7 @@ export function switchToSession(id: string): void {
     measurement: null,
     pinnedMeasurements: [],
     importReport: null,
+    importUnits: null,
   });
   rebindBus();
   bumpSessionsVersion();

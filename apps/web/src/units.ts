@@ -71,10 +71,70 @@ export function displayUnitToDxfCode(unit: DisplayUnit): number {
   return DXF_UNIT_CODE[unit];
 }
 
-/** The DisplayUnit for a DXF `$INSUNITS` code, or null if unspecified/unmapped. */
+/**
+ * The closest DisplayUnit for the `$INSUNITS` codes that have no exact one
+ * (the geometry itself is scaled exactly in dxf.ts; this only picks how the
+ * numbers are shown): imperial small units as inches, imperial large units
+ * as feet, metric by magnitude.
+ */
+const DXF_CODE_NEAREST_UNIT: Record<number, DisplayUnit> = {
+  3: "ft", // miles
+  7: "m", // kilometres
+  8: "in", // microinches
+  9: "in", // mils
+  10: "ft", // yards
+  11: "mm", // ångströms
+  12: "mm", // nanometres
+  13: "mm", // microns
+  14: "cm", // decimetres
+  15: "m", // decametres
+  16: "m", // hectometres
+  17: "m", // gigametres
+  18: "m", // astronomical units
+  19: "m", // light years
+  20: "m", // parsecs
+  21: "ft", // US survey feet
+  22: "in", // US survey inches
+  23: "ft", // US survey yards
+  24: "ft", // US survey miles
+};
+
+/** The DisplayUnit for a DXF `$INSUNITS` code (nearest one for units Sketchor can't display), or null if unspecified/unknown. */
 export function dxfCodeToDisplayUnit(code: number): DisplayUnit | null {
-  return DXF_CODE_TO_UNIT.get(code) ?? null;
+  return DXF_CODE_TO_UNIT.get(code) ?? DXF_CODE_NEAREST_UNIT[code] ?? null;
 }
+
+/** Human name of a DXF `$INSUNITS` code, for telling the user what a file was read in. */
+export function dxfUnitName(code: number): string {
+  return DXF_UNIT_NAMES[code] ?? "unitless";
+}
+
+const DXF_UNIT_NAMES: Record<number, string> = {
+  1: "inches",
+  2: "feet",
+  3: "miles",
+  4: "millimetres",
+  5: "centimetres",
+  6: "metres",
+  7: "kilometres",
+  8: "microinches",
+  9: "mils",
+  10: "yards",
+  11: "ångströms",
+  12: "nanometres",
+  13: "microns",
+  14: "decimetres",
+  15: "decametres",
+  16: "hectometres",
+  17: "gigametres",
+  18: "astronomical units",
+  19: "light years",
+  20: "parsecs",
+  21: "US survey feet",
+  22: "US survey inches",
+  23: "US survey yards",
+  24: "US survey miles",
+};
 
 // --- last-used unit, remembered per browser ---
 

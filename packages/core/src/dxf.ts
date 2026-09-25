@@ -114,57 +114,121 @@ function collectBlocks(pairs: Pair[]): Map<string, BlockDef> {
   return blocks;
 }
 
-/** The group-70 value of a HEADER variable (e.g. `$INSUNITS`), or null if absent. */
-function headerInt(pairs: Pair[], name: string): number | null {
+/** The pairs following a HEADER variable's `9 $NAME` marker, up to the next variable. Empty if absent. */
+function headerVar(pairs: Pair[], name: string): Pair[] {
   for (let i = 0; i < pairs.length; i++) {
     if (pairs[i].code === 9 && pairs[i].value.trim() === name) {
-      const next = pairs[i + 1];
-      if (next && next.code === 70) {
-        const v = parseInt(next.value, 10);
-        return Number.isFinite(v) ? v : null;
-      }
-      return null;
+      const out: Pair[] = [];
+      for (let j = i + 1; j < pairs.length && pairs[j].code !== 9 && pairs[j].code !== 0; j++) out.push(pairs[j]);
+      return out;
     }
   }
-  return null;
+  return [];
+}
+
+/** A HEADER variable's value for one group code (e.g. 70 for `$INSUNITS`), or null if absent/unreadable. */
+function headerNum(pairs: Pair[], name: string, code: number): number | null {
+  const p = headerVar(pairs, name).find((x) => x.code === code);
+  if (!p) return null;
+  const v = parseFloat(p.value);
+  return Number.isFinite(v) ? v : null;
 }
 
 /**
- * The drawing's real-world unit as an `$INSUNITS` code (0 unitless, 1 in,
- * 2 ft, 4 mm, 5 cm, 6 m, plus values for other units this app doesn't
- * otherwise support); 0 if the file gives no usable hint.
- *
- * `$INSUNITS` wins when it names a unit. When it's missing (it only exists
- * from AC1015 / R2000 on — Onshape's R14 exports never carry it) or 0
- * "unitless", falls back to `$MEASUREMENT` (0 imperial → inches, 1 metric →
- * mm), which is what AutoCAD itself does for unitless drawings. Without
- * that fallback an inch drawing was read as millimetres: a 23" part showed
- * up as 0.9".
+ * Where a DXF's unit came from, most to least trustworthy:
+ * - `insunits`: the file's `$INSUNITS` names a unit.
+ * - `measurement`: no `$INSUNITS` (it only exists from R2000/AC1015 on —
+ *   e.g. Onshape's R14 exports never carry it) or it's 0 "unitless", so
+ *   `$MEASUREMENT` decides (0 imperial → in, 1 metric → mm), as AutoCAD does.
+ * - `inferred`: neither variable, but the header still carries its
+ *   template's imperial or metric drawing defaults (text size, arrow size,
+ *   sheet limits, alternate-unit factor) — a guess, flagged to the user.
+ * - `none`: no hint at all; coordinates are read in the caller's
+ *   `assumeUnits` (the numbers as written), also flagged to the user.
  */
-function parseInsUnits(pairs: Pair[]): number {
-  const insUnits = headerInt(pairs, "$INSUNITS");
-  if (insUnits) return insUnits;
-  const measurement = headerInt(pairs, "$MEASUREMENT");
-  if (measurement === 0) return 1;
-  if (measurement === 1) return 4;
+export type DxfUnitSource = "insunits" | "measurement" | "inferred" | "none";
+
+/**
+ * Millimetres per unit for every `$INSUNITS` code the DXF spec defines
+ * (1 in, 2 ft, 3 mi, 4 mm, 5 cm, 6 m, 7 km, 8 µin, 9 mil, 10 yd, 11 Å,
+ * 12 nm, 13 µm, 14 dm, 15 dam, 16 hm, 17 Gm, 18 AU, 19 ly, 20 pc,
+ * 21–24 US survey ft/in/yd/mi). 0 (unitless) has no factor.
+ */
+export const MM_PER_INSUNIT: Readonly<Record<number, number>> = {
+  1: 25.4,
+  2: 304.8,
+  3: 1609344,
+  4: 1,
+  5: 10,
+  6: 1000,
+  7: 1e6,
+  8: 25.4e-6,
+  9: 0.0254,
+  10: 914.4,
+  11: 1e-7,
+  12: 1e-6,
+  13: 1e-3,
+  14: 100,
+  15: 1e4,
+  16: 1e5,
+  17: 1e12,
+  18: 1.495978707e14,
+  19: 9.4607304725808e18,
+  20: 3.0856775814913673e19,
+  21: 1200000 / 3937,
+  22: 100000 / 3937,
+  23: 3600000 / 3937,
+  24: 6336000000 / 3937,
+};
+
+const near = (v: number | null, target: number): boolean =>
+  v !== null && Math.abs(v - target) <= Math.abs(target) * 0.02;
+
+/**
+ * Guesses imperial (1) vs metric (4) from the stock values AutoCAD's
+ * acad.dwt / acadiso.dwt templates leave in the header. Only answers when
+ * every recognisable hint agrees; 0 if there are none or they conflict.
+ */
+function inferUnitsFromDefaults(pairs: Pair[]): number {
+  let imperial = 0;
+  let metric = 0;
+  const vote = (v: number | null, imp: number[], met: number[]) => {
+    if (imp.some((t) => near(v, t))) imperial++;
+    else if (met.some((t) => near(v, t))) metric++;
+  };
+  vote(headerNum(pairs, "$DIMALTF", 40), [25.4], [0.03937]);
+  vote(headerNum(pairs, "$DIMTXT", 40), [0.18], [2.5]);
+  vote(headerNum(pairs, "$DIMASZ", 40), [0.18], [2.5]);
+  vote(headerNum(pairs, "$DIMEXO", 40), [0.0625], [0.625]);
+  vote(headerNum(pairs, "$TEXTSIZE", 40), [0.2], [2.5]);
+  const limX = headerNum(pairs, "$LIMMAX", 10);
+  const limY = headerNum(pairs, "$LIMMAX", 20);
+  if (near(limX, 12) && near(limY, 9)) imperial++;
+  else if (near(limX, 420) && near(limY, 297)) metric++;
+  if (imperial > 0 && metric === 0) return 1;
+  if (metric > 0 && imperial === 0) return 4;
   return 0;
 }
 
-/**
- * Millimeters per unit for the `$INSUNITS` codes this app maps to a
- * {@link DisplayUnit} (see units.ts's `DXF_UNIT_CODE`). Unspecified/unmapped
- * codes have no known factor, so callers leave coordinates untouched for
- * those rather than guessing.
- */
-const MM_PER_INSUNIT: Record<number, number> = { 1: 25.4, 2: 304.8, 4: 1, 5: 10, 6: 1000 };
+/** Resolves the drawing's unit as an `$INSUNITS` code plus where it came from (see {@link DxfUnitSource}). */
+function resolveUnits(pairs: Pair[]): { code: number; source: DxfUnitSource } {
+  const insUnits = headerNum(pairs, "$INSUNITS", 70);
+  if (insUnits && MM_PER_INSUNIT[insUnits]) return { code: insUnits, source: "insunits" };
+  const measurement = headerNum(pairs, "$MEASUREMENT", 70);
+  if (measurement === 0) return { code: 1, source: "measurement" };
+  if (measurement === 1) return { code: 4, source: "measurement" };
+  const inferred = inferUnitsFromDefaults(pairs);
+  if (inferred) return { code: inferred, source: "inferred" };
+  return { code: 0, source: "none" };
+}
 
 const ORIGIN: Point = { x: 0, y: 0 };
 
 /**
  * Entities are always stored internally in millimeters (see units.ts), but a
- * DXF's coordinates are in whatever real-world unit its `$INSUNITS` declares
- * — so they're rescaled to mm here, once, right after parsing. Without this,
- * an inch-based file's raw numbers would be stored as if they were already
+ * DXF's coordinates are in whatever real-world unit it declares — so they're
+ * rescaled to mm here, once, right after parsing. Without this, an
+ * inch-based file's raw numbers would be stored as if they were already
  * millimeters: 25.4x too small, and silently wrong again on export.
  */
 function scaleToMm(entities: Entity[], insUnits: number): Entity[] {
@@ -413,8 +477,23 @@ export interface DxfParseResult {
   entities: Entity[];
   warnings: string[];
   report: DxfImportReport;
-  /** The drawing's unit as an `$INSUNITS` code — from `$INSUNITS`, else `$MEASUREMENT`; 0 if unspecified — see {@link parseInsUnits}. */
+  /**
+   * The unit the coordinates were read in, as an `$INSUNITS` code (entities
+   * are already scaled from it to mm). For `unitSource: "none"` this is the
+   * caller's `assumeUnits` (0 if none given — coordinates left as-is).
+   */
   insUnits: number;
+  /** How {@link insUnits} was decided — anything but `insunits`/`measurement` is a guess worth showing the user. */
+  unitSource: DxfUnitSource;
+}
+
+export interface DxfParseOptions {
+  /**
+   * `$INSUNITS` code to read the file in when it gives no unit hint at all
+   * (e.g. the unit the user is already working in, so the numbers show up
+   * exactly as written). Default 0: coordinates are taken as millimetres.
+   */
+  assumeUnits?: number;
 }
 
 /**
@@ -667,16 +746,26 @@ function convertRecords(raws: RawEntity[], ctx: ConvertContext): Entity[] {
   return entities;
 }
 
-export function parseDxf(text: string): DxfParseResult {
+export function parseDxf(text: string, options: DxfParseOptions = {}): DxfParseResult {
   const warnings: string[] = [];
+  if (text.startsWith("AutoCAD Binary DXF")) {
+    warnings.push("binary DXF isn't supported — re-save the file as ASCII DXF");
+  }
   const allPairs = tokenize(text);
-  const insUnits = parseInsUnits(allPairs);
+  const resolved = resolveUnits(allPairs);
+  const insUnits = resolved.source === "none" ? (options.assumeUnits ?? 0) : resolved.code;
   const raws = collectRawEntities(allPairs);
   const blocks = collectBlocks(allPairs);
 
   const entities = scaleToMm(convertRecords(raws, { blocks, warnings, depth: 0, stack: new Set() }), insUnits);
 
-  return { entities, warnings: dedupe(warnings), report: buildImportReport(raws), insUnits };
+  return {
+    entities,
+    warnings: dedupe(warnings),
+    report: buildImportReport(raws),
+    insUnits,
+    unitSource: resolved.source,
+  };
 }
 
 const SUPPORTED_TYPES = new Set([
