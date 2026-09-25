@@ -115,13 +115,28 @@ that need handling regardless:
   tolerance, so it's smooth at any zoom. Follow CLAUDE.md's "new entity
   type" checklist (transforms, sketch code, DXF + SVG round-trips, the five
   if/else chains noted in v0.6.0, renderer, snapping, box select, grips).
-- **P-02 Grips show the real handles.** Spline: its control (or fit)
-  points. Polyline: its real vertices — which after P-01/P-03 are few.
-- **P-03 "Simplify polyline" + fit arcs.** For files that *already* contain
-  dense `LWPOLYLINE`s (other programs' exports): Douglas–Peucker to a
-  tolerance, then fit runs of points to arcs (stored as bulges). Offered as
-  a command on the selection and as an import option ("Simplify dense
-  polylines"), with the before/after vertex count in the import report.
+- **P-02 Grips show the real handles. DONE as a side effect of P-03.**
+  `grips.ts`'s polyline case already puts one grip per real vertex — the
+  clutter was always the point *count*, not the grip logic. Running
+  Simplify now gives that fewer-points result directly; no separate work
+  needed. Still true for later: once P-01 lands, a spline needs its own
+  control/fit-point grips (that part of P-02 is still open).
+- **P-03 "Simplify polyline" + fit arcs. DONE, commit `564adb8`.**
+  `packages/core/src/simplify.ts`: Ramer–Douglas–Peucker first, then a
+  pass that fits maximal runs of the survivors onto a common circle
+  (closed-form least-squares) and replaces them with one bulge-arc
+  segment. Two false positives found and fixed while building it (both
+  pinned by regression tests): concyclic-but-sparse polygon corners (a
+  square's 4 corners fit a circle exactly, but its straight edges don't
+  trace one — guarded by a chord/radius and total-sweep plausibility
+  check) and a run wrapping back over points an earlier run already
+  claimed (corrupted that segment's circle fit outright). Wired up as
+  **Shift+P** / command-line `simplify`, next to Join/Explode. Fixed
+  0.1mm tolerance for now, no settings UI. **Not done this pass**: the
+  import-time option ("Simplify dense polylines" during DXF import) —
+  the command exists and can be run right after import instead, but
+  isn't yet offered inline in the import report the way the plan
+  describes.
 - **P-04 DXF export writes what came in.** A spline exports as `SPLINE`,
   not a 72-vertex `LWPOLYLINE`. Round-trip test: import → export → import
   gives the same control points; vertex/entity counts match the source.
