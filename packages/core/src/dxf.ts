@@ -145,8 +145,12 @@ function headerNum(pairs: Pair[], name: string, code: number): number | null {
  *   sheet limits, alternate-unit factor) — a guess, flagged to the user.
  * - `none`: no hint at all; coordinates are read in the caller's
  *   `assumeUnits` (the numbers as written), also flagged to the user.
+ * - `conflict`: the file says millimetres, but its `$DIMALTF` of 1000
+ *   (primary → alternate dimension factor) only makes sense for a drawing
+ *   in metres — read as metres, flagged to the user. Seen in real
+ *   production files: parts that measured 0.3 mm read as mm, 12" as metres.
  */
-export type DxfUnitSource = "insunits" | "measurement" | "inferred" | "none";
+export type DxfUnitSource = "insunits" | "measurement" | "inferred" | "none" | "conflict";
 
 /**
  * Millimetres per unit for every `$INSUNITS` code the DXF spec defines
@@ -212,6 +216,12 @@ function inferUnitsFromDefaults(pairs: Pair[]): number {
 
 /** Resolves the drawing's unit as an `$INSUNITS` code plus where it came from (see {@link DxfUnitSource}). */
 function resolveUnits(pairs: Pair[]): { code: number; source: DxfUnitSource } {
+  const declared = declaredUnits(pairs);
+  if (declared.code === 4 && near(headerNum(pairs, "$DIMALTF", 40), 1000)) return { code: 6, source: "conflict" };
+  return declared;
+}
+
+function declaredUnits(pairs: Pair[]): { code: number; source: DxfUnitSource } {
   const insUnits = headerNum(pairs, "$INSUNITS", 70);
   if (insUnits && MM_PER_INSUNIT[insUnits]) return { code: insUnits, source: "insunits" };
   const measurement = headerNum(pairs, "$MEASUREMENT", 70);

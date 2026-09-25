@@ -181,7 +181,8 @@ round-trip tests assert against that bound rather than a fixed epsilon.
 - Unit detection: all 24 `$INSUNITS` codes land as mm; missing/unitless
   `$INSUNITS` falls back to `$MEASUREMENT`, then to a unanimous vote of
   acad.dwt/acadiso.dwt template defaults (`unitSource: "inferred"`), then to
-  the caller's `assumeUnits` (`"none"`); binary DXF warns.
+  the caller's `assumeUnits` (`"none"`); declared mm with `$DIMALTF` 1000
+  reads as metres (`"conflict"`); binary DXF warns.
 - LWPOLYLINE with bulges: correct per-segment `bulges` indices, `closed` from
   group code 70.
 - Legacy `POLYLINE`/`VERTEX`/`SEQEND` stitching.

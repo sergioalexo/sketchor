@@ -23,7 +23,7 @@ export function ImportReportBanner() {
 
   if (report) {
     const { parsed, skipped } = report;
-    const guessed = units !== null && (units.source === "inferred" || units.source === "none");
+    const guessed = units !== null && (units.source === "inferred" || units.source === "none" || units.source === "conflict");
     const clean = skipped.length === 0 && warnings.length === 0 && !guessed;
     const current = units ? dxfCodeToDisplayUnit(units.code) : null;
     const summary =
@@ -92,6 +92,8 @@ function unitText(source: string, code: number): string {
       return `units: ${name} (from the file's imperial/metric setting)`;
     case "inferred":
       return `units not stated in the file — guessed ${name} from its drawing defaults. Check a known dimension`;
+    case "conflict":
+      return `file says millimetres, but its dimension settings say ${name} — read as ${name}. Check a known dimension`;
     case "user":
       return `units: ${name} (set by you)`;
     default:

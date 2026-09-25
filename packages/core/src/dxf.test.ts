@@ -448,6 +448,21 @@ describe("$INSUNITS", () => {
     expect(mixed.unitSource).toBe("none");
   });
 
+  it("reads a 'millimetre' file whose $DIMALTF is 1000 as metres, and flags it", () => {
+    // Real production files: declared mm, metric template, DIMALTF 1000 — the
+    // parts are 0.3 mm as mm and a sensible 12" as metres.
+    for (const vars of [
+      [["$INSUNITS", 70, 4], ["$DIMALTF", 40, 1000]],
+      [["$MEASUREMENT", 70, 1], ["$DIMALTF", 40, 1000.0]],
+    ] as [string, number, number][][]) {
+      const r = parse(dxf(headerVars(...vars), oneMetreLine));
+      expect(r).toMatchObject({ insUnits: 6, unitSource: "conflict" });
+      expect((r.entities[0] as LineEntity).b.x).toBeCloseTo(1000, 9);
+    }
+    // A normal metric file (DIMALTF 0.03937) stays millimetres.
+    expect(parse(dxf(headerVars(["$INSUNITS", 70, 4], ["$DIMALTF", 40, 0.03937]), oneMetreLine)).unitSource).toBe("insunits");
+  });
+
   it("reads a file with no unit hint in the caller's assumed unit", () => {
     const r = parse(dxf(oneMetreLine), { assumeUnits: 1 });
     expect(r).toMatchObject({ insUnits: 1, unitSource: "none" });
