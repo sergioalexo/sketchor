@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { nfpKey, outerNfp } from "./nfp";
-import { pointInPolygon } from "./geometry";
+import { innerFit, nfpKey, outerNfp } from "./nfp";
+import { bounds, pointInPolygon, polygonContainsPolygon } from "./geometry";
 
 /**
  * NFP correctness is the one thing the whole placement search leans on —
@@ -82,6 +82,60 @@ describe("outerNfp", () => {
     expect(() => outerNfp(lShape, small)).not.toThrow();
     const loops = outerNfp(lShape, small);
     expect(loops.length).toBeGreaterThan(0);
+  });
+});
+
+describe("innerFit", () => {
+  function square(w: number, h = w): { x: number; y: number }[] {
+    return [
+      { x: 0, y: 0 },
+      { x: w, y: 0 },
+      { x: w, y: h },
+      { x: 0, y: h },
+    ];
+  }
+
+  it("a 10x10 square inside a 100x100 one gives exactly the [0,90]x[0,90] boundary", () => {
+    const [loop] = innerFit(square(100), square(10));
+    const b = bounds(loop);
+    expect(b.minX).toBeCloseTo(0, 6);
+    expect(b.minY).toBeCloseTo(0, 6);
+    expect(b.maxX).toBeCloseTo(90, 6);
+    expect(b.maxY).toBeCloseTo(90, 6);
+  });
+
+  it("a candidate translation from inside the region keeps the part fully inside the container", () => {
+    const container = square(100);
+    const part = square(10);
+    const [loop] = innerFit(container, part);
+    const candidate = { x: 40, y: 40 }; // well inside [0,90]x[0,90]
+    const placed = part.map((p) => ({ x: p.x + candidate.x, y: p.y + candidate.y }));
+    expect(pointInPolygon(candidate, loop)).toBe(true);
+    expect(polygonContainsPolygon(container, placed)).toBe(true);
+  });
+
+  it("doesn't depend on the container's original winding direction", () => {
+    const ccwContainer = square(100);
+    const cwContainer = [...ccwContainer].reverse();
+    const part = square(10);
+    const a = bounds(innerFit(ccwContainer, part)[0]);
+    const b = bounds(innerFit(cwContainer, part)[0]);
+    expect(a).toEqual(b);
+  });
+
+  it("a part bigger than the container never verifies as actually contained (guards the technique's spurious-loop case)", () => {
+    const container = square(100);
+    const tooB1g = square(200);
+    const loops = innerFit(container, tooB1g);
+    // The technique can still emit a loop here — real callers must verify
+    // with polygonContainsPolygon on the original container, not trust this
+    // result alone. Confirm that verification correctly rejects it.
+    for (const loop of loops) {
+      for (const candidate of loop) {
+        const placed = tooB1g.map((p) => ({ x: p.x + candidate.x, y: p.y + candidate.y }));
+        expect(polygonContainsPolygon(container, placed)).toBe(false);
+      }
+    }
   });
 });
 

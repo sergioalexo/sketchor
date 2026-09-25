@@ -51,6 +51,35 @@ export function outerNfp(stationary: Point[], orbiting: Point[]): Point[][] {
   return solution.map(fromIntPoints);
 }
 
+/**
+ * The inner-fit polygon (N-12): every loop `part`'s reference point must
+ * stay *inside* to keep `part` fully within `container` (a hole, after
+ * being shrunk inward by spacing) — the placement primitive part-in-hole
+ * filling needs, the mirror image of {@link outerNfp}'s "stay outside".
+ *
+ * Computed the same way real nesting tools (SVGnest among them) get it
+ * from a plain Minkowski-sum library without a dedicated erosion op: feed
+ * `MinkowskiSum` the container wound *backwards* (CW where it's normally
+ * CCW). The union it computes internally then contains both the ordinary
+ * outward dilation (an artifact, CCW) and the true inner-fit region (CW —
+ * literally "the hole" of that union in the nonzero-fill sense); keeping
+ * only the CW loops throws the artifact away. Verified by hand before
+ * relying on it: a 10×10 square inside a 100×100 one gives exactly the
+ * [0,90]×[0,90] boundary a bbox-min reference point would need.
+ *
+ * A part that doesn't fit at all can still produce a spurious CW loop (the
+ * technique has no "no solution" case to fall back on) — callers must
+ * verify a candidate point with real containment (`polygonContainsPolygon`
+ * on the *original* container, not this result) before trusting it, the
+ * same defensive pattern `trueNest.ts` already uses around NFP placement.
+ */
+export function innerFit(container: Point[], part: Point[]): Point[][] {
+  const reversedContainer = [...ccw(toIntPoints(container))].reverse();
+  const p = ccw(toIntPoints(part));
+  const solution = ClipperLib.Clipper.MinkowskiSum(negate(p), reversedContainer, true);
+  return solution.filter((loop) => !ClipperLib.Clipper.Orientation(loop)).map(fromIntPoints);
+}
+
 /** Memoizes {@link outerNfp} by the (part, rotation, mirror) pair on each side — the NFP shape doesn't depend on where the stationary part ended up on the sheet. */
 export class NfpCache {
   private readonly cache = new Map<string, Point[][]>();

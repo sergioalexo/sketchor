@@ -2,12 +2,14 @@
 
 Status: in progress (2026-09-25). Item IDs `N-xx` are stable — reference them in commits/issues.
 
-Done: **N-01–N-04** (`fa1e422`), **N-10/11/13** (`a7ef44e`), **N-20/21/22** (`155eb65`) —
-the true-shape engine is built and wired into a working 4-tab panel; `nestPlugin.ts`
-nests real selections onto real sheets today. Next per the order below: **N-12**
-(part-in-hole filling), then **N-30/31** (dedicated PDF report, DXF-per-sheet),
-**N-40–44** (G-code), and **N-14** (time-budgeted Quick/Normal/Thorough search — this
-pass is one deterministic placement, not that search layered on top of it).
+Done: **N-01–N-04** (`fa1e422`), **N-10/11/13** (`a7ef44e`), **N-20/21/22** (`155eb65`),
+**N-12** (part-in-hole filling) — the true-shape engine is built and wired into a
+working 4-tab panel with an "in-holes" toggle per part and a min-hole-size setting;
+`nestPlugin.ts` nests real selections, including filling holes with smaller parts,
+onto real sheets today. Remaining: **N-30/31** (dedicated PDF report,
+DXF-per-sheet), **N-40–44** (G-code), and **N-14** (time-budgeted
+Quick/Normal/Thorough search — every pass so far is one deterministic placement,
+not that search layered on top of it).
 
 Goal: select parts, enter quantities, nest them true-shape onto any number of sheets drawn from a library of standard sizes, with per-part rotation freedom (locked / 90° / any), part-in-part filling of large cut-outs, and output as a printed/PDF report (cutting time, utilisation, scrap), DXF, and G-code.
 

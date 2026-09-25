@@ -5,10 +5,11 @@ import { bounds, normalize, polygonsClash, rotate, translate, insideSheet } from
 import type { Point } from "./types";
 
 /**
- * N-15's invariants, minus the hole-fill case (that's N-12, not built yet):
- * no overlap and everything inside its sheet hold no matter what the search
- * placed, locked rotation is actually respected, stock quantity limits are
- * enforced, and an oversized part is reported rather than looping forever.
+ * N-15's invariants: no overlap and everything inside its sheet hold no
+ * matter what the search placed, locked rotation is actually respected,
+ * stock quantity limits are enforced, an oversized part is reported rather
+ * than looping forever, and (N-12) a part flagged allowInHoles actually
+ * lands inside another part's hole rather than being reported unplaced.
  */
 
 function rect(w: number, h: number): Point[] {
@@ -191,5 +192,97 @@ describe("nestTrueShape", () => {
     const box = bounds(reconstructed);
     expect(box.minX).toBeGreaterThanOrEqual(-1e-6);
     expect(box.minY).toBeGreaterThanOrEqual(-1e-6);
+  });
+});
+
+describe("nestTrueShape — N-12 part-in-hole", () => {
+  // A 90x90 part leaves only a 10mm-wide rim on a 100x100 sheet — too
+  // narrow for a 20x20 square in any orientation, so the small part below
+  // can only ever be placed successfully by actually landing in the hole.
+  const bigOuter = rect(90, 90);
+  const hole = [
+    { x: 30, y: 30 },
+    { x: 60, y: 30 },
+    { x: 60, y: 60 },
+    { x: 30, y: 60 },
+  ]; // 30x30, area 900
+
+  function scenario(smallAllowInHoles: boolean): { parts: TrueNestPart[]; stock: StockRow[] } {
+    return {
+      parts: [
+        { id: "big", name: "big", outer: bigOuter, holes: [hole], quantity: 1, rotation: { mode: "locked" } },
+        { id: "small", name: "small", outer: rect(20, 20), holes: [], quantity: 1, rotation: { mode: "locked" }, allowInHoles: smallAllowInHoles },
+      ],
+      stock: [{ size: { name: "sheet", width: 100, height: 100 }, qty: 1 }] as StockRow[],
+    };
+  }
+
+  it("places an allowInHoles part inside another part's hole instead of reporting it unplaced", () => {
+    const { parts, stock } = scenario(true);
+    const result = nestTrueShape(parts, stock);
+
+    expect(result.unplaced).toEqual([]);
+    expect(result.placed).toHaveLength(2);
+    expect(result.sheets).toHaveLength(1); // proof it didn't fall back to a second sheet
+
+    const small = result.placed.find((p) => p.partId === "small")!;
+    expect(small).toBeDefined();
+    expect(small.sheet).toBe(0);
+    expect(small.translation.x).toBeGreaterThanOrEqual(30 - 1e-6);
+    expect(small.translation.x + 20).toBeLessThanOrEqual(60 + 1e-6);
+    expect(small.translation.y).toBeGreaterThanOrEqual(30 - 1e-6);
+    expect(small.translation.y + 20).toBeLessThanOrEqual(60 + 1e-6);
+  });
+
+  it("never places a part inside a hole unless allowInHoles is set", () => {
+    const { parts, stock } = scenario(false);
+    const result = nestTrueShape(parts, stock);
+    const smallUnplaced = result.unplaced.find((u) => u.partId === "small")?.count ?? 0;
+    expect(smallUnplaced).toBe(1);
+  });
+
+  it("minHoleArea excludes a hole below the threshold from being offered", () => {
+    const { parts, stock } = scenario(true);
+    const result = nestTrueShape(parts, stock, { minHoleArea: 1000 }); // hole area is 900
+    const smallUnplaced = result.unplaced.find((u) => u.partId === "small")?.count ?? 0;
+    expect(smallUnplaced).toBe(1);
+  });
+
+  it("places several allowInHoles instances sharing one hole without overlapping each other", () => {
+    const bigger = [
+      { x: 20, y: 20 },
+      { x: 70, y: 20 },
+      { x: 70, y: 70 },
+      { x: 20, y: 70 },
+    ]; // 50x50 hole
+    const parts: TrueNestPart[] = [
+      { id: "big", name: "big", outer: bigOuter, holes: [bigger], quantity: 1, rotation: { mode: "locked" } },
+      { id: "small", name: "small", outer: rect(20, 20), holes: [], quantity: 4, rotation: { mode: "locked" }, allowInHoles: true },
+    ];
+    const stock: StockRow[] = [{ size: { name: "sheet", width: 100, height: 100 }, qty: 1 }];
+    const result = nestTrueShape(parts, stock, { spacing: 1 });
+
+    const smalls = result.placed.filter((p) => p.partId === "small");
+    expect(smalls).toHaveLength(4); // all 4 fit: a 2x2 grid of 20x20 + 1mm spacing comfortably fits a 50x50 hole
+    for (let i = 0; i < smalls.length; i++) {
+      for (let j = i + 1; j < smalls.length; j++) {
+        const a = translate(rect(20, 20), smalls[i].translation.x, smalls[i].translation.y);
+        const b = translate(rect(20, 20), smalls[j].translation.x, smalls[j].translation.y);
+        expect(polygonsClash(a, b, 0)).toBe(false);
+      }
+    }
+  });
+
+  it("a hole-filling part's corners stay within the hole, never spilling into the surrounding part's solid material", () => {
+    const { parts, stock } = scenario(true);
+    const result = nestTrueShape(parts, stock);
+    const small = result.placed.find((p) => p.partId === "small")!;
+    const smallPolygon = translate(rect(20, 20), small.translation.x, small.translation.y);
+    for (const p of smallPolygon) {
+      expect(p.x).toBeGreaterThanOrEqual(30 - 1e-6);
+      expect(p.x).toBeLessThanOrEqual(60 + 1e-6);
+      expect(p.y).toBeGreaterThanOrEqual(30 - 1e-6);
+      expect(p.y).toBeLessThanOrEqual(60 + 1e-6);
+    }
   });
 });

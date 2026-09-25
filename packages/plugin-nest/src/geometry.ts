@@ -32,6 +32,15 @@ export function area(poly: Point[]): number {
   return Math.abs(a) / 2;
 }
 
+/** True if `poly` winds counter-clockwise (positive signed shoelace area). Nothing upstream guarantees a consistent winding on entity-derived polygons, so this is how a caller that needs one (e.g. before a signed offset) finds out. */
+export function isCCW(poly: Point[]): boolean {
+  let a = 0;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    a += (poly[j].x + poly[i].x) * (poly[j].y - poly[i].y);
+  }
+  return a < 0;
+}
+
 export function translate(poly: Point[], dx: number, dy: number): Point[] {
   return poly.map((p) => ({ x: p.x + dx, y: p.y + dy }));
 }
@@ -61,6 +70,24 @@ export function pointInPolygon(p: Point, poly: Point[]): boolean {
     }
   }
   return inside;
+}
+
+/**
+ * `pointInPolygon`, but a point exactly on (or within `eps` of) the boundary
+ * also counts. Ray-casting alone is an interior-only test — a candidate
+ * placement point sitting exactly on an allowed region's edge (touching a
+ * hole's wall, or a sheet-fit boundary) is the *normal*, even desirable
+ * case in tight nesting, not a rounding error to reject. Use this wherever
+ * "is this point somewhere I'm allowed to be" is the question; keep plain
+ * `pointInPolygon` where touching a *forbidden* region should still count
+ * as outside it (matching `polygonsClash`'s own "touching isn't a clash").
+ */
+export function pointInOrOnPolygon(p: Point, poly: Point[], eps = 1e-6): boolean {
+  if (pointInPolygon(p, poly)) return true;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    if (pointToSegment(p, poly[j], poly[i]) <= eps) return true;
+  }
+  return false;
 }
 
 function onSeg(a: Point, b: Point, p: Point): boolean {
@@ -100,6 +127,31 @@ export function properIntersect(a: Point, b: Point, c: Point, d: Point): boolean
   return o1 !== 0 && o2 !== 0 && o3 !== 0 && o4 !== 0 && o1 !== o2 && o3 !== o4;
 }
 
+/**
+ * True when every vertex of `inner` lies inside (or exactly on) `outer` and
+ * no edge of either properly crosses the other — full containment, not
+ * just "some point is inside" (which a centroid-only test would wrongly
+ * pass for a partial overlap of a concave shape). Boundary-inclusive: a
+ * shape whose edge exactly touches its container's edge (a part placed
+ * flush against a hole's wall) is still fully contained, not rejected by
+ * ray-casting's usual interior-only reading of "inside".
+ */
+export function polygonContainsPolygon(outer: Point[], inner: Point[]): boolean {
+  for (const p of inner) {
+    if (!pointInOrOnPolygon(p, outer)) return false;
+  }
+  for (let i = 0; i < outer.length; i++) {
+    const a1 = outer[i];
+    const a2 = outer[(i + 1) % outer.length];
+    for (let j = 0; j < inner.length; j++) {
+      const b1 = inner[j];
+      const b2 = inner[(j + 1) % inner.length];
+      if (properIntersect(a1, a2, b1, b2)) return false;
+    }
+  }
+  return true;
+}
+
 /** Vertex average — inside any convex polygon and most sane laser parts. */
 export function centroid(poly: Point[]): Point {
   let x = 0;
@@ -122,7 +174,7 @@ export function segmentDistance(a: Point, b: Point, c: Point, d: Point): number 
   );
 }
 
-function pointToSegment(p: Point, a: Point, b: Point): number {
+export function pointToSegment(p: Point, a: Point, b: Point): number {
   const dx = b.x - a.x;
   const dy = b.y - a.y;
   const len2 = dx * dx + dy * dy;

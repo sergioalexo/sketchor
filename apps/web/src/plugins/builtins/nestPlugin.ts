@@ -43,6 +43,8 @@ export interface PartSettings {
   /** "any" only. */
   stepDeg?: number;
   mirror: boolean;
+  /** N-12: try this part inside another part's hole before the open sheet area. */
+  allowInHoles: boolean;
 }
 
 /** A part in the working set: identified by its stable `sourceIds` key, not `ExtractedPart.id` (synthetic, not stable across extraction calls). */
@@ -61,6 +63,8 @@ export interface PersistedState {
   /** Added into spacing at nest time. */
   kerf: number;
   gravity: Gravity;
+  /** N-12: a hole smaller than this (mm², after shrinking inward by spacing) is never offered to an allowInHoles part. */
+  minHoleArea: number;
 }
 
 const STORAGE_KEY = "state";
@@ -121,6 +125,7 @@ export function asPartSettings(v: unknown): PartSettings {
     rotationMode,
     stepDeg: o.stepDeg === undefined ? undefined : Math.max(1, num(o.stepDeg, 15)),
     mirror: !!o.mirror,
+    allowInHoles: !!o.allowInHoles,
   };
 }
 
@@ -152,6 +157,7 @@ export function asState(v: unknown): PersistedState {
     edgeMargin: Math.max(0, num(o.edgeMargin, 0)),
     kerf: Math.max(0, num(o.kerf, 0)),
     gravity,
+    minHoleArea: Math.max(0, num(o.minHoleArea, 0)),
   };
 }
 
@@ -283,7 +289,7 @@ const plugin: PluginModule = {
           const key = stableKey(part.sourceIds);
           const existing = state.workingParts.find((w) => w.key === key);
           if (existing) existing.sourceIds = part.sourceIds;
-          else state.workingParts.push({ key, sourceIds: part.sourceIds, settings: { quantity: 1, rotationMode: "quarter", mirror: false } });
+          else state.workingParts.push({ key, sourceIds: part.sourceIds, settings: { quantity: 1, rotationMode: "quarter", mirror: false, allowInHoles: false } });
         }
         await persist();
         await pushWorkingParts(entities);
@@ -360,6 +366,7 @@ const plugin: PluginModule = {
             holes: p.holes,
             quantity: p.settings.quantity,
             rotation: { mode: p.settings.rotationMode, stepDeg: p.settings.stepDeg, mirror: p.settings.mirror },
+            allowInHoles: p.settings.allowInHoles,
           }));
         if (trueParts.length === 0) {
           void sketchor.ui.postMessage({ type: "error", message: "Every part has quantity 0." });
@@ -371,6 +378,7 @@ const plugin: PluginModule = {
             spacing: state.spacing + state.kerf,
             edgeMargin: state.edgeMargin,
             gravity: state.gravity,
+            minHoleArea: state.minHoleArea,
           });
 
           const geometryByKey = new Map(withSettings.map((p) => [p.key, p]));
@@ -479,7 +487,7 @@ export const PANEL_HTML = String.raw`<!doctype html>
       .part-info { min-width: 0; }
       .part-name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .part-dim { opacity: 0.55; font-size: 11px; }
-      .part-controls { display: grid; grid-template-columns: 44px 1fr auto auto; gap: 4px; align-items: center; }
+      .part-controls { display: grid; grid-template-columns: 44px 1fr auto auto auto; gap: 4px; align-items: center; }
       .part-controls input, .part-controls select { margin-top: 0; padding: 3px 4px; font-size: 11px; }
       .part-controls .icon { background: none; border: none; color: #9aa0a6; cursor: pointer; padding: 2px 4px; font-size: 13px; }
       .step-row { grid-column: 1 / -1; margin-top: 3px; }
@@ -527,6 +535,7 @@ export const PANEL_HTML = String.raw`<!doctype html>
         <label>Spacing (<span class="u"></span>)<input id="set-spacing" type="number" min="0" step="any" /></label>
         <label>Edge margin (<span class="u"></span>)<input id="set-margin" type="number" min="0" step="any" /></label>
         <label>Kerf (<span class="u"></span>)<input id="set-kerf" type="number" min="0" step="any" /></label>
+        <label>Min hole size (<span class="u"></span>)<input id="set-minhole" type="number" min="0" step="any" title="Holes smaller than this aren't offered to in-hole parts" /></label>
         <label>Gravity
           <select id="set-gravity">
             <option value="bottom-left">Bottom-left</option>
@@ -560,7 +569,7 @@ export const PANEL_HTML = String.raw`<!doctype html>
       const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
       let unit = { unit: "mm", perMm: 1, label: "mm" };
-      let state = { stock: [], workingParts: [], spacing: 0, edgeMargin: 0, kerf: 0, gravity: "bottom-left" };
+      let state = { stock: [], workingParts: [], spacing: 0, edgeMargin: 0, kerf: 0, gravity: "bottom-left", minHoleArea: 0 };
       let parts = []; // working-set parts, as last pushed by the plugin: {key,name,w,h,area,outer,settings}
       let saveTimer = 0;
 
@@ -608,6 +617,7 @@ export const PANEL_HTML = String.raw`<!doctype html>
               "<option value='any'" + (s.rotationMode === "any" ? " selected" : "") + ">Any</option>" +
               "</select>" +
               "<label style='display:flex;align-items:center;gap:2px;margin:0' title='Mirror'><input class='mirror' type='checkbox'" + (s.mirror ? " checked" : "") + "> M</label>" +
+              "<label style='display:flex;align-items:center;gap:2px;margin:0' title='Try inside another placed part&#39;s hole first'><input class='in-holes' type='checkbox'" + (s.allowInHoles ? " checked" : "") + "> H</label>" +
               "<button class='icon remove' title='Remove'>&#10005;</button>" +
               (s.rotationMode === "any"
                 ? "<div class='step-row'><input class='step' type='number' min='1' step='1' value='" + (s.stepDeg || 15) + "' title='Step degrees'> °</div>"
@@ -622,6 +632,7 @@ export const PANEL_HTML = String.raw`<!doctype html>
           row.querySelector(".qty").addEventListener("input", (e) => { entry.settings.quantity = Math.max(0, Math.floor(Number(e.target.value) || 0)); sendSettings(); });
           row.querySelector(".rot").addEventListener("change", (e) => { entry.settings.rotationMode = e.target.value; sendSettings(); renderParts(); });
           row.querySelector(".mirror").addEventListener("change", (e) => { entry.settings.mirror = e.target.checked; sendSettings(); });
+          row.querySelector(".in-holes").addEventListener("change", (e) => { entry.settings.allowInHoles = e.target.checked; sendSettings(); });
           const stepInput = row.querySelector(".step");
           if (stepInput) stepInput.addEventListener("input", (e) => { entry.settings.stepDeg = Math.max(1, Number(e.target.value) || 15); sendSettings(); });
           row.querySelector(".remove").addEventListener("click", () => post({ type: "remove-part", key }));
@@ -670,11 +681,15 @@ export const PANEL_HTML = String.raw`<!doctype html>
         $("set-spacing").value = toU(state.spacing);
         $("set-margin").value = toU(state.edgeMargin);
         $("set-kerf").value = toU(state.kerf);
+        // Stored as an area (mm²) but shown/edited as a side length — much
+        // easier to reason about ("holes under 10mm across") than mm².
+        $("set-minhole").value = toU(Math.sqrt(state.minHoleArea || 0));
         $("set-gravity").value = state.gravity;
       }
       $("set-spacing").addEventListener("input", () => { state.spacing = fromU($("set-spacing").value); persist(); });
       $("set-margin").addEventListener("input", () => { state.edgeMargin = fromU($("set-margin").value); persist(); });
       $("set-kerf").addEventListener("input", () => { state.kerf = fromU($("set-kerf").value); persist(); });
+      $("set-minhole").addEventListener("input", () => { const side = fromU($("set-minhole").value); state.minHoleArea = Math.max(0, side * side); persist(); });
       $("set-gravity").addEventListener("change", () => { state.gravity = $("set-gravity").value; persist(); });
 
       // ---- results tab ----

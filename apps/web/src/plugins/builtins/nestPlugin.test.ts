@@ -55,11 +55,14 @@ describe("asState", () => {
   it("round-trips a valid stored state", () => {
     const valid: PersistedState = {
       stock: [{ size: { name: "Custom", width: 1000, height: 2000 }, material: "steel", thickness: 3, qty: 5, cost: 40 }],
-      workingParts: [{ key: "a,b", sourceIds: ["a", "b"], settings: { quantity: 2, rotationMode: "any", stepDeg: 5, mirror: true } }],
+      workingParts: [
+        { key: "a,b", sourceIds: ["a", "b"], settings: { quantity: 2, rotationMode: "any", stepDeg: 5, mirror: true, allowInHoles: true } },
+      ],
       spacing: 2,
       edgeMargin: 5,
       kerf: 0.2,
       gravity: "top-right",
+      minHoleArea: 25,
     };
     expect(asState(valid)).toEqual(valid);
   });
@@ -96,6 +99,11 @@ describe("asPartSettings", () => {
   it("defaults quantity to 1 when absent, never negative", () => {
     expect(asPartSettings({}).quantity).toBe(1);
     expect(asPartSettings({ quantity: -5 }).quantity).toBe(0);
+  });
+
+  it("defaults allowInHoles to false", () => {
+    expect(asPartSettings({}).allowInHoles).toBe(false);
+    expect(asPartSettings({ allowInHoles: true }).allowInHoles).toBe(true);
   });
 });
 
@@ -155,18 +163,21 @@ describe("the sheet metal nest panel", () => {
     }
   });
 
-  it("offers locked/quarter/any rotation and a mirror toggle, not a placeholder", () => {
+  it("offers locked/quarter/any rotation, a mirror toggle and an in-holes toggle, not placeholders", () => {
     expect(PANEL_HTML).toContain("value='locked'");
     expect(PANEL_HTML).toContain("value='quarter'");
     expect(PANEL_HTML).toContain("value='any'");
     expect(PANEL_HTML).toContain("class='mirror'");
+    // N-12: wired to a real settings field and message, not a dead checkbox.
+    expect(PANEL_HTML).toContain("class='in-holes'");
+    expect(PANEL_HTML).toContain("entry.settings.allowInHoles = e.target.checked");
+    expect(PANEL_HTML).toContain('id="set-minhole"');
   });
 
   it("does not ship controls for features this pass doesn't back", () => {
-    // N-12 (in-holes), N-14 (search mode) and N-30/40 (PDF/G-code buttons)
-    // are explicitly out of scope for this pass — no inert UI for them.
+    // N-14 (search mode) and N-30/40 (PDF/G-code buttons) are explicitly
+    // out of scope for this pass — no inert UI for them.
     expect(PANEL_HTML).not.toMatch(/search.?mode/i);
-    expect(PANEL_HTML).not.toContain("in-holes");
     expect(PANEL_HTML).not.toContain("export-pdf");
     expect(PANEL_HTML).not.toContain("export-gcode");
   });

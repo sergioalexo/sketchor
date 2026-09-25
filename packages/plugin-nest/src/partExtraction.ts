@@ -1,5 +1,5 @@
 import { joinEntities, type Entity } from "@sketchor/core";
-import { area as polygonArea, pointInPolygon, properIntersect } from "./geometry";
+import { area as polygonArea, polygonContainsPolygon } from "./geometry";
 import { DEFAULT_CHORD_TOLERANCE, flattenCircle, flattenClosedPolyline } from "./flatten";
 import type { Point } from "./types";
 
@@ -107,28 +107,11 @@ function findParents(regions: Region[]): (number | null)[] {
     let bestArea = Infinity;
     regions.forEach((candidate, j) => {
       if (j === i || candidate.area <= region.area) return; // a container is strictly bigger
-      if (candidate.area < bestArea && polygonContains(candidate.points, region.points)) {
+      if (candidate.area < bestArea && polygonContainsPolygon(candidate.points, region.points)) {
         best = j;
         bestArea = candidate.area;
       }
     });
     return best;
   });
-}
-
-/** True when every vertex of `inner` lies inside `outer` and no edge of either crosses the other. */
-function polygonContains(outer: Point[], inner: Point[]): boolean {
-  for (const p of inner) {
-    if (!pointInPolygon(p, outer)) return false;
-  }
-  for (let i = 0; i < outer.length; i++) {
-    const a1 = outer[i];
-    const a2 = outer[(i + 1) % outer.length];
-    for (let j = 0; j < inner.length; j++) {
-      const b1 = inner[j];
-      const b2 = inner[(j + 1) % inner.length];
-      if (properIntersect(a1, a2, b1, b2)) return false;
-    }
-  }
-  return true;
 }

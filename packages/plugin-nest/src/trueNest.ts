@@ -1,5 +1,6 @@
-import { area, bounds, insideSheet, normalize, pointInPolygon, polygonsClash, rotate, translate, type Bounds } from "./geometry";
-import { NfpCache, nfpKey } from "./nfp";
+import { area, bounds, insideSheet, isCCW, normalize, pointInOrOnPolygon, pointInPolygon, polygonContainsPolygon, polygonsClash, rotate, translate, type Bounds } from "./geometry";
+import { innerFit, NfpCache, nfpKey } from "./nfp";
+import { offsetPolygon } from "./polygonOps";
 import { rotationCandidates, type PartRotationSpec } from "./rotation";
 import { shrinkLastSheet, type StockRow } from "./stock";
 import type { Point } from "./types";
@@ -17,10 +18,12 @@ export interface TrueNestPart {
   name: string;
   /** Closed outline, world-scale mm. */
   outer: Point[];
-  /** Carried through untouched — unused for placement until N-12 (part-in-hole filling). */
+  /** This part's own holes — become candidate free regions for other parts once this part is placed (N-12), if it has any. */
   holes: Point[][];
   quantity: number;
   rotation: PartRotationSpec;
+  /** N-12: try this part inside an already-placed part's hole before the open sheet area. */
+  allowInHoles?: boolean;
 }
 
 /** Which sheet corner placement gravitates toward. Default "bottom-left". */
@@ -32,6 +35,8 @@ export interface TrueNestOptions {
   /** Gap kept clear from every sheet edge, mm. Default 0. */
   edgeMargin?: number;
   gravity?: Gravity;
+  /** N-12: a hole smaller than this (after shrinking inward by `spacing`) is never offered to `allowInHoles` parts. Default 0 (no filter). */
+  minHoleArea?: number;
 }
 
 export interface TrueNestPlacement {
@@ -66,6 +71,20 @@ interface SheetItem {
   local: Point[];
   translation: Point;
   placedPolygon: Point[];
+}
+
+/** A hole, already in sheet coordinates and shrunk inward by spacing — a free region `allowInHoles` parts can be placed within (N-12). */
+interface HoleRegion {
+  /** Which sheet this hole (and therefore anything placed inside it) is on. */
+  sheet: number;
+  polygon: Point[];
+  area: number;
+}
+
+/** Rotates/mirrors/translates a polygon the same rigid way {@link placementTransform}'s result carries original geometry — used to bring a part's *hole* (still in the part's own original coordinate frame) into sheet space alongside its outer. */
+function transformPolygon(poly: Point[], transform: { rotationDeg: number; mirrored: boolean; translation: Point }): Point[] {
+  const mirroredPoly = transform.mirrored ? poly.map((p) => ({ x: -p.x, y: p.y })) : poly;
+  return translate(rotate(mirroredPoly, transform.rotationDeg), transform.translation.x, transform.translation.y);
 }
 
 /** A part's outline rotated (and mirrored) then bbox-normalized to the origin — the frame NFPs are cached and placed in. */
@@ -116,9 +135,14 @@ export function nestTrueShape(parts: TrueNestPart[], stock: StockRow[], opts: Tr
   }
   instances.sort((a, b) => b.area - a.area);
 
+  const minHoleArea = opts.minHoleArea ?? 0;
+
   const stockUsed: number[] = stock.map(() => 0);
   const sheets: TrueNestSheet[] = [];
   const sheetItems: SheetItem[][] = [];
+  // Parallel arrays — holeItems[i] is what's been placed inside holeRegions[i] so far.
+  const holeRegions: HoleRegion[] = [];
+  const holeItems: SheetItem[][] = [];
   const placed: TrueNestPlacement[] = [];
   const unplacedCounts = new Map<string, number>();
   const nfpCache = new NfpCache();
@@ -186,19 +210,106 @@ export function nestTrueShape(parts: TrueNestPart[], stock: StockRow[], opts: Tr
     placed.push({ partId: part.id, sheet: sheetIdx, rotationDeg: result.deg, mirrored: result.mirrored, translation: result.translation });
   }
 
+  /** After a part with holes lands on a sheet (N-12): each hole, brought into sheet space and shrunk inward by spacing, becomes a free region `allowInHoles` parts can be tried in. Only for ordinary sheet placements — a part placed inside a hole doesn't itself offer its own holes as further nested regions. */
+  function registerHoles(sheetIdx: number, part: TrueNestPart, result: { deg: number; mirrored: boolean; translation: Point; local: Point[] }): void {
+    if (part.holes.length === 0) return;
+    const transform = placementTransform(part.outer, { rotationDeg: result.deg, mirrored: result.mirrored, translation: result.translation });
+    for (const hole of part.holes) {
+      const sheetHole = transformPolygon(hole, transform);
+      // offsetPolygon's inward/outward sense follows the input's own winding
+      // — force CCW first so a negative delta reliably shrinks, regardless
+      // of which way the original entity happened to be drawn.
+      const ccwHole = isCCW(sheetHole) ? sheetHole : [...sheetHole].reverse();
+      const shrunk = spacing > 0 ? offsetPolygon(ccwHole, -spacing) : [ccwHole];
+      for (const loop of shrunk) {
+        if (loop.length < 3) continue;
+        const loopArea = area(loop);
+        if (loopArea < minHoleArea) continue;
+        holeRegions.push({ sheet: sheetIdx, polygon: loop, area: loopArea });
+        holeItems.push([]);
+      }
+    }
+  }
+
+  /** Tries every rotation candidate inside one available hole; returns the first accepted placement, or null. Mirrors `tryPlaceOnSheet`, but the boundary is an arbitrary polygon (`innerFit`) instead of a rectangle. */
+  function tryPlaceInHole(holeIdx: number, part: TrueNestPart): { deg: number; mirrored: boolean; translation: Point; local: Point[] } | null {
+    const hole = holeRegions[holeIdx];
+    const placedHere = holeItems[holeIdx];
+
+    for (const { deg, mirrored } of rotationCandidates(part.rotation, part.outer)) {
+      const local = localFrame(part.outer, deg, mirrored);
+      const fitLoops = innerFit(hole.polygon, local);
+      if (fitLoops.length === 0) continue;
+
+      const orbitingKey = nfpKey(part.id, deg, mirrored);
+      const candidates: Point[] = fitLoops.flat();
+      const forbidden: Point[][] = [];
+      for (const other of placedHere) {
+        for (const loop of nfpCache.get(other.key, other.local, orbitingKey, local)) {
+          const translated = loop.map((p) => ({ x: p.x + other.translation.x, y: p.y + other.translation.y }));
+          forbidden.push(translated);
+          candidates.push(...translated);
+        }
+      }
+
+      const valid = candidates.filter((p) => {
+        if (!fitLoops.some((loop) => loop.length >= 3 && pointInOrOnPolygon(p, loop))) return false;
+        return !forbidden.some((loop) => loop.length >= 3 && pointInPolygon(p, loop));
+      });
+      valid.sort(compareCandidates);
+
+      for (const candidate of valid) {
+        const placedPolygon = translate(local, candidate.x, candidate.y);
+        // Safety net — doubly load-bearing here: innerFit's reversed-winding
+        // technique can emit a spurious loop when the part doesn't actually
+        // fit (no clean "no solution" case), so real containment against
+        // the hole's own boundary is the only thing that can be trusted.
+        if (!polygonContainsPolygon(hole.polygon, placedPolygon)) continue;
+        if (placedHere.some((other) => polygonsClash(placedPolygon, other.placedPolygon, spacing))) continue;
+        return { deg, mirrored, translation: candidate, local };
+      }
+    }
+    return null;
+  }
+
+  function commitInHole(holeIdx: number, part: TrueNestPart, result: { deg: number; mirrored: boolean; translation: Point; local: Point[] }): void {
+    holeItems[holeIdx].push({
+      key: nfpKey(part.id, result.deg, result.mirrored),
+      local: result.local,
+      translation: result.translation,
+      placedPolygon: translate(result.local, result.translation.x, result.translation.y),
+    });
+    placed.push({ partId: part.id, sheet: holeRegions[holeIdx].sheet, rotationDeg: result.deg, mirrored: result.mirrored, translation: result.translation });
+  }
+
   for (const instance of instances) {
     const part = instance.part;
-    let placedOnExisting = false;
-    for (let sheetIdx = 0; sheetIdx < sheets.length; sheetIdx++) {
+    let done = false;
+
+    // N-12: an allowInHoles part tries every hole already opened up by an
+    // earlier (bigger) placement before touching open sheet area at all.
+    if (part.allowInHoles) {
+      for (let holeIdx = 0; holeIdx < holeRegions.length && !done; holeIdx++) {
+        const result = tryPlaceInHole(holeIdx, part);
+        if (result) {
+          commitInHole(holeIdx, part, result);
+          placedArea += instance.area;
+          done = true;
+        }
+      }
+      if (done) continue;
+    }
+
+    for (let sheetIdx = 0; sheetIdx < sheets.length && !done; sheetIdx++) {
       const result = tryPlaceOnSheet(sheetIdx, part);
       if (result) {
         commitPlacement(sheetIdx, part, result);
+        registerHoles(sheetIdx, part, result);
         placedArea += instance.area;
-        placedOnExisting = true;
-        break;
+        done = true;
       }
     }
-    if (placedOnExisting) continue;
+    if (done) continue;
 
     // Try opening a fresh sheet from stock — not just the first row with
     // room, but every row in order, since a part might not fit the first
@@ -213,6 +324,7 @@ export function nestTrueShape(parts: TrueNestPart[], stock: StockRow[], opts: Tr
       const result = tryPlaceOnSheet(sheetIdx, part);
       if (result) {
         commitPlacement(sheetIdx, part, result);
+        registerHoles(sheetIdx, part, result);
         placedArea += instance.area;
         stockUsed[i] += 1;
         opened = true;
@@ -226,7 +338,11 @@ export function nestTrueShape(parts: TrueNestPart[], stock: StockRow[], opts: Tr
 
   // Post-pass (N-13): the last sheet often only needed a fraction of the
   // stock size it was opened from — swap it for the smallest size that
-  // still fits everything actually placed on it.
+  // still fits everything actually placed on it. Only sheetItems needs
+  // checking here, not holeItems too — anything placed inside a hole is by
+  // construction nested inside the footprint of the part that hole belongs
+  // to, which is already one of these sheetItems, so it can never extend
+  // the sheet's used bounds beyond what sheetItems alone already covers.
   if (sheets.length > 0) {
     const lastIdx = sheets.length - 1;
     const lastItems = sheetItems[lastIdx];
