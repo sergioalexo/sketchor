@@ -32,10 +32,18 @@ declare module "clipper-lib" {
     Execute(solution: Paths, delta: number): void;
   }
 
+  export const Clipper: {
+    /** `true` for a positively (CCW, in a Y-up frame) wound polygon — what `MinkowskiSum` expects. */
+    Orientation(poly: Path): boolean;
+    /** `pattern` is always one closed path; `path_or_paths` may be a single path or many. */
+    MinkowskiSum(pattern: Path, path_or_paths: Path | Paths, pathIsClosed: boolean): Paths;
+  };
+
   const ClipperLibDefault: {
     ClipperOffset: typeof ClipperOffset;
     JoinType: typeof JoinType;
     EndType: typeof EndType;
+    Clipper: typeof Clipper;
   };
   export default ClipperLibDefault;
 }

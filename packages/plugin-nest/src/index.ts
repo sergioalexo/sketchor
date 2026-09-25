@@ -6,3 +6,7 @@ export * from "./flatten";
 export * from "./materialize";
 export * from "./partExtraction";
 export * from "./polygonOps";
+export * from "./nfp";
+export * from "./rotation";
+export * from "./stock";
+export * from "./trueNest";
