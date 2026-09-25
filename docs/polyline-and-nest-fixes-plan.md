@@ -1,6 +1,8 @@
 # Polylines + Sheet Metal Nest fixes — plan
 
-Status: planned (2026-09-25). Item IDs are stable — reference them in commits.
+Status: Phase 1 shipped (2026-09-25, commit `1641b69`). Item IDs are stable — reference them in commits.
+Decisions from the user: nest result opens in a **new tab** (NF-07); adding a
+whole file makes **one part per file** (NF-06).
 `P-xx` = polyline fidelity, `NF-xx` = nesting fixes. Follows on from
 `sheet-metal-nesting-plan.md` (N-xx) — this is a bug-and-usability pass on
 top of it, not a new engine.
@@ -68,26 +70,31 @@ that need handling regardless:
 
 ## Plan
 
-### Phase 1 — Nest bugs (ship first, small)
+### Phase 1 — Nest bugs (ship first, small) — **DONE, commit `1641b69`**
 
-- **NF-01 Stop the panel wiping parts.** The panel never sends
-  `workingParts`; the plugin's `persist` handler merges only the
-  settings/stock fields into its own state. Test: add a part, persist a
-  settings change, the part survives. *(Confirmed root cause of report 3.)*
-- **NF-02 Adding is always additive.** A new selection that shares entities
-  with an existing part **updates** that part instead of creating a
-  near-duplicate; everything else is appended. Panel shows "Added 2 ·
-  updated 1". Parts already in the list get a subtle highlight on the
-  canvas so it's obvious what's in the job.
-- **NF-03 Open-contour help.** When a selection has open chains, say how
-  many and mark the open ends on the canvas (same violet markers as the
-  crossings detector). Add a **Join tolerance** setting (default = current
-  `JOIN_TOL`, allow up to e.g. 0.5 mm) so real-world DXFs with small gaps
-  close.
-- **NF-04 Never fail silently.** Every "nest" exit path posts a specific,
-  human reason: which part is bigger than every sheet, which part has no
-  closed outline, instance cap hit, search cancelled/timed out. Per-part
-  problems show on that part's row, not just in the summary.
+- **NF-01 Stop the panel wiping parts. DONE.** Root cause confirmed: the
+  panel's `persist` message carried its own stale copy of `workingParts`
+  (set once at init, before any part existed, never updated after). The
+  plugin's `persist` handler now keeps its own live `workingParts` and only
+  takes stock/spacing/settings from the panel's message.
+- **NF-02 Adding is always additive. DONE.** Was already non-destructive in
+  effect (matches by `stableKey`, updates in place or appends); now also
+  reports "N added, M refreshed — T part(s) in the job" so it's visible.
+  *(Not done this pass: a canvas highlight for parts already in the job —
+  small follow-up, not a bug.)*
+- **NF-03 Open-contour help.** Not started — still needed for real DXFs
+  with small gaps. When a selection has open chains, say how many and mark
+  the open ends on the canvas (same violet markers as the crossings
+  detector). Add a **Join tolerance** setting (default = current
+  `JOIN_TOL`, allow up to e.g. 0.5 mm).
+- **NF-04 Never fail silently. DONE (first pass).** Nest now: names parts
+  that no longer resolve on the drawing and prunes them instead of
+  blocking Nest forever; flags a part bigger than every stock sheet
+  (accounting rotation mode and edge margin) before running the search
+  instead of a silent "0 placed"; prefixes a thrown engine error with
+  "Nesting failed:" instead of showing it bare. Not yet done: per-part
+  problem markers on the part's own row (still only a summary message),
+  and the instance-cap / search-timeout-specific wording.
 
 ### Phase 2 — Real polylines (P-xx)
 
