@@ -1,5 +1,7 @@
 /// <reference path="./clipper-lib.d.ts" />
 import ClipperLib, { type IntPoint } from "clipper-lib";
+import { area, isCCW } from "./geometry";
+import { offsetPolygon } from "./polygonOps";
 import type { Point } from "./types";
 
 /**
@@ -80,7 +82,29 @@ export function innerFit(container: Point[], part: Point[]): Point[][] {
   return solution.filter((loop) => !ClipperLib.Clipper.Orientation(loop)).map(fromIntPoints);
 }
 
-/** Memoizes {@link outerNfp} by the (part, rotation, mirror) pair on each side — the NFP shape doesn't depend on where the stationary part ended up on the sheet. */
+/**
+ * Grows `poly` outward by `spacing` mm before it stands in as the stationary
+ * side of an NFP — so a candidate on the resulting boundary keeps at least
+ * that much clearance from the real, un-grown polygon, instead of touching
+ * it exactly. Without this, every NFP-vertex candidate lands at zero
+ * clearance and gets rejected the moment `spacing > 0` (the ordinary case —
+ * every real job has *some* kerf/handling gap), which silently collapsed
+ * placement to just the sheet's own 4 corner candidates: a severe, easy-to-
+ * miss density and performance bug (found via an N-14 perf test — 2500
+ * identical rectangles with `spacing: 2` opened 625 near-empty sheets, one
+ * per 4 corners, instead of packing densely onto a handful). Falls back to
+ * the original polygon if the offset degenerates — never blocks nesting
+ * over a spacing edge case.
+ */
+function grownForSpacing(poly: Point[], spacing: number): Point[] {
+  if (spacing <= 0) return poly;
+  const ccwPoly = isCCW(poly) ? poly : [...poly].reverse();
+  const grown = offsetPolygon(ccwPoly, spacing);
+  if (grown.length === 0) return poly;
+  return grown.reduce((a, b) => (area(b) > area(a) ? b : a));
+}
+
+/** Memoizes {@link outerNfp} by the (part, rotation, mirror) pair on each side plus `spacing` — the NFP shape doesn't depend on where the stationary part ended up on the sheet, but does depend on the required clearance. */
 export class NfpCache {
   private readonly cache = new Map<string, Point[][]>();
 
@@ -89,11 +113,12 @@ export class NfpCache {
     stationary: Point[],
     orbitingKey: string,
     orbiting: Point[],
+    spacing = 0,
   ): Point[][] {
-    const key = `${stationaryKey}|${orbitingKey}`;
+    const key = `${stationaryKey}|${orbitingKey}|${spacing}`;
     let nfp = this.cache.get(key);
     if (!nfp) {
-      nfp = outerNfp(stationary, orbiting);
+      nfp = outerNfp(grownForSpacing(stationary, spacing), orbiting);
       this.cache.set(key, nfp);
     }
     return nfp;

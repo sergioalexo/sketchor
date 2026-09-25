@@ -8,7 +8,7 @@ import {
   cutTableRowFor,
   extractParts,
   materializeInstance,
-  nestTrueShape,
+  nestTrueShapeSearch,
   NEST_HOLES_LAYER,
   NEST_LABELS_LAYER,
   NEST_PARTS_LAYER,
@@ -18,6 +18,7 @@ import {
   type CutTableRow,
   type Gravity,
   type JobMetrics,
+  type SearchLevel,
   type StockRow,
   type TrueNestPart,
   type TrueNestSheet,
@@ -71,6 +72,8 @@ export interface PersistedState {
   gravity: Gravity;
   /** N-12: a hole smaller than this (mm², after shrinking inward by spacing) is never offered to an allowInHoles part. */
   minHoleArea: number;
+  /** N-14: how long to spend trying alternate orderings for a denser packing. Default "quick" (today's single deterministic pass). */
+  searchLevel: SearchLevel;
 }
 
 const STORAGE_KEY = "state";
@@ -100,6 +103,7 @@ export const DEFAULT_CUT_TABLE: CutTableRow[] = [
 
 const ROTATION_MODES: RotationMode[] = ["locked", "quarter", "any"];
 const GRAVITIES: Gravity[] = ["bottom-left", "bottom-right", "top-left", "top-right"];
+const SEARCH_LEVELS: SearchLevel[] = ["quick", "normal", "thorough"];
 
 function num(v: unknown, fallback = 0): number {
   const n = typeof v === "number" ? v : Number(v);
@@ -156,6 +160,7 @@ export function asState(v: unknown): PersistedState {
   const stock = Array.isArray(o.stock) ? o.stock.map(asStockRow).filter((s): s is StockRow => s !== null) : [];
   const workingParts = Array.isArray(o.workingParts) ? o.workingParts.map(asWorkingPart).filter((p): p is WorkingPartEntry => p !== null) : [];
   const gravity = GRAVITIES.includes(o.gravity as Gravity) ? (o.gravity as Gravity) : "bottom-left";
+  const searchLevel = SEARCH_LEVELS.includes(o.searchLevel as SearchLevel) ? (o.searchLevel as SearchLevel) : "quick";
   return {
     stock: stock.length > 0 ? stock : SEED_STOCK.map((s) => ({ ...s, size: { ...s.size } })),
     workingParts,
@@ -164,6 +169,7 @@ export function asState(v: unknown): PersistedState {
     kerf: Math.max(0, num(o.kerf, 0)),
     gravity,
     minHoleArea: Math.max(0, num(o.minHoleArea, 0)),
+    searchLevel,
   };
 }
 
@@ -226,6 +232,11 @@ const plugin: PluginModule = {
     // (deliberate scope: no live-canvas reconciliation this pass, unlike
     // "Check nest" which exists specifically to validate a drag in place).
     let lastNest: LastNest | null = null;
+    // Set by "cancel-nest" and polled between search attempts — the panel's
+    // Cancel button reaches a search already in progress this way, since
+    // the "nest" handler is mid-`await` and not free to read a new message
+    // any other way.
+    let nestCancelRequested = false;
 
     const persist = async () => {
       await sketchor.storage.set(STORAGE_KEY, state).catch(() => undefined);
@@ -340,6 +351,11 @@ const plugin: PluginModule = {
         return;
       }
 
+      if (msg.type === "cancel-nest") {
+        nestCancelRequested = true;
+        return;
+      }
+
       if (msg.type === "check-nest") {
         const model = await sketchor.document.read();
         const issues = checkNestOverlaps(model);
@@ -391,12 +407,16 @@ const plugin: PluginModule = {
           return;
         }
 
+        nestCancelRequested = false;
         try {
-          const result = nestTrueShape(trueParts, state.stock, {
+          const { result, attempts, cancelled } = await nestTrueShapeSearch(trueParts, state.stock, {
             spacing: state.spacing + state.kerf,
             edgeMargin: state.edgeMargin,
             gravity: state.gravity,
             minHoleArea: state.minHoleArea,
+            level: state.searchLevel,
+            onProgress: (p) => void sketchor.ui.postMessage({ type: "nest-progress", ...p }),
+            isCancelled: () => nestCancelRequested,
           });
 
           const geometryByKey = new Map(withSettings.map((p) => [p.key, p]));
@@ -468,10 +488,11 @@ const plugin: PluginModule = {
 
           void sketchor.ui.postMessage({ type: "result", result, metrics: jobMetrics, sheetLabels });
           const unplacedCount = result.unplaced.reduce((n, u) => n + u.count, 0);
+          const searchNote = attempts > 1 ? ` (best of ${attempts} attempts${cancelled ? ", cancelled early" : ""})` : "";
           sketchor.ui.notify(
             unplacedCount > 0
-              ? `Nested ${result.placed.length} on ${result.sheets.length} sheet(s) — ${unplacedCount} didn't fit.`
-              : `Nested ${result.placed.length} part(s) on ${result.sheets.length} sheet(s), ${Math.round(result.utilisation * 100)}% used.`,
+              ? `Nested ${result.placed.length} on ${result.sheets.length} sheet(s) — ${unplacedCount} didn't fit${searchNote}.`
+              : `Nested ${result.placed.length} part(s) on ${result.sheets.length} sheet(s), ${Math.round(result.utilisation * 100)}% used${searchNote}.`,
             { error: unplacedCount > 0 },
           );
         } catch (err) {
@@ -671,6 +692,13 @@ export const PANEL_HTML = String.raw`<!doctype html>
             <option value="top-right">Top-right</option>
           </select>
         </label>
+        <label>Search
+          <select id="set-search" title="Quick is one pass; Normal/Thorough spend more time trying alternate orderings for a denser packing">
+            <option value="quick">Quick</option>
+            <option value="normal">Normal</option>
+            <option value="thorough">Thorough</option>
+          </select>
+        </label>
       </div>
     </div>
 
@@ -678,6 +706,7 @@ export const PANEL_HTML = String.raw`<!doctype html>
       <div class="actions">
         <button id="nest">Nest</button>
         <button class="ghost" id="clear">Clear</button>
+        <button class="ghost" id="cancel-nest" style="display:none">Cancel</button>
       </div>
       <div class="row" style="margin-bottom:8px">
         <button class="ghost sm" id="check-nest">Check nest</button>
@@ -703,7 +732,7 @@ export const PANEL_HTML = String.raw`<!doctype html>
       const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
       let unit = { unit: "mm", perMm: 1, label: "mm" };
-      let state = { stock: [], workingParts: [], spacing: 0, edgeMargin: 0, kerf: 0, gravity: "bottom-left", minHoleArea: 0 };
+      let state = { stock: [], workingParts: [], spacing: 0, edgeMargin: 0, kerf: 0, gravity: "bottom-left", minHoleArea: 0, searchLevel: "quick" };
       let parts = []; // working-set parts, as last pushed by the plugin: {key,name,w,h,area,outer,settings}
       let saveTimer = 0;
 
@@ -819,18 +848,33 @@ export const PANEL_HTML = String.raw`<!doctype html>
         // easier to reason about ("holes under 10mm across") than mm².
         $("set-minhole").value = toU(Math.sqrt(state.minHoleArea || 0));
         $("set-gravity").value = state.gravity;
+        $("set-search").value = state.searchLevel;
       }
       $("set-spacing").addEventListener("input", () => { state.spacing = fromU($("set-spacing").value); persist(); });
       $("set-margin").addEventListener("input", () => { state.edgeMargin = fromU($("set-margin").value); persist(); });
       $("set-kerf").addEventListener("input", () => { state.kerf = fromU($("set-kerf").value); persist(); });
       $("set-minhole").addEventListener("input", () => { const side = fromU($("set-minhole").value); state.minHoleArea = Math.max(0, side * side); persist(); });
       $("set-gravity").addEventListener("change", () => { state.gravity = $("set-gravity").value; persist(); });
+      $("set-search").addEventListener("change", () => { state.searchLevel = $("set-search").value; persist(); });
 
       // ---- results tab ----
+      function endNesting() {
+        $("nest").disabled = false;
+        $("cancel-nest").style.display = "none";
+        $("cancel-nest").disabled = false;
+        $("cancel-nest").textContent = "Cancel";
+      }
       $("nest").addEventListener("click", () => {
         $("summary").innerHTML = "<div class='muted'>Nesting…</div>";
         $("sheet-cards").innerHTML = "";
+        $("nest").disabled = true;
+        $("cancel-nest").style.display = "";
         post({ type: "nest" });
+      });
+      $("cancel-nest").addEventListener("click", () => {
+        $("cancel-nest").disabled = true;
+        $("cancel-nest").textContent = "Cancelling…";
+        post({ type: "cancel-nest" });
       });
       $("clear").addEventListener("click", () => {
         post({ type: "clear" });
@@ -884,8 +928,15 @@ export const PANEL_HTML = String.raw`<!doctype html>
           return;
         }
         if (m.type === "cleared") { $("summary").innerHTML = "<div class='f'>Cleared.</div>"; $("sheet-cards").innerHTML = ""; return; }
-        if (m.type === "error") { $("summary").innerHTML = "<div class='f error'>" + esc(m.message) + "</div>"; return; }
-        if (m.type === "result") { renderResult(m.result, m.metrics, m.sheetLabels); return; }
+        if (m.type === "error") { endNesting(); $("summary").innerHTML = "<div class='f error'>" + esc(m.message) + "</div>"; return; }
+        if (m.type === "nest-progress") {
+          $("summary").innerHTML =
+            "<div class='muted'>Attempt " + m.attempt + " — best so far: " + m.bestPlaced + " placed" +
+            (m.bestUnplaced ? ", " + m.bestUnplaced + " unplaced" : "") +
+            ", " + Math.round(m.bestUtilisation * 100) + "% used (" + (m.elapsedMs / 1000).toFixed(1) + "s)</div>";
+          return;
+        }
+        if (m.type === "result") { endNesting(); renderResult(m.result, m.metrics, m.sheetLabels); return; }
         if (m.type === "check-result") {
           const issues = m.issues || [];
           $("summary").innerHTML = issues.length

@@ -12,3 +12,4 @@ export * from "./stock";
 export * from "./trueNest";
 export * from "./trueLayout";
 export * from "./metrics";
+export * from "./search";

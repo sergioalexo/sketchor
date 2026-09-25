@@ -37,6 +37,13 @@ export interface TrueNestOptions {
   gravity?: Gravity;
   /** N-12: a hole smaller than this (after shrinking inward by `spacing`) is never offered to `allowInHoles` parts. Default 0 (no filter). */
   minHoleArea?: number;
+  /**
+   * N-14: the sequence instances are greedily placed in. Default
+   * `"area-desc"` (largest first, unchanged from before this option
+   * existed) — `nestTrueShapeSearch` tries the others (and seeded shuffles,
+   * via a number) to search for a denser packing within a time budget.
+   */
+  order?: "area-desc" | "area-asc" | "bbox-desc" | number;
 }
 
 export interface TrueNestPlacement {
@@ -133,17 +140,68 @@ export function placementTransform(
   };
 }
 
+/**
+ * Hard cap so a pathological quantity can't hang the plugin worker (mirrors
+ * `nest.ts`'s own guard, raised: N-14's perf test measured this engine's
+ * per-candidate NFP checks scale roughly cubically with how many instances
+ * end up sharing one sheet — the pathological case is one huge quantity
+ * that all fits on a single large sheet, not spread across many. 600 was
+ * chosen because that adversarial case measured ~9s on a dev machine at
+ * this size; the perf test pins a generous bound above that for slower CI.
+ */
+const MAX_INSTANCES = 600;
+
+/** Deterministic Mulberry32 shuffle — `order: <seed>` uses this to give `nestTrueShapeSearch` reproducible alternate orderings to try. */
+function seededShuffle<T>(items: T[], seed: number): T[] {
+  let s = (seed >>> 0) || 1;
+  const next = () => {
+    s = (s + 0x6d2b79f5) | 0;
+    let t = Math.imul(s ^ (s >>> 15), 1 | s);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const out = [...items];
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(next() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
 export function nestTrueShape(parts: TrueNestPart[], stock: StockRow[], opts: TrueNestOptions = {}): TrueNestResult {
   const spacing = opts.spacing ?? 0;
   const margin = opts.edgeMargin ?? 0;
   const compareCandidates = gravityComparator(opts.gravity ?? "bottom-left");
 
-  const instances: { part: TrueNestPart; area: number }[] = [];
+  const unplacedCounts = new Map<string, number>();
+  const addUnplaced = (partId: string) => unplacedCounts.set(partId, (unplacedCounts.get(partId) ?? 0) + 1);
+
+  let instances: { part: TrueNestPart; area: number }[] = [];
   for (const part of parts) {
     const partArea = area(part.outer);
-    for (let i = 0; i < part.quantity; i++) instances.push({ part, area: partArea });
+    for (let i = 0; i < part.quantity; i++) {
+      if (instances.length >= MAX_INSTANCES) {
+        addUnplaced(part.id);
+        continue;
+      }
+      instances.push({ part, area: partArea });
+    }
   }
-  instances.sort((a, b) => b.area - a.area);
+
+  const order = opts.order ?? "area-desc";
+  if (typeof order === "number") {
+    instances = seededShuffle(instances, order);
+  } else if (order === "area-asc") {
+    instances.sort((a, b) => a.area - b.area);
+  } else if (order === "bbox-desc") {
+    const bboxArea = (p: TrueNestPart) => {
+      const b = bounds(p.outer);
+      return (b.maxX - b.minX) * (b.maxY - b.minY);
+    };
+    instances.sort((a, b) => bboxArea(b.part) - bboxArea(a.part));
+  } else {
+    instances.sort((a, b) => b.area - a.area);
+  }
 
   const minHoleArea = opts.minHoleArea ?? 0;
 
@@ -154,11 +212,8 @@ export function nestTrueShape(parts: TrueNestPart[], stock: StockRow[], opts: Tr
   const holeRegions: HoleRegion[] = [];
   const holeItems: SheetItem[][] = [];
   const placed: TrueNestPlacement[] = [];
-  const unplacedCounts = new Map<string, number>();
   const nfpCache = new NfpCache();
   let placedArea = 0;
-
-  const addUnplaced = (partId: string) => unplacedCounts.set(partId, (unplacedCounts.get(partId) ?? 0) + 1);
 
   /** Tries every rotation candidate on one already-open sheet; returns the first accepted placement, or null. */
   function tryPlaceOnSheet(sheetIdx: number, part: TrueNestPart): { deg: number; mirrored: boolean; translation: Point; local: Point[] } | null {
@@ -185,7 +240,7 @@ export function nestTrueShape(parts: TrueNestPart[], stock: StockRow[], opts: Tr
       ];
       const forbidden: Point[][] = [];
       for (const other of placedHere) {
-        for (const loop of nfpCache.get(other.key, other.local, orbitingKey, local)) {
+        for (const loop of nfpCache.get(other.key, other.local, orbitingKey, local, spacing)) {
           const translated = loop.map((p) => ({ x: p.x + other.translation.x, y: p.y + other.translation.y }));
           forbidden.push(translated);
           candidates.push(...translated);
@@ -260,7 +315,7 @@ export function nestTrueShape(parts: TrueNestPart[], stock: StockRow[], opts: Tr
       const candidates: Point[] = fitLoops.flat();
       const forbidden: Point[][] = [];
       for (const other of placedHere) {
-        for (const loop of nfpCache.get(other.key, other.local, orbitingKey, local)) {
+        for (const loop of nfpCache.get(other.key, other.local, orbitingKey, local, spacing)) {
           const translated = loop.map((p) => ({ x: p.x + other.translation.x, y: p.y + other.translation.y }));
           forbidden.push(translated);
           candidates.push(...translated);

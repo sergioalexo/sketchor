@@ -3,12 +3,13 @@
 Status: in progress (2026-09-25). Item IDs `N-xx` are stable — reference them in commits/issues.
 
 Done: **N-01–N-04** (`fa1e422`), **N-10/11/13** (`a7ef44e`), **N-20/21/22** (`155eb65`),
-**N-12** (`d0989a1`), **N-30/31** — the true-shape engine is built and wired into a
-working 4-tab panel; canvas output now lives on four layers (`Nest Sheet`/`Nest
-Parts`/`Nest Holes`/`Nest Labels`) so DXF export (all sheets, stacked like the
-canvas, or one sheet in local coordinates) and the PDF/print report (cover summary,
-one page per sheet with a numbered part table, parts ordered-vs-placed) read the
-exact same entities as the drawing — no separate re-derivation.
+**N-12** (`d0989a1`), **N-30/31**, **N-40/41/44**, **N-14** — the true-shape engine
+is built and wired into a working 4-tab panel; canvas output now lives on four
+layers (`Nest Sheet`/`Nest Parts`/`Nest Holes`/`Nest Labels`) so DXF export (all
+sheets, stacked like the canvas, or one sheet in local coordinates) and the
+PDF/print report (cover summary, one page per sheet with a numbered part table,
+parts ordered-vs-placed) read the exact same entities as the drawing — no
+separate re-derivation.
 
 **N-40/41/44** (`packages/plugin-gcode/src/toolpath.ts`, `write.ts`) — a real
 toolpath builder and G-code writer, wired to a per-sheet "Export G-code" button.
@@ -26,9 +27,36 @@ G-code follows the app's own global unit. N-44's round-trip (emit → the existi
 profiles** (LinuxCNC/Mach3/4/plasma — no profile picker or editor UI yet), and
 **N-43's on-canvas toolpath preview** with dashed rapids (export-only, no preview).
 
-Remaining: those N-42/43 deferrals above, and **N-14** (time-budgeted
-Quick/Normal/Thorough search — every pass so far is one deterministic placement,
-not that search layered on top of it).
+**Critical fix found while building N-14's own perf test** (`packages/plugin-nest/src/nfp.ts`):
+the engine's NFP-vertex candidates were computed with no spacing/kerf allowance at
+all, so the instant `spacing > 0` — the ordinary case, every real job has *some*
+kerf or handling gap — every touching candidate was rejected by the spacing-aware
+overlap check with nothing to replace it, silently capping *every sheet* at just
+its own 4 corners (2500 identical parts opened 625 near-empty sheets instead of
+packing densely onto a handful). `NfpCache` now grows the stationary side by
+`spacing` (`offsetPolygon`) before computing the NFP, so a candidate on its
+boundary already keeps the required clearance. This shipped invisibly in
+N-10/12/13/30/31/40/41 — the existing overlap/inside-sheet tests never caught it
+because 4 correctly-non-overlapping parts still "pass" those checks; only a
+packing-*density* assertion (now in `trueNest.test.ts`) catches it.
+
+**N-14** (`packages/plugin-nest/src/search.ts`) — Quick/Normal/Thorough search.
+"Quick" is exactly the previous single deterministic pass (no behaviour change
+unless a job opts in). "Normal"/"Thorough" spend a time budget (3s/15s) trying
+alternate instance orderings (area-ascending, bbox-descending, then seeded
+shuffles) and keep whichever placed the most (ties broken by utilisation), with
+progress messages and a Cancel button in the panel. Every plugin already runs in
+its own worker (`PluginHost.ts`), so a long search doesn't freeze the app's UI —
+only the panel waiting on it, which the progress/cancel wiring is for. The
+400-instance cap is raised to 600, backed by a perf test: the density fix above
+means a large identical-part job can now genuinely pack onto one sheet, and the
+candidate-based placement scales roughly cubically with how many instances end up
+sharing a sheet (~9s at 600 on a dev machine) — raising the cap further needs an
+algorithmic change (spatial indexing), not just a bigger number.
+
+Remaining: N-42/43 deferrals above (other post profiles, a canvas toolpath
+preview with dashed rapids), and a real algorithmic improvement if jobs need more
+than ~600 instances sharing one sheet.
 
 Goal: select parts, enter quantities, nest them true-shape onto any number of sheets drawn from a library of standard sizes, with per-part rotation freedom (locked / 90° / any), part-in-part filling of large cut-outs, and output as a printed/PDF report (cutting time, utilisation, scrap), DXF, and G-code.
 

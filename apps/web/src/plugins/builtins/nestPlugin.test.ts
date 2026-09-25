@@ -41,6 +41,12 @@ describe("asState", () => {
     expect(state.stock).toEqual(SEED_STOCK.map((s) => ({ ...s, size: { ...s.size } })));
     expect(state.workingParts).toEqual([]);
     expect(state.gravity).toBe("bottom-left");
+    expect(state.searchLevel).toBe("quick");
+  });
+
+  it("falls back to quick for an unrecognized search level", () => {
+    expect(asState({ searchLevel: "ludicrous" }).searchLevel).toBe("quick");
+    expect(asState({ searchLevel: "thorough" }).searchLevel).toBe("thorough");
   });
 
   it("treats the previous panel's data shape as absent rather than crashing", () => {
@@ -63,6 +69,7 @@ describe("asState", () => {
       kerf: 0.2,
       gravity: "top-right",
       minHoleArea: 25,
+      searchLevel: "normal",
     };
     expect(asState(valid)).toEqual(valid);
   });
@@ -166,7 +173,7 @@ describe("the sheet metal nest panel", () => {
   });
 
   it("sends the message types the plugin side actually handles", () => {
-    for (const type of ["ready", "persist", "add-selection", "remove-part", "update-part-settings", "clear", "check-nest", "nest", "export-dxf", "export-gcode", "print"]) {
+    for (const type of ["ready", "persist", "add-selection", "remove-part", "update-part-settings", "clear", "check-nest", "nest", "cancel-nest", "export-dxf", "export-gcode", "print"]) {
       expect(PANEL_HTML).toContain(`type: "${type}"`);
     }
   });
@@ -183,11 +190,23 @@ describe("the sheet metal nest panel", () => {
   });
 
   it("does not ship controls for features this pass doesn't back", () => {
-    // N-14 (search mode) is explicitly out of scope for this pass — no
-    // inert UI for it. N-30's report is now real (no separate "export-pdf"
-    // — Print produces the PDF), and N-40's G-code export is now real too.
-    expect(PANEL_HTML).not.toMatch(/search.?mode/i);
+    // N-30's report is now real (no separate "export-pdf" — Print produces
+    // the PDF), N-40's G-code export is now real, and N-14's search level
+    // is now a real setting (see the dedicated tests below for it).
     expect(PANEL_HTML).not.toContain("export-pdf");
+  });
+
+  it("offers a Quick/Normal/Thorough search level, wired to a real setting", () => {
+    expect(PANEL_HTML).toContain('id="set-search"');
+    expect(PANEL_HTML).toContain('<option value="quick">Quick</option>');
+    expect(PANEL_HTML).toContain('<option value="normal">Normal</option>');
+    expect(PANEL_HTML).toContain('<option value="thorough">Thorough</option>');
+    expect(PANEL_HTML).toContain('state.searchLevel = $("set-search").value');
+  });
+
+  it("offers a Cancel button for an in-progress search, sent as its own message", () => {
+    expect(PANEL_HTML).toContain('id="cancel-nest"');
+    expect(PANEL_HTML).toContain('post({ type: "cancel-nest" })');
   });
 
   it("offers all four gravity corners", () => {

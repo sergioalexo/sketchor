@@ -195,6 +195,103 @@ describe("nestTrueShape", () => {
   });
 });
 
+describe("nestTrueShape — N-14 spacing/candidate density (regression)", () => {
+  it("packs far more than 4 identical parts onto one big sheet once spacing is set, not just the sheet's own corners", () => {
+    // Before the N-14 fix, every NFP-vertex candidate touched its neighbour
+    // at zero clearance and was rejected the instant spacing > 0, silently
+    // capping every sheet at its own 4 corner candidates — a severe density
+    // bug invisible to overlap/inside-sheet checks alone, since 4 correctly
+    // non-overlapping parts still "pass" those. This pins actual packing
+    // density, not just correctness of whatever got placed.
+    const parts: TrueNestPart[] = [{ id: "p", name: "p", outer: rect(40, 30), holes: [], quantity: 20, rotation: { mode: "quarter" } }];
+    const stock: StockRow[] = [{ size: { name: "sheet", width: 3000, height: 3000 }, qty: null }];
+    const result = nestTrueShape(parts, stock, { spacing: 2, edgeMargin: 5 });
+    expect(result.unplaced).toEqual([]);
+    expect(result.placed).toHaveLength(20);
+    expect(result.sheets.length).toBeLessThan(3); // was 5 sheets (4 per sheet) before the fix
+  });
+
+  it("still keeps the requested spacing between every pair once packing is dense", () => {
+    const parts: TrueNestPart[] = [{ id: "p", name: "p", outer: rect(40, 30), holes: [], quantity: 20, rotation: { mode: "quarter" } }];
+    const stock: StockRow[] = [{ size: { name: "sheet", width: 3000, height: 3000 }, qty: null }];
+    const spacing = 2;
+    const result = nestTrueShape(parts, stock, { spacing, edgeMargin: 5 });
+    const bySheet = new Map<number, Point[][]>();
+    for (const p of result.placed) {
+      const poly = materialize(rect(40, 30), p);
+      const list = bySheet.get(p.sheet) ?? [];
+      list.push(poly);
+      bySheet.set(p.sheet, list);
+    }
+    for (const polys of bySheet.values()) {
+      for (let i = 0; i < polys.length; i++) {
+        for (let j = i + 1; j < polys.length; j++) {
+          // polygonsClash's third argument is the minimum gap two polygons
+          // must keep — asking it to enforce slightly *more* than the
+          // requested spacing must report no clash, proving the real gap is
+          // at least that much (a fresh check, not the engine's own).
+          expect(polygonsClash(polys[i], polys[j], spacing - 0.05)).toBe(false);
+        }
+      }
+    }
+  });
+});
+
+describe("nestTrueShape — N-14 instance ordering", () => {
+  const parts: TrueNestPart[] = [
+    { id: "big", name: "big", outer: rect(50, 50), holes: [], quantity: 3, rotation: { mode: "locked" } },
+    { id: "small", name: "small", outer: rect(10, 10), holes: [], quantity: 3, rotation: { mode: "locked" } },
+  ];
+  const stock: StockRow[] = [{ size: { name: "sheet", width: 200, height: 200 }, qty: 4 }];
+
+  it.each(["area-desc", "area-asc", "bbox-desc", 1, 42] as const)("produces a valid, non-overlapping result for order=%s", (order) => {
+    const result = nestTrueShape(parts, stock, { order });
+    const partById = new Map(parts.map((p) => [p.id, p]));
+    const bySheet = new Map<number, Point[][]>();
+    for (const p of result.placed) {
+      const list = bySheet.get(p.sheet) ?? [];
+      list.push(materialize(partById.get(p.partId)!.outer, p));
+      bySheet.set(p.sheet, list);
+    }
+    for (const polys of bySheet.values()) {
+      for (let i = 0; i < polys.length; i++) {
+        for (let j = i + 1; j < polys.length; j++) expect(polygonsClash(polys[i], polys[j], 0)).toBe(false);
+      }
+    }
+  });
+
+  it("a numeric seed is deterministic — the same seed always gives the same placement", () => {
+    const a = nestTrueShape(parts, stock, { order: 7 });
+    const b = nestTrueShape(parts, stock, { order: 7 });
+    expect(a.placed).toEqual(b.placed);
+  });
+});
+
+describe("nestTrueShape — N-14 instance cap", () => {
+  it("caps total instances and reports the rest unplaced instead of hanging", () => {
+    const parts: TrueNestPart[] = [{ id: "p", name: "p", outer: rect(10, 10), holes: [], quantity: 700, rotation: { mode: "locked" } }];
+    const stock: StockRow[] = [{ size: { name: "sheet", width: 5000, height: 5000 }, qty: null }];
+    const result = nestTrueShape(parts, stock, { spacing: 1 });
+    const unplacedCount = result.unplaced.find((u) => u.partId === "p")?.count ?? 0;
+    expect(result.placed.length).toBeLessThanOrEqual(600);
+    expect(result.placed.length + unplacedCount).toBe(700);
+    expect(unplacedCount).toBeGreaterThan(0);
+  });
+
+  it("perf: an adversarial single-sheet fill at the cap completes well within a worker-friendly bound", () => {
+    const parts: TrueNestPart[] = [{ id: "p", name: "p", outer: rect(40, 30), holes: [], quantity: 600, rotation: { mode: "quarter" } }];
+    const stock: StockRow[] = [{ size: { name: "sheet", width: 3000, height: 3000 }, qty: null }];
+    const t0 = Date.now();
+    const result = nestTrueShape(parts, stock, { spacing: 2, edgeMargin: 5 });
+    const elapsed = Date.now() - t0;
+    expect(result.placed).toHaveLength(600);
+    // Measured ~9s on a dev machine at this size; a generous bound for
+    // slower CI, so this fails loudly if a future change regresses scaling
+    // rather than the cap silently needing to shrink again.
+    expect(elapsed).toBeLessThan(20000);
+  }, 25000);
+});
+
 describe("nestTrueShape — N-12 part-in-hole", () => {
   // A 90x90 part leaves only a 10mm-wide rim on a 100x100 sheet — too
   // narrow for a 20x20 square in any orientation, so the small part below
