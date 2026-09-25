@@ -82,11 +82,22 @@ that need handling regardless:
   reports "N added, M refreshed — T part(s) in the job" so it's visible.
   *(Not done this pass: a canvas highlight for parts already in the job —
   small follow-up, not a bug.)*
-- **NF-03 Open-contour help.** Not started — still needed for real DXFs
-  with small gaps. When a selection has open chains, say how many and mark
-  the open ends on the canvas (same violet markers as the crossings
-  detector). Add a **Join tolerance** setting (default = current
-  `JOIN_TOL`, allow up to e.g. 0.5 mm).
+- **NF-03 Open-contour help. DONE (partial), commit `c80dfcf`.** Shipped:
+  `extractPartsWithDiagnostics()` (`packages/plugin-nest/src/partExtraction.ts`)
+  reports every open chain (gap size + location, including lone
+  unconnected pieces); "Add selection" names what's wrong instead of a
+  flat "select closed shapes", and still adds whatever *did* close; the
+  live selection hint shows an open count before Add is even clicked; a
+  new **Join tolerance** setting (Settings tab, 0–0.5mm, blank = exact)
+  actually closes small real gaps, threaded through `resolvePart` so a
+  part that needed it keeps resolving later. **Not done**: marking the
+  open ends on the *canvas* (violet markers, like the crossings detector)
+  — there's no host capability for a plugin to draw an ephemeral overlay
+  today (`PluginHostApi` has no `ui.highlight`/selection-set method; the
+  crossings markers are core-app state, not something a sandboxed plugin
+  can reach). That needs a small additive host API bump
+  (`ui.highlight(points)` + host-side render wiring) — worth doing as its
+  own follow-up rather than folding into this pass.
 - **NF-04 Never fail silently. DONE (first pass).** Nest now: names parts
   that no longer resolve on the drawing and prunes them instead of
   blocking Nest forever; flags a part bigger than every stock sheet
