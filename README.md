@@ -414,6 +414,38 @@ The web build has no installer to swap, so it falls back to the public GitHub
 Releases API and offers the download page instead — the same fallback the
 desktop app uses if `latest.json` can't be reached.
 
+## Usage statistics
+
+Sketchor sends anonymous usage statistics to [PostHog](https://posthog.com) so
+it's possible to tell how many people use it and which features matter. It's
+on by default; a one-time notice on first launch says so, and **Send anonymous
+usage statistics** in the toolbar's update popover turns it off (or back on)
+at any time. Turning it off also deletes the random id PostHog kept, so
+turning it on again starts as a new anonymous user.
+
+What is sent: a launch event, once per tab or window — a reload isn't a new
+launch — with "first launch" and "updated from" flags;
+a heartbeat every five minutes while the window is visible; which button,
+shortcut, command-line command or palette entry was used — the same name for
+all four, so it also records *how* a feature is reached, and never the text
+typed into the command line — files opened and saved by *extension* and
+order-of-magnitude size, STEP/IGES reads by part-count bucket and how long
+they took, whether an update was found or failed, and errors — unhandled
+exceptions plus a few caught ones (a model that failed to read, a save
+target gone stale), with the message scrubbed of anything that looks like a
+file name, path or URL before it leaves. Every event carries
+the app version and whether it's the desktop or web build; PostHog derives a
+coarse OS and browser from the user agent. Nothing else — never a file name,
+a path, geometry, sketch text, layer names or plugin code. There is no
+account or identity; no person profile is ever created.
+
+`apps/web/src/metrics/` is the whole thing. `actions.ts` is the whitelist of
+buttons that get counted, and a test checks each entry against the
+components so a renamed button fails a test instead of silently vanishing
+from the charts. Where a button's name is built at runtime the name is
+dropped — a layer, a 3D part or a plugin is counted as "a layer was deleted",
+never which one. Dev builds send nothing unless `VITE_METRICS_DEV=1`.
+
 ## Roadmap
 
 1. **More geometry** — ellipses and splines; hatch patterns; blocks.

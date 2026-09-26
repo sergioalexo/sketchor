@@ -787,18 +787,19 @@ function Viewer({ model }: { model: Model3D }) {
         {spanLength}
       </div>
       <div className="model-toolbar" data-testid="model-toolbar">
-        <ToolButton title="Isometric (1)" label="Iso" icon={ICONS.iso} onClick={() => fitAll("iso")} />
-        <ToolButton title="Top (2)" label="Top" icon={ICONS.top} onClick={() => fitAll("top")} />
-        <ToolButton title="Front (3)" label="Front" icon={ICONS.front} onClick={() => fitAll("front")} />
-        <ToolButton title="Right (4)" label="Right" icon={ICONS.right} onClick={() => fitAll("right")} />
+        <ToolButton title="Isometric (1)" label="Iso" icon={ICONS.iso} onClick={() => fitAll("iso")} testId="model-view-iso" />
+        <ToolButton title="Top (2)" label="Top" icon={ICONS.top} onClick={() => fitAll("top")} testId="model-view-top" />
+        <ToolButton title="Front (3)" label="Front" icon={ICONS.front} onClick={() => fitAll("front")} testId="model-view-front" />
+        <ToolButton title="Right (4)" label="Right" icon={ICONS.right} onClick={() => fitAll("right")} testId="model-view-right" />
         <span className="model-toolbar-sep" />
-        <ToolButton title="Fit everything visible (F)" label="Fit" icon={ICONS.fit} onClick={() => fitAll()} />
+        <ToolButton title="Fit everything visible (F)" label="Fit" icon={ICONS.fit} onClick={() => fitAll()} testId="model-fit" />
         <ToolButton
           title="Toggle B-rep edges (E)"
           label="Edges"
           icon={ICONS.edges}
           active={showEdges}
           onClick={() => setShowEdges((v) => !v)}
+          testId="model-edges"
         />
         <ToolButton
           title="Isolate the selected part — everything else is hidden (I)"
@@ -818,6 +819,7 @@ function Viewer({ model }: { model: Model3D }) {
             const last = selection[selection.length - 1];
             if (last) hidePart(partOf(model, last));
           }}
+          testId="model-hide"
         />
         <ToolButton
           title="Show all hidden parts (Shift+H)"
@@ -825,6 +827,7 @@ function Viewer({ model }: { model: Model3D }) {
           icon={ICONS.showAll}
           disabled={hidden.size === 0}
           onClick={showAllParts}
+          testId="model-show-all"
         />
       </div>
       <div className="model-status" data-testid="model-status">

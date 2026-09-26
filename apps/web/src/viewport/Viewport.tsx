@@ -70,6 +70,8 @@ import { applyTracking, trackingIncrement, useTracking } from "../tools/tracking
 import { useSnapSettings } from "../tools/snapSettings";
 import { parseTypedInput, resolveTypedInput, startsTypedInput } from "../tools/typedInput";
 import { parseCommand, type AppCommandId } from "../tools/commandLine";
+import { COMMAND_LINE_ACTIONS } from "../metrics/actions";
+import { track } from "../metrics/metrics";
 import { CommandBar, type CommandEcho } from "../tools/CommandBar";
 
 /**
@@ -1785,6 +1787,10 @@ export function Viewport() {
   /** Runs one command-line entry and returns what to echo back. */
   const runCommand = (line: string): void => {
     const parsed = parseCommand(line);
+    // Counted like a button or a shortcut would be: the action it resolved
+    // to, never the line — that can hold coordinates the user typed.
+    if (parsed.kind === "tool") track("action", { id: `tool.${parsed.tool}`, source: "command-line" });
+    else if (parsed.kind === "app") track("action", { id: COMMAND_LINE_ACTIONS[parsed.id], source: "command-line" });
     const app = useApp.getState();
     const say = (text: string, kind: CommandEcho["kind"] = "out") =>
       setCommandEcho((prev) => [...prev, { text: line, kind: "in" as const }, { text, kind }].slice(-8));

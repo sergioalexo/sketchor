@@ -16,6 +16,7 @@ import {
   useApp,
 } from "../state/store";
 import { displayUnitToDxfCode, factorFromMm } from "../units";
+import { reportError, track } from "../metrics/metrics";
 
 /**
  * Save / open of Sketchor's supported drawing formats: DXF and SVG for
@@ -195,6 +196,7 @@ export async function saveDrawing(format: SaveFormat, suggestedName?: string, mo
         await writeTarget(target, text);
         finishSessionSave(target.name);
         noticeSaved(target.name);
+        track("file_saved", { format, mode });
         return;
       } catch (err) {
         // Target went stale (file moved/deleted, permission revoked). Say so
@@ -205,7 +207,7 @@ export async function saveDrawing(format: SaveFormat, suggestedName?: string, mo
           message: `Couldn't write ${target.name} — choose a location`,
           at: Date.now(),
         });
-        void err;
+        reportError(err, "save", { format, target: target.kind });
       }
     }
   }
@@ -222,6 +224,7 @@ export async function saveDrawing(format: SaveFormat, suggestedName?: string, mo
       }
       finishSessionSave(handle.name);
       noticeSaved(handle.name);
+      track("file_saved", { format, mode });
     } catch (err) {
       // The user dismissing the picker throws AbortError — treat as a no-op.
       if ((err as DOMException)?.name !== "AbortError") throw err;
@@ -240,6 +243,7 @@ export async function saveDrawing(format: SaveFormat, suggestedName?: string, mo
   URL.revokeObjectURL(url);
   finishSessionSave(name);
   noticeSaved(name);
+  track("file_saved", { format, mode });
 }
 
 /** Plain "Save": overwrites the active tab's bound file in its own format, defaulting to DXF if it has none. */

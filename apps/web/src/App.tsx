@@ -34,6 +34,7 @@ import { TabStrip } from "./tabs/TabStrip";
 const ModelViewport = lazy(() => import("./model3d/ModelViewport").then((m) => ({ default: m.ModelViewport })));
 const StructurePanel = lazy(() => import("./model3d/StructurePanel").then((m) => ({ default: m.StructurePanel })));
 import { UpdateBanner, UpdateButton } from "./update/UpdatePanel";
+import { MetricsNotice } from "./metrics/MetricsNotice";
 import { openExternal } from "./update/updateService";
 
 /**
@@ -790,6 +791,7 @@ export function App() {
                   {saveTarget ? `Save to ${saveTarget.name}` : "Save..."}
                 </button>
                 <button
+                  data-testid="save-as-dxf"
                   onClick={() => {
                     setShowSaveMenu(false);
                     void saveDrawing("dxf", undefined, "save-as");
@@ -798,6 +800,7 @@ export function App() {
                   Save As DXF...
                 </button>
                 <button
+                  data-testid="save-as-svg"
                   onClick={() => {
                     setShowSaveMenu(false);
                     void saveDrawing("svg", undefined, "save-as");
@@ -806,6 +809,7 @@ export function App() {
                   Save As SVG...
                 </button>
                 <button
+                  data-testid="save-copy-dxf"
                   onClick={() => {
                     setShowSaveMenu(false);
                     void saveDrawing("dxf", undefined, "save-copy");
@@ -814,6 +818,7 @@ export function App() {
                   Save a Copy as DXF...
                 </button>
                 <button
+                  data-testid="save-copy-svg"
                   onClick={() => {
                     setShowSaveMenu(false);
                     void saveDrawing("svg", undefined, "save-copy");
@@ -859,6 +864,7 @@ export function App() {
             className="action"
             title={withKey("Undo — right-click to change shortcut", "edit.undo")}
             disabled={!bus.canUndo}
+            data-testid="undo"
             onClick={() => bus.undo()}
             onContextMenu={rebind("edit.undo")}
           >
@@ -877,6 +883,7 @@ export function App() {
             className="action"
             title={withKey("Redo — right-click to change shortcut", "edit.redo")}
             disabled={!bus.canRedo}
+            data-testid="redo"
             onClick={() => bus.redo()}
             onContextMenu={rebind("edit.redo")}
           >
@@ -1187,6 +1194,7 @@ export function App() {
       </header>
 
       <UpdateBanner />
+      <MetricsNotice />
       <ImportReportBanner />
 
       <div className="body">

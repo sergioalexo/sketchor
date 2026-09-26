@@ -4,6 +4,7 @@ import { App } from "./App";
 import { initDesktopFileOpen } from "./dxf/desktopBridge";
 import { initUpdateCheck } from "./update/updateService";
 import { initExplorerPreviews } from "./desktop/explorerPreviews";
+import { initMetrics } from "./metrics/metrics";
 import { installPluginDevHandle, loadFirstPartyPlugins, loadInstalledPlugins } from "./plugins";
 import "./styles.css";
 
@@ -25,6 +26,11 @@ initUpdateCheck();
 // launch without the machine-wide markers asks Windows for them (one UAC
 // prompt). No-op on the web. See desktop/explorerPreviews.ts.
 initExplorerPreviews();
+
+// Anonymous usage statistics (opt-out, first-launch notice). Inert unless a
+// PostHog key is configured and this is a production build — see
+// metrics/metrics.ts for exactly what is and isn't sent.
+initMetrics();
 
 // Plugin runtime: boot the first-party plugins (their contributions show up in
 // the command palette and the export menu), and keep the console dev handle

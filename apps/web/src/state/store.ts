@@ -9,6 +9,7 @@ import {
   saveDisplayUnit,
   type DisplayUnit,
 } from "../units";
+import { formatOf, magnitudeBucket, reportError, track } from "../metrics/metrics";
 import {
   CommandBus,
   DEFAULT_DUPLICATE_OPTIONS,
@@ -1104,11 +1105,28 @@ export function openIntoSession(name: string, load: () => void): void {
       switchToSession(active.id);
     }
   }
-  load();
+  // Every drawing open converges here, so this is where it gets counted:
+  // format (extension only), size bucket and how long the load took. Model
+  // tabs report from openModelIntoSession once the worker has answered.
+  const started = performance.now();
+  try {
+    load();
+  } catch (err) {
+    track("file_opened", { format: formatOf(name), ok: false, error_kind: err instanceof Error ? err.name : "unknown" });
+    throw err;
+  }
   active.name = name;
   active.named = true;
   active.dirty = false;
   bumpSessionsVersion();
+  if (!isModelSession(active)) {
+    track("file_opened", {
+      format: formatOf(name),
+      ok: true,
+      entities: magnitudeBucket(active.doc.all().length),
+      load_ms: Math.round(performance.now() - started),
+    });
+  }
 }
 
 /**
@@ -1118,6 +1136,14 @@ export function openIntoSession(name: string, load: () => void): void {
  */
 export function openModelIntoSession(name: string, loading: Promise<Model3D>): void {
   let target: DocSession | undefined;
+  const started = performance.now();
+  const report = (ok: boolean, parts?: number) =>
+    track("model_opened", {
+      format: formatOf(name),
+      ok,
+      ...(parts !== undefined ? { parts: magnitudeBucket(parts) } : {}),
+      load_ms: Math.round(performance.now() - started),
+    });
   openIntoSession(name, () => {
     target = activeSession();
     // A reused tab could be an "Untitled" drawing or a re-open of this same
@@ -1132,12 +1158,17 @@ export function openModelIntoSession(name: string, loading: Promise<Model3D>): v
       target.model = model;
       target.modelLoading = false;
       bumpSessionsVersion();
+      report(true, model.parts.length);
     },
     (err: Error) => {
       if (!target) return;
       target.modelLoading = false;
       target.modelError = err?.message ?? String(err);
       bumpSessionsVersion();
+      report(false);
+      // The tab shows the error and nothing rethrows, so this is the only
+      // place a bad STEP/IGES read (or a wasm worker crash) gets reported.
+      reportError(err, "model_open", { format: formatOf(name) });
     },
   );
 }

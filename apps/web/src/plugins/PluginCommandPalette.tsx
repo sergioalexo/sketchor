@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { listActions, onRegistriesChange, runCommand, runGenerator, type CommandListItem } from "./host/registries";
+import { track } from "../metrics/metrics";
 
 /**
  * A minimal command palette (Ctrl/Cmd-K) over the plugin contribution
@@ -42,6 +43,8 @@ export function PluginCommandPalette({ open, onClose }: { open: boolean; onClose
 
   const run = async (item: CommandListItem) => {
     setStatus(`Running ${item.title}…`);
+    // Which plugin's command isn't sent — installed plugins can be private.
+    track("action", { id: `palette.${item.kind}`, source: "palette" });
     try {
       if (item.kind === "command") {
         await runCommand(item.id);

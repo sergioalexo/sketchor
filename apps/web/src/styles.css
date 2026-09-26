@@ -1564,7 +1564,8 @@ body {
 }
 
 .action-menu button.update-primary,
-.update-banner button.update-primary {
+.update-banner button.update-primary,
+.metrics-notice button.update-primary {
   padding: 6px 12px;
   border: none;
   border-radius: 6px;
@@ -1578,7 +1579,8 @@ body {
 }
 
 .action-menu button.update-primary:hover,
-.update-banner button.update-primary:hover {
+.update-banner button.update-primary:hover,
+.metrics-notice button.update-primary:hover {
   background: #4a86ff;
 }
 
@@ -1632,6 +1634,24 @@ body {
 }
 
 .update-banner-text {
+  flex: 1;
+  min-width: 0;
+}
+
+/* First-launch usage-statistics notice: same strip as the update banner,
+   but neutral — it's information, not a call to action. */
+.metrics-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 14px;
+  font-size: 12px;
+  background: var(--panel);
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--border);
+}
+
+.metrics-notice-text {
   flex: 1;
   min-width: 0;
 }
