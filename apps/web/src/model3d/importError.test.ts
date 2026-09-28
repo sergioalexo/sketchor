@@ -36,8 +36,8 @@ describe("isOomError", () => {
 
 describe("describeImportError", () => {
   it("names the file and calls out the 4 GB ceiling for an OOM failure", () => {
-    const msg = describeImportError("RuntimeError: memory access out of bounds", "24408-A MASTER.STEP", 64 * 1024 * 1024);
-    expect(msg).toContain("24408-A MASTER.STEP");
+    const msg = describeImportError("RuntimeError: memory access out of bounds", "large-sample.STEP", 64 * 1024 * 1024);
+    expect(msg).toContain("large-sample.STEP");
     expect(msg).toContain("64 MB");
     expect(msg).toContain("Ran out of memory");
     expect(msg).toContain("4 GB");

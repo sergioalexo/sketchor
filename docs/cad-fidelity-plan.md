@@ -137,7 +137,7 @@ Tick `[x]` and add a progress-log row as items land. Order = recommended executi
 - [ ] L-09 `contributes.layoutTemplates`
 
 **11 · DXF fidelity (continuous, after each phase)**
-- [ ] X-03 Import coverage sweep over K:/01 PROD FILES
+- [ ] X-03 Import coverage sweep over `PROD_FILES` (see `docs/local-samples.md`)
 - [ ] X-05 DXF GROUP objects
 - [ ] X-08 Lossless SKETCHOR XDATA round-trip
 - [ ] X-09 Preserve unknown DXF data on re-save
@@ -560,7 +560,7 @@ Export: `*Paper_Space` (first layout) and `*Paper_Space0..n` BLOCK_RECORDs, LAYO
 
 ## 11. DXF fidelity items that don't belong to one feature
 
-- **X-03 · Import coverage sweep — P1, M.** Re-run the 11,234-file `K:/01 PROD FILES` scan (node + esbuild bundle of core, read in place — see memory; auto-mode forbids copying K: files into the repo) after each phase; record entity-type counts that are still reported unsupported. Target: zero unsupported *geometry* types (PROXY objects excepted).
+- **X-03 · Import coverage sweep — P1, M.** Re-run the full-folder DXF scan over `PROD_FILES` — the real production-DXF folder whose path is in `docs/local-samples.md` (gitignored; node + esbuild bundle of core, read in place; never copy those files, their names or part numbers into the repo) after each phase; record entity-type counts that are still reported unsupported. Target: zero unsupported *geometry* types (PROXY objects excepted).
 - **X-04 · Colours — P1, S.** ACI ↔ RGB table (all 256, exact AutoCAD values), true colour 420, colour books (430) read-only, BYLAYER/BYBLOCK semantics everywhere, layer colour/linetype/lineweight/plot flag/on/freeze/lock written correctly (today every layer is written with colour 7).
 - **X-05 · Groups — P2, S.** Sketchor groups → DXF `GROUP` objects (named, selectable) in `ACAD_GROUP`; import GROUP back.
 - **X-06 · Units + extents — P1, S.** `$INSUNITS`, `$MEASUREMENT`, `$LUNITS/$LUPREC/$AUNITS`, `$EXTMIN/$EXTMAX` including blocks/paper space, `$LIMMIN/$LIMMAX`. Keep the unit-detection guarantees from v0.26 (a Sketchor file must never be read in the wrong unit anywhere).

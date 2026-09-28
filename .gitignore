@@ -21,3 +21,6 @@ plugin-key.json
 native/occt-import-js-build/src/
 native/occt-import-js-build/emsdk/
 native/occt-import-js-build/build/
+
+# Machine-specific paths to real sample files (see docs/local-samples.example.md)
+docs/local-samples.md

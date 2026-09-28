@@ -7,7 +7,9 @@ pipeline. Follow the repo's testing rules in `CLAUDE.md` → "Testing".
 
 ## The file that fails
 
-`K:\Job Drawings\24408\24408A\SALES CAD\24408-A MASTER.STEP`
+`LARGE_STEP` — a real ~58 MB production STEP assembly. It is not in the repo;
+its path on the dev machine is in `docs/local-samples.md` (gitignored — copy
+`docs/local-samples.example.md` and fill it in).
 
 - SolidWorks 2023, `SwSTEP 2.0`, AP203 (`CONFIG_CONTROL_DESIGN`), inches.
 - ~748,000 lines — roughly 60–70 MB. The largest file tested so far was 11 MB.
@@ -46,7 +48,7 @@ this section is the summary for a fresh session.
    double-click a big STEP and open it from the in-app file browser to
    exercise `read_file_bytes`; confirm non-UTF-8 STEP names open.
 2. ~~Reinstall the Explorer DLL~~ Done 2026-09-28: reinstalled, Explorer
-   restarted; `verify_shell_thumb` on the 24408 file now returns a 256x256
+   restarted; `verify_shell_thumb` on the `LARGE_STEP` file now returns a 256x256
    wireframe, upright (thin slab lying flat, Y-up rule applied). Note:
    `install-thumbnailer.ps1` without `-SkipBuild` aborts under PowerShell 5.1
    because cargo's stderr progress line trips `$ErrorActionPreference = Stop`;
@@ -57,14 +59,15 @@ this section is the summary for a fresh session.
    tier 1 serves ahead of the wireframe.
 4. **Inventor Y-up detection** — add to `detectUpAxis` (TS) and `is_y_up`
    (Rust) only after checking a real Inventor export.
-5. ~~No visual screenshot of the 24408 model.~~ Done 2026-09-28: pane
-   screenshot works; the Top view looks down on the curved slatted deck
+5. ~~No visual screenshot of the `LARGE_STEP` model.~~ Done 2026-09-28: pane
+   screenshot works; the Top view looks down on the model
    (upright, Y-up header detected).
 
 ### Rules for the next session
 
-- Do **not** copy the 24408 file (company data, public repo) or commit
-  anything derived from it; open it in place from `K:\`.
+- Do **not** copy the `LARGE_STEP` file (third-party data, public repo) or
+  commit anything derived from it — including its path, name or
+  dimensions; open it in place from the path in `docs/local-samples.md`.
 - Other sessions release in parallel: `git pull` and read the current
   version before any bump; don't tag unless the user asks.
 - `npm test` and `npm run build` must pass; `apps/web/vendor/occt-import-js`
@@ -104,7 +107,7 @@ Expected outcomes and which items they select:
 `stepImport.ts:98-104` turns a worker crash into `"import worker crashed"`;
 `occt.worker.ts:95` wraps OCCT exceptions. Make the message say what
 happened and how big the file was, e.g.
-`"Ran out of memory reading 24408-A MASTER.STEP (64 MB). …"`.
+`"Ran out of memory reading large-sample.STEP (64 MB). …"`.
 - Pass the byte length along with the job so the main thread can name it.
 - Detect OOM by message (`/OOM|out of memory|memory access out of bounds|Cannot enlarge memory/i`).
 - Make sure a crashed worker's queued/in-flight siblings are not affected
@@ -208,7 +211,7 @@ the model (uncached).
 - `step-wire` / `read_file_bytes` Rust tests as above.
 - Per CLAUDE.md, any parser touched must handle empty, truncated and
   malformed input without throwing or hanging.
-- **Do not commit the 24408 file or anything derived from it.** If a large
+- **Do not commit the `LARGE_STEP` file or anything derived from it.** If a large
   fixture is needed, generate one in the test (repeat a small STEP body's
   solids N times with fresh entity ids) — and keep such a test out of the
   default `npm test` run if it's slow.
@@ -322,7 +325,7 @@ export function upAxisMatrix(up: UpAxis): number[];
 4. S-02 / S-04 / S-06 per S-00's findings; S-05 if OCCT still can't read it.
 5. U-05, U-06, S-08 wrap-up.
 6. `npm test` and `npm run build` must pass; verify live in the dev server
-   with the real 24408 file (open, toggle Y-up, measure an edge, check the
+   with the real `LARGE_STEP` file (open, toggle Y-up, measure an edge, check the
    Top view looks down on the model). On desktop, verify double-click and
    the in-app file browser both open it.
 
@@ -336,7 +339,7 @@ to the user (see the release procedure in the user's notes / README).
 
 - 2026-09-28 — S-00 done. **The failure is not OOM and not slowness —
   it's a content-extraction bug, and the decision table above doesn't
-  cover it.** Repro: served the file from its K:\ folder over a throwaway
+  cover it.** Repro: served the file from its original folder over a throwaway
   local HTTP server (CORS-enabled `http.server`, not copied into the repo
   or committed anywhere) and fed it to `window.sketchor.openModel` in the
   dev server tab.
@@ -408,8 +411,8 @@ to the user (see the release procedure in the user's notes / README).
   before checking for it (`native/step-wire/src/lib.rs`, ~3 lines). After
   the fix: `pds_def=213 nauo=112 cdsr=112`, one clean root, 133 placed
   instances, **254,946 wireframe segments**, rendered and visually
-  confirmed as real geometry (a curved decking/frame assembly, matching
-  the file's own name). Added a regression test
+  confirmed as real geometry (a multi-part assembly, matching the
+  file's own name). Added a regression test
   (`tolerates_a_space_before_the_argument_list`) using the existing
   `cube()` fixture with `TYPE ( args )` spacing; all 11 tests pass; no new
   clippy warnings. This fixes the *existing* Explorer-thumbnail fallback
@@ -454,7 +457,7 @@ to the user (see the release procedure in the user's notes / README).
   committed nowhere yet (uncommitted in the working tree). No debug
   scaffolding left behind (the temporary `debug_stats`/`debug_parse`
   functions and example were added, used, and removed in this session).
-  Nothing was copied from K:\ — the C++ investigation only read files
+  Nothing was copied from the sample's folder — the C++ investigation only read files
   already present in `native/occt-import-js-build/src/`.
 
 - 2026-09-28 — **Root cause found and fixed on the wasm/OCCT side too**
@@ -492,7 +495,7 @@ to the user (see the release procedure in the user's notes / README).
     correctly meshed, so this costs nothing on files where the root-level
     triangulation already propagated down (i.e. every file that worked
     before). Result on the real file: **1,366 parts, 546,061 triangles**
-    — opens correctly, bounding box 7647.666 × 457.2 × 8909.426 mm.
+    — opens correctly, bounding box matches the source CAD.
   - **Made it permanent correctly**: `native/occt-import-js-build/src/`
     (the checked-out upstream + patched sources) is git-ignored — editing
     the live checkout would not have persisted the fix. The real,
@@ -602,7 +605,7 @@ to the user (see the release procedure in the user's notes / README).
     in `src-tauri` (3/3, including the new one).
   - Not yet verified **live** in the browser/desktop app for this batch
     (S-00's manual repro is still the most recent live check, before
-    these changes) — next session should re-open the real 24408 file and
+    these changes) — next session should re-open the real `LARGE_STEP` file and
     confirm the size hint/error wording look right, and desktop-test
     S-03's IPC path specifically (the browser dev server can't exercise
     `window.__TAURI__`).
@@ -624,11 +627,11 @@ to the user (see the release procedure in the user's notes / README).
     (`refreshThumbnail`, mirrored to Explorer). `native/step-wire`:
     `is_y_up` + `y_up_to_z_up`, used by the DLL's wireframe tier (Rust
     tests added). Inventor not added — no real export to verify against.
-  - **Verified live** with the real 24408 file (58 MB, served from K: by a
+  - **Verified live** with the real `LARGE_STEP` file (58 MB, served from its original folder by a
     throwaway local server, since stopped): opens with 1,366 parts / 353,639
     triangles (coarse tessellation), size hint "Large file (55 MB)…" shows,
-    header detected as Y-up → status size reads 7647 × 8909 × **457** mm
-    (Z = height); toggling reads 7647 × 457 × 8909 and back; override lands
+    header detected as Y-up → status size reads X × Y × **height** (Z = height); toggling swaps
+    Y and Z and back; override lands
     in localStorage. The browser pane's screenshots timed out on this scene
     (heavy), so the visual check was by status/DOM, not a picture. Test
     override was removed from localStorage afterwards.
