@@ -95,6 +95,74 @@ private:
 };
 '''
 
+# Sketchor fix: triangulating only the top-level free shape's compound
+# (XcafRootNode::GetChildren) does not reliably leave triangulation
+# reachable from a leaf's own GetShape() result on every assembly -
+# observed on a real 58 MB SolidWorks export with no MAPPED_ITEM instancing
+# (every pattern occurrence its own separate geometry copy): every leaf
+# node had real solids and faces, but zero triangulated faces, so
+# occt-import-js reported success with zero meshes for the whole file.
+# Triangulating defensively at the leaf too (BRepMesh_IncrementalMesh
+# checks and skips an already-meshed shape, so this costs nothing where it
+# already worked) fixed it: the same file then opened with 1,366 parts and
+# 546,061 triangles. These entries run after the LabelIndex replacements
+# below (the `old` text here is what that patch already produces), so
+# XcafNode needs a `params` member the same way the LabelIndex patch added
+# `index` to it.
+TRIANGULATE_LEAF_FIX = [
+    (
+        "    XcafNode (const TDF_Label& label, const Handle (XCAFDoc_ShapeTool)& shapeTool, const Handle (XCAFDoc_ColorTool)& colorTool, const LabelIndex& index) :\n"
+        "        label (label),\n"
+        "        shapeTool (shapeTool),\n"
+        "        colorTool (colorTool),\n"
+        "        index (index)\n"
+        "    {\n"
+        "\n"
+        "    }",
+        "    XcafNode (const TDF_Label& label, const Handle (XCAFDoc_ShapeTool)& shapeTool, const Handle (XCAFDoc_ColorTool)& colorTool, const LabelIndex& index, const ImportParams& params) :\n"
+        "        label (label),\n"
+        "        shapeTool (shapeTool),\n"
+        "        colorTool (colorTool),\n"
+        "        index (index),\n"
+        "        params (params)\n"
+        "    {\n"
+        "\n"
+        "    }",
+    ),
+    (
+        "                children.push_back (std::make_shared<const XcafNode> (\n"
+        "                    childLabel, shapeTool, colorTool, index\n"
+        "                    ));",
+        "                children.push_back (std::make_shared<const XcafNode> (\n"
+        "                    childLabel, shapeTool, colorTool, index, params\n"
+        "                    ));",
+    ),
+    (
+        "        TopoDS_Shape shape = shapeTool->GetShape (label);\n"
+        "        EnumerateShapeMeshes (shape, onMesh);",
+        "        TopoDS_Shape shape = shapeTool->GetShape (label);\n"
+        "        TriangulateShape (shape, params);\n"
+        "        EnumerateShapeMeshes (shape, onMesh);",
+    ),
+    (
+        "    TDF_Label label;\n"
+        "    const Handle (XCAFDoc_ShapeTool)& shapeTool;\n"
+        "    const Handle (XCAFDoc_ColorTool)& colorTool;\n"
+        "    const LabelIndex& index;\n"
+        "};\n"
+        "\n"
+        "class XcafRootNode : public Node",
+        "    TDF_Label label;\n"
+        "    const Handle (XCAFDoc_ShapeTool)& shapeTool;\n"
+        "    const Handle (XCAFDoc_ColorTool)& colorTool;\n"
+        "    const LabelIndex& index;\n"
+        "    const ImportParams& params;\n"
+        "};\n"
+        "\n"
+        "class XcafRootNode : public Node",
+    ),
+]
+
 REPLACEMENTS = [
     ("#include <XCAFDoc_DocumentTool.hxx>\n", INDEX),
     (
@@ -138,7 +206,7 @@ REPLACEMENTS = [
         "index = std::make_shared<LabelIndex> ();\n    index->Build (shapeTool);\n    rootNode = std::make_shared<const XcafRootNode> (shapeTool, colorTool, *index, params);",
     ),
     ("    colorTool (nullptr),\n    rootNode (nullptr)", "    colorTool (nullptr),\n    index (nullptr),\n    rootNode (nullptr)"),
-]
+] + TRIANGULATE_LEAF_FIX
 
 HEADER_REPLACEMENTS = [
     ("class ImporterXcaf : public Importer", "class LabelIndex;\n\nclass ImporterXcaf : public Importer"),

@@ -170,7 +170,13 @@ fn find_type<'a>(body: &'a str, name: &str) -> Option<&'a str> {
     while let Some(pos) = body[from..].find(name) {
         let at = from + pos;
         let before_ok = at == 0 || !(bytes[at - 1].is_ascii_alphanumeric() || bytes[at - 1] == b'_');
-        let after = at + name.len();
+        // Some exporters (SolidWorks among them) write "NAME (args)" with a
+        // space before the parenthesis; EXPRESS allows whitespace between any
+        // two tokens, so skip it rather than requiring immediate adjacency.
+        let mut after = at + name.len();
+        while after < bytes.len() && bytes[after].is_ascii_whitespace() {
+            after += 1;
+        }
         let after_ok = after < bytes.len() && bytes[after] == b'(';
         if before_ok && after_ok {
             return balanced(body, after);
@@ -819,6 +825,27 @@ mod tests {
     fn single_part_draws_its_twelve_edges() {
         let (cube, sr) = cube(100, [0.0; 3]);
         let data = format!("{cube}#1=PRODUCT_DEFINITION('','',#2,#3);\n#4=PRODUCT_DEFINITION_SHAPE('','',#1);\n#5=SHAPE_DEFINITION_REPRESENTATION(#4,#{sr});\n");
+        let segs = parse(&wrap(&data));
+        assert_eq!(segs.len(), 12);
+        assert_eq!(bbox(&segs), ([0.0; 3], [1.0; 3]));
+    }
+
+    #[test]
+    fn tolerates_a_space_before_the_argument_list() {
+        // SolidWorks (and presumably other exporters) write "TYPE (args)" —
+        // a space between the type name and its argument list, which is
+        // legal EXPRESS whitespace. A real 58 MB SolidWorks assembly used
+        // this consistently and `find_type`'s immediate-adjacency check
+        // made every classification (PRODUCT_DEFINITION_SHAPE,
+        // SHAPE_DEFINITION_REPRESENTATION, NEXT_ASSEMBLY_USAGE_OCCURRENCE,
+        // ...) come back empty, so the file "parsed" but yielded zero
+        // segments despite having thousands of valid B-rep entities.
+        let (cube, sr) = cube(100, [0.0; 3]);
+        let data = format!(
+            "{cube}#1 = PRODUCT_DEFINITION ( '', '', #2, #3 ) ;\n\
+             #4 = PRODUCT_DEFINITION_SHAPE ( '', '', #1 ) ;\n\
+             #5 = SHAPE_DEFINITION_REPRESENTATION ( #4, #{sr} ) ;\n"
+        );
         let segs = parse(&wrap(&data));
         assert_eq!(segs.len(), 12);
         assert_eq!(bbox(&segs), ([0.0; 3], [1.0; 3]));
