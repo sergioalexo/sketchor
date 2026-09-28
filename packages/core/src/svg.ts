@@ -275,24 +275,79 @@ function arcEndpointToCenter(
   return { cx, cy, rx, ry, theta1, dtheta, phi };
 }
 
+/** Flatness (world units, mm) Béziers are flattened to — tighter than any drawing tolerance in use. */
+const CURVE_TOLERANCE = 0.01;
+
 /**
- * Parses an SVG path `d` attribute; M/L/H/V/Z and elliptical arcs (A) are
- * exact, curves (C/S/Q/T) degrade to a straight segment. Known limitation:
- * per the SVG grammar, the two 1-character arc flags may run together with
- * the following number with no separator (e.g. "0110" for flags 0,1 then
- * "10"); this tokenizer doesn't special-case that, so densely-minified arc
- * flags can misparse. Sketchor's own export never emits `A` (arcs are
- * tessellated to M/L instead), so this never affects round-tripping our
- * own files — only importing third-party minified SVGs with compact arcs.
+ * Reads a path's `d` string one token at a time. A regex split can't do this
+ * right: `1.5.5` is two numbers, `-.5e-3` is one, and an arc's two flags are
+ * single characters that may run straight into the next number (`a1 1 0 0110 10`).
+ */
+class PathScanner {
+  i = 0;
+  constructor(private readonly s: string) {}
+
+  private skipSeparators(): void {
+    while (this.i < this.s.length && /[\s,]/.test(this.s[this.i])) this.i++;
+  }
+  atEnd(): boolean {
+    this.skipSeparators();
+    return this.i >= this.s.length;
+  }
+  /** The next command letter, or null when a number (implicit repeat) or the end is next. */
+  command(): string | null {
+    this.skipSeparators();
+    const c = this.s[this.i];
+    if (c !== undefined && /[a-zA-Z]/.test(c)) {
+      this.i++;
+      return c;
+    }
+    return null;
+  }
+  /** True when a number starts here (tells "repeat the command" from junk). */
+  numberAhead(): boolean {
+    this.skipSeparators();
+    return /^[-+]?(\d|\.\d)/.test(this.s.slice(this.i, this.i + 3));
+  }
+  number(): number | null {
+    this.skipSeparators();
+    const m = /^[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/.exec(this.s.slice(this.i));
+    if (!m) return null;
+    this.i += m[0].length;
+    return parseFloat(m[0]);
+  }
+  flag(): number | null {
+    this.skipSeparators();
+    const c = this.s[this.i];
+    if (c !== "0" && c !== "1") return null;
+    this.i++;
+    return c === "1" ? 1 : 0;
+  }
+  /** Skips to the next command letter — recovery after a malformed command. */
+  skipToCommand(): void {
+    while (this.i < this.s.length && !/[a-zA-Z]/.test(this.s[this.i])) this.i++;
+  }
+}
+
+/** Number of arguments per path command (an arc's two flags count as one each). */
+const PATH_ARGS: Record<string, number> = { M: 2, L: 2, H: 1, V: 1, Z: 0, C: 6, S: 4, Q: 4, T: 2, A: 7 };
+
+/**
+ * Parses an SVG path `d` attribute. M/L/H/V/Z and elliptical arcs (A) are
+ * exact (arcs tessellated); C/S/Q/T Béziers, with S/T reflecting the previous
+ * control point, are flattened to `CURVE_TOLERANCE` so no geometry is lost
+ * (they become splines once C-02 lands). A malformed or unknown command adds
+ * a warning and skips only that command, never the rest of the path.
  */
 function parsePathD(d: string, m: Mat, layer: string | undefined, out: Entity[], warn: (msg: string) => void): void {
-  const tokens = d.match(/[a-zA-Z]|-?\d*\.?\d+(?:[eE][-+]?\d+)?/g) ?? [];
-  let i = 0;
+  const sc = new PathScanner(d);
   let cur: Point = { x: 0, y: 0 };
   let start: Point = { x: 0, y: 0 };
   let cmd = "";
-  let sawCurve = false;
-  const num = () => parseFloat(tokens[i++]);
+  // The previous curve's last control point, for S/T reflection (only valid
+  // straight after a cubic / quadratic respectively).
+  let lastCubic: Point | null = null;
+  let lastQuad: Point | null = null;
 
   // Each subpath (a run between M commands, or split by Z) becomes ONE
   // polyline entity — not one line entity per segment — so the whole shape
@@ -320,56 +375,104 @@ function parsePathD(d: string, m: Mat, layer: string | undefined, out: Entity[],
     subpath.push(toWorld(to));
     cur = to;
   };
+  /** Flattens a cubic (quadratics are elevated to one) in world space and appends the points. */
+  const cubic = (p1: Point, p2: Point, p3: Point) => {
+    if (subpath.length === 0) subpath.push(toWorld(cur));
+    flattenCubic(toWorld(cur), toWorld(p1), toWorld(p2), toWorld(p3), CURVE_TOLERANCE, subpath);
+    cur = p3;
+  };
 
-  while (i < tokens.length) {
-    // Z consumes no arguments, so a stray number after one (malformed, but
-    // real files contain them) would leave `i` where it was and spin forever,
-    // appending a point each pass until the process runs out of memory.
-    const startedAt = i;
-    if (/^[a-zA-Z]$/.test(tokens[i])) cmd = tokens[i++];
-    const relative = cmd === cmd.toLowerCase();
+  while (!sc.atEnd()) {
+    const letter = sc.command();
+    if (letter !== null) {
+      cmd = letter;
+    } else if (!cmd || cmd.toUpperCase() === "Z" || !sc.numberAhead()) {
+      // A number with no command to repeat (or after Z), or stray punctuation.
+      warn("a path had stray characters after a command — skipped");
+      sc.skipToCommand();
+      continue;
+    }
     const C = cmd.toUpperCase();
+    const argc = PATH_ARGS[C];
+    if (argc === undefined) {
+      warn(`a path used an unknown command "${cmd}" — that command was skipped`);
+      sc.skipToCommand();
+      cmd = "";
+      continue;
+    }
+    const relative = cmd !== C;
+    const args: number[] = [];
+    for (let k = 0; k < argc; k++) {
+      const v = C === "A" && (k === 3 || k === 4) ? sc.flag() : sc.number();
+      if (v === null) break;
+      args.push(v);
+    }
+    if (args.length < argc) {
+      warn(`a path command "${cmd}" had missing or malformed arguments — that command was skipped`);
+      sc.skipToCommand();
+      cmd = "";
+      continue;
+    }
+    const ox = relative ? cur.x : 0;
+    const oy = relative ? cur.y : 0;
+    const prevCubic = lastCubic;
+    const prevQuad = lastQuad;
+    lastCubic = null;
+    lastQuad = null;
     switch (C) {
       case "M": {
         flush(); // a new subpath starts — the previous one is done
-        const x = num();
-        const y = num();
-        cur = relative ? { x: cur.x + x, y: cur.y + y } : { x, y };
+        cur = { x: ox + args[0], y: oy + args[1] };
         start = cur;
         cmd = relative ? "l" : "L"; // subsequent pairs are an implicit lineto
         break;
       }
-      case "L": {
-        const x = num();
-        const y = num();
-        line(relative ? { x: cur.x + x, y: cur.y + y } : { x, y });
+      case "L":
+        line({ x: ox + args[0], y: oy + args[1] });
         break;
-      }
-      case "H": {
-        const x = num();
-        line(relative ? { x: cur.x + x, y: cur.y } : { x, y: cur.y });
+      case "H":
+        line({ x: ox + args[0], y: cur.y });
         break;
-      }
-      case "V": {
-        const y = num();
-        line(relative ? { x: cur.x, y: cur.y + y } : { x: cur.x, y });
+      case "V":
+        line({ x: cur.x, y: oy + args[0] });
         break;
-      }
-      case "Z": {
+      case "Z":
         subpathClosed = true;
         line(start);
         break;
+      case "C": {
+        const p2 = { x: ox + args[2], y: oy + args[3] };
+        cubic({ x: ox + args[0], y: oy + args[1] }, p2, { x: ox + args[4], y: oy + args[5] });
+        lastCubic = p2;
+        break;
+      }
+      case "S": {
+        const p1 = prevCubic ? { x: 2 * cur.x - prevCubic.x, y: 2 * cur.y - prevCubic.y } : cur;
+        const p2 = { x: ox + args[0], y: oy + args[1] };
+        cubic(p1, p2, { x: ox + args[2], y: oy + args[3] });
+        lastCubic = p2;
+        break;
+      }
+      case "Q":
+      case "T": {
+        const q: Point =
+          C === "Q"
+            ? { x: ox + args[0], y: oy + args[1] }
+            : prevQuad
+              ? { x: 2 * cur.x - prevQuad.x, y: 2 * cur.y - prevQuad.y }
+              : cur;
+        const e = C === "Q" ? { x: ox + args[2], y: oy + args[3] } : { x: ox + args[0], y: oy + args[1] };
+        // Degree elevation: a quadratic is exactly the cubic with these controls.
+        const c1 = { x: cur.x + (2 / 3) * (q.x - cur.x), y: cur.y + (2 / 3) * (q.y - cur.y) };
+        const c2 = { x: e.x + (2 / 3) * (q.x - e.x), y: e.y + (2 / 3) * (q.y - e.y) };
+        cubic(c1, c2, e);
+        lastQuad = q;
+        break;
       }
       case "A": {
-        const rx = num();
-        const ry = num();
-        const rot = num();
-        const largeArc = num() !== 0;
-        const sweep = num() !== 0;
-        const x = num();
-        const y = num();
-        const to = relative ? { x: cur.x + x, y: cur.y + y } : { x, y };
-        const params = arcEndpointToCenter(cur, rx, ry, rot, largeArc, sweep, to);
+        const [rx, ry, rot, la, sw] = args;
+        const to = { x: ox + args[5], y: oy + args[6] };
+        const params = arcEndpointToCenter(cur, rx, ry, rot, la !== 0, sw !== 0, to);
         if (!params) {
           line(to);
           break;
@@ -381,35 +484,39 @@ function parsePathD(d: string, m: Mat, layer: string | undefined, out: Entity[],
           const ey = params.ry * Math.sin(t);
           const cosPhi = Math.cos(params.phi);
           const sinPhi = Math.sin(params.phi);
-          const p = { x: params.cx + ex * cosPhi - ey * sinPhi, y: params.cy + ex * sinPhi + ey * cosPhi };
-          line(p);
+          line({ x: params.cx + ex * cosPhi - ey * sinPhi, y: params.cy + ex * sinPhi + ey * cosPhi });
         }
         cur = to;
         break;
       }
-      default: {
-        // Curves (C/S/Q/T) and anything else: consume their numeric args and
-        // draw a straight segment to the endpoint — shape approximated, not exact.
-        const argCounts: Record<string, number> = { C: 6, S: 4, Q: 4, T: 2 };
-        const argc = argCounts[C];
-        if (argc === undefined) {
-          i = tokens.length; // unknown command: bail out of this path
-          break;
-        }
-        const args: number[] = [];
-        for (let k = 0; k < argc; k++) args.push(num());
-        const to = relative
-          ? { x: cur.x + args[argc - 2], y: cur.y + args[argc - 1] }
-          : { x: args[argc - 2], y: args[argc - 1] };
-        sawCurve = true;
-        line(to);
-        break;
-      }
     }
-    if (i === startedAt) i++; // no token consumed: skip it rather than loop
   }
   flush();
-  if (sawCurve) warn("a path used curves (C/S/Q/T) — approximated as straight segments");
+}
+
+/**
+ * Appends the flattened cubic (excluding its start point, which the caller
+ * already has) to `pts`. Recursive de Casteljau subdivision until both
+ * control points lie within `tol` of the chord; depth-capped so a NaN or
+ * enormous curve can't recurse forever.
+ */
+function flattenCubic(p0: Point, p1: Point, p2: Point, p3: Point, tol: number, pts: Point[], depth = 0): void {
+  const chord = dist(p0, p3);
+  const off = (p: Point): number =>
+    chord < 1e-12 ? dist(p, p0) : Math.abs((p3.x - p0.x) * (p0.y - p.y) - (p0.x - p.x) * (p3.y - p0.y)) / chord;
+  if (depth >= 16 || (off(p1) <= tol && off(p2) <= tol)) {
+    pts.push(p3);
+    return;
+  }
+  const mid = (a: Point, b: Point): Point => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+  const p01 = mid(p0, p1);
+  const p12 = mid(p1, p2);
+  const p23 = mid(p2, p3);
+  const p012 = mid(p01, p12);
+  const p123 = mid(p12, p23);
+  const m = mid(p012, p123);
+  flattenCubic(p0, p01, p012, m, tol, pts, depth + 1);
+  flattenCubic(m, p123, p23, p3, tol, pts, depth + 1);
 }
 
 export interface SvgImportResult {
@@ -419,7 +526,7 @@ export interface SvgImportResult {
 
 /**
  * Parses SVG into entities: line/circle/ellipse/rect/polyline/polygon
- * exactly, path M/L/H/V/Z/A exactly (arcs tessellated), curves approximated.
+ * exactly, paths incl. Béziers (arcs and curves flattened).
  * Uses the browser's DOMParser (this module's one browser-API dependency).
  */
 export function parseSvgText(text: string): SvgImportResult {

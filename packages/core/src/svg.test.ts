@@ -249,12 +249,58 @@ describe("parseSvgText: paths", () => {
     expect(path("M0 0 L10 0 L10 10 L0 10").entities).toHaveLength(1);
   });
 
-  it("approximates curves as straight segments and warns once", () => {
-    const result = path("M0 0 C1 1 2 2 3 3 Q4 4 5 5");
+  it("flattens a cubic Bézier onto the true curve instead of dropping it", () => {
+    // Quarter circle of radius 10 about (10, 0) as a cubic (k = 0.5523).
+    const result = path("M0 0 C0 5.5228 4.4772 10 10 10");
     const e = result.entities[0] as PolylineEntity;
-    expect(e.points).toHaveLength(3);
-    closeTo(e.points[2], 5, -5);
-    expect(result.warnings).toEqual(["a path used curves (C/S/Q/T) — approximated as straight segments"]);
+    expect(e.points.length).toBeGreaterThan(8);
+    closeTo(e.points[0], 0, 0);
+    closeTo(e.points[e.points.length - 1], 10, -10);
+    for (const p of e.points) expect(Math.hypot(p.x - 10, p.y - 0)).toBeCloseTo(10, 1);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("elevates a quadratic exactly", () => {
+    const q = first("M0 0 Q5 10 10 0");
+    // The parabola's apex is at t=.5: y = 5 in SVG, -5 in world.
+    expect(q.points.reduce((m, p) => Math.min(m, p.y), 0)).toBeCloseTo(-5, 2);
+    closeTo(q.points[q.points.length - 1], 10, 0);
+  });
+
+  it("reflects the previous control point for S after C and for T after Q", () => {
+    expect(first("M0 0 C0 10 10 10 10 0 S20 -10 20 0").points).toEqual(first("M0 0 C0 10 10 10 10 0 C10 -10 20 -10 20 0").points);
+    expect(first("M0 0 Q5 10 10 0 T20 0").points).toEqual(first("M0 0 Q5 10 10 0 Q15 -10 20 0").points);
+  });
+
+  it("S with no preceding cubic uses the current point as its first control point", () => {
+    expect(first("M0 0 S10 10 20 0").points).toEqual(first("M0 0 C0 0 10 10 20 0").points);
+  });
+
+  it("reads relative curve commands and implicitly repeated curve arguments", () => {
+    const abs = first("M0 0 C0 5 5 10 10 10 C15 10 20 5 20 0").points;
+    expect(first("M0 0 c0 5 5 10 10 10 c5 0 10 -5 10 -10").points).toEqual(abs);
+    expect(first("M0 0 C0 5 5 10 10 10 15 10 20 5 20 0").points).toEqual(abs);
+  });
+
+  it("flattens to a tolerance in world units, so a scaled-up curve gets more points", () => {
+    const d = "M0 0 C0 10 10 10 10 0";
+    const small = parseSvgText(svgOf(`<path d="${d}"/>`)).entities[0] as PolylineEntity;
+    const big = parseSvgText(svgOf(`<g transform="scale(100)"><path d="${d}"/></g>`)).entities[0] as PolylineEntity;
+    expect(big.points.length).toBeGreaterThan(small.points.length);
+  });
+
+  it("parses compact number forms: 1.5.5 is two numbers, -.5e-3 is one", () => {
+    const e = first("M1.5.5L-.5e-3-.5e-3");
+    closeTo(e.points[0], 1.5, -0.5);
+    closeTo(e.points[1], -0.0005, 0.0005, 9);
+  });
+
+  it("reads arc flags run together with the next number", () => {
+    expect(first("M0 0a5 5 0 0110 0").points).toEqual(first("M0 0a5 5 0 0 1 10 0").points);
+  });
+
+  it("closes a curved shape with Z", () => {
+    expect(first("M0 0 C0 10 10 10 10 0 Z").closed).toBe(true);
   });
 
   it("tessellates an elliptical arc, honouring the sweep flag", () => {
@@ -276,8 +322,25 @@ describe("parseSvgText: paths", () => {
     expect(e.points).toHaveLength(2);
   });
 
-  it("bails out of a path with an unknown command", () => {
-    expect(() => path("M0 0 L10 0 Ω5 5")).not.toThrow();
+  it("skips only an unknown command, keeping the rest of the path", () => {
+    const result = path("M0 0 L10 0 X5 5 L20 0");
+    const e = result.entities[0] as PolylineEntity;
+    expect(e.points).toHaveLength(3);
+    closeTo(e.points[2], 20, 0);
+    expect(result.warnings.some((w) => w.includes("unknown command"))).toBe(true);
+  });
+
+  it("skips a command with missing arguments and continues with the next", () => {
+    const result = path("M0 0 L10 0 C1 2 3 L20 0");
+    const e = result.entities[0] as PolylineEntity;
+    closeTo(e.points[e.points.length - 1], 20, 0);
+    expect(result.warnings.some((w) => w.includes("missing or malformed"))).toBe(true);
+  });
+
+  it("never loops or throws on garbage path data", () => {
+    for (const d of ["M", "C", "M0 0 C", "M0 0 A1 1 0 5 5 1 1", "!!!", "M0 0 L 1e", "M 1,2,3 ,,, L", "M0 0 Q1", "M0 0 C NaN NaN 1 1 1 1"]) {
+      expect(() => path(d)).not.toThrow();
+    }
   });
 
   it("terminates on stray numbers after a Z instead of looping forever", () => {

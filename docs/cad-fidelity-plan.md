@@ -8,14 +8,15 @@ Written 2026-09-28 against `main` @ `8bafb82` (v0.28.0). Intended to be executed
 
 | Date | Items | Notes |
 |---|---|---|
-| — | — | nothing started |
+| 2026-09-28 | SV-01 | Path parser rewritten (own scanner: `1.5.5`, `-.5e-3`, packed arc flags); C/S/Q/T flattened to 0.01 mm until C-02 (arc-fitting via `simplify.ts` not applied — flat tolerance already minimal; revisit with C-02); bad/unknown command skips only itself. Inkscape/Illustrator/Figma fixtures deferred to SV-09 |
+| — | — | nothing else started |
 
-### Open items checklist (status 2026-09-28: **nothing started** — every item below is open)
+### Open items checklist (status 2026-09-28: SV-01 done — the rest open)
 
 Tick `[x]` and add a progress-log row as items land. Order = recommended execution order.
 
 **1 · Do first — SVG bugs + foundation**
-- [ ] SV-01 SVG Bézier paths (C/S/Q/T) — today they silently drop geometry
+- [x] SV-01 SVG Bézier paths (C/S/Q/T) — today they silently drop geometry
 - [ ] SV-02 SVG units + true physical size (import and export)
 - [ ] Z-01 Entity-kind registry + new-entity checklist
 - [ ] Z-02 Document v3 + named tables (blocks, dimStyles, textStyles, linetypes, hatchPatterns, layouts, params)
