@@ -596,3 +596,15 @@ to the user (see the release procedure in the user's notes / README).
   - Not done / caveats: no desktop (Tauri) run of S-03's IPC path or the
     Explorer wireframe orientation (the DLL wasn't rebuilt/installed);
     the DLL wireframe follows the header only, not the user's override.
+
+- 2026-09-28 — wrap-up. Both parts shipped in v0.29.0. Closed the loose ends:
+  - `linearUnit: "millimeter"` question **verified fine**: the inch file
+    reads back 457.2 mm = exactly 18 in, so OCCT converts from the file's
+    own unit.
+  - `verify_shell_thumb` UNC bug fixed (`\?\UNC\srv\share` → `\srv\share`);
+    the K: path now resolves. It then reports 0x8004B200 (no handler bitmap)
+    because the DLL installed on this PC predates the wireframe/whitespace
+    fix — reinstall it (`install-thumbnailer.ps1`) before re-checking.
+  - Still open (needs the desktop app, not doable from the browser pane):
+    live check of S-03's `read_file_bytes` path, and the DLL wireframe
+    following the user's Y/Z override (it follows the header only).

@@ -32,10 +32,13 @@ fn main() {
     // The shell needs an absolute path; strip the \\?\ verbatim prefix that
     // canonicalize adds on Windows.
     let abs = std::fs::canonicalize(&path).expect("file must exist");
-    let abs = abs
-        .to_string_lossy()
-        .trim_start_matches(r"\\?\")
-        .to_string();
+    // A network share canonicalizes to \\?\UNC\server\share; that has to
+    // become \\server\share, not UNC\server\share.
+    let abs = abs.to_string_lossy();
+    let abs = match abs.strip_prefix(r"\\?\UNC\") {
+        Some(rest) => format!(r"\\{rest}"),
+        None => abs.trim_start_matches(r"\\?\").to_string(),
+    };
 
     unsafe {
         CoInitializeEx(None, COINIT_APARTMENTTHREADED)
