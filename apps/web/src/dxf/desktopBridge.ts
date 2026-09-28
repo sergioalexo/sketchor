@@ -1,7 +1,6 @@
-import { importDxfText, importEntities, openIntoSession, useApp } from "../state/store";
+import { importDxfText, importEntities, importSvgText, openIntoSession, useApp } from "../state/store";
 import { DWG_UNREADABLE, dwgToDxfText } from "../browser/dwgImport";
 import { bindSavePath, openModelBytes } from "../io/drawingFile";
-import { parseSvgText } from "@sketchor/core";
 
 /**
  * Desktop-only: when Sketchor is launched by double-clicking a file (or via
@@ -82,8 +81,8 @@ export function initDesktopFileOpen(): void {
 
   tauri.event.listen("open-svg", ({ payload }) => {
     if (!payload?.text) return;
-    const { entities, warnings } = parseSvgText(payload.text);
-    openIntoSession(payload.name, () => importEntities(entities, warnings));
+    const svgText = payload.text;
+    openIntoSession(payload.name, () => importSvgText(svgText));
     bindOpened(payload.path, payload.name);
     revealFolder(payload.dir);
   });

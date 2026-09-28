@@ -13,7 +13,7 @@ export function printDrawing(): void {
   const entities = doc.all().filter((e) => !hidden.has(e.layer ?? "0"));
   if (entities.length === 0) return;
 
-  const svg = entitiesToSvgDocument(entities, { strokeColor: "#000000", padding: 8 });
+  const svg = entitiesToSvgDocument(entities, { strokeColor: "#000000", padding: 8, unit: "none" });
   const title = activeSaveTarget()?.name ?? "Sketchor drawing";
   const unit = useApp.getState().displayUnit;
 

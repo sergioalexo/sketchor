@@ -20,7 +20,8 @@ import type { Point } from "./geometry";
 const line = (): LineEntity => ({ id: "l", type: "line", a: { x: 0, y: 0 }, b: { x: 100, y: 50 } });
 const circle = (): CircleEntity => ({ id: "c", type: "circle", center: { x: 20, y: 30 }, radius: 12.5 });
 
-const svgOf = (body: string, attrs = ""): string =>
+/** Default root: 100×100 mm over a 100×100 viewBox, so 1 user unit = 1 mm and coordinates read back as written. */
+const svgOf = (body: string, attrs = 'width="100mm" height="100mm" viewBox="0 0 100 100"'): string =>
   `<svg xmlns="http://www.w3.org/2000/svg" ${attrs}>${body}</svg>`;
 
 const pointsOf = (e: Entity): Point[] => {
@@ -45,7 +46,7 @@ describe("entitiesToSvgDocument", () => {
     const text = entitiesToSvgDocument([line()]);
     expect(text.startsWith('<?xml version="1.0" encoding="UTF-8"?>\n')).toBe(true);
     // Bounds 100x50 plus the default padding of 5 on every side.
-    expect(text).toContain('width="110" height="60" viewBox="0 0 110 60"');
+    expect(text).toContain('width="110mm" height="60mm" viewBox="0 0 110 60"');
     expect(text).toContain('stroke-width="0.25"');
     expect(text.trimEnd().endsWith("</svg>")).toBe(true);
   });
@@ -58,13 +59,13 @@ describe("entitiesToSvgDocument", () => {
 
   it("honours the padding option in both the size and the offset", () => {
     const text = entitiesToSvgDocument([line()], { padding: 20 });
-    expect(text).toContain('width="140" height="90"');
+    expect(text).toContain('width="140mm" height="90mm"');
     expect(text).toContain('x1="20" y1="70"');
   });
 
   it("falls back to a fixed box for an empty drawing", () => {
     const text = entitiesToSvgDocument([]);
-    expect(text).toContain('width="110" height="110"');
+    expect(text).toContain('width="110mm" height="110mm"');
     expect(parseSvgText(text).entities).toEqual([]);
   });
 
@@ -355,6 +356,110 @@ describe("parseSvgText: paths", () => {
     expect(path("").entities).toEqual([]);
     expect(path("M").entities).toEqual([]);
     expect(path("Z").entities).toEqual([]);
+  });
+});
+
+describe("parseSvgText: units and physical size (SV-02)", () => {
+  // A 10-unit horizontal line, so its length in mm is the whole story.
+  const lenOf = (attrs: string): { len: number; result: ReturnType<typeof parseSvgText> } => {
+    const result = parseSvgText(svgOf('<line x1="0" y1="0" x2="10" y2="0"/>', attrs));
+    const e = result.entities[0] as LineEntity;
+    return { len: e.b.x - e.a.x, result };
+  };
+
+  it("scales a viewBox to the declared width/height in mm", () => {
+    const { len, result } = lenOf('width="200mm" height="100mm" viewBox="0 0 100 50"');
+    expect(len).toBeCloseTo(20, 9);
+    expect(result.units).toMatchObject({ source: "declared", insUnits: 4 });
+    expect(result.units.mmPerUserUnit).toBeCloseTo(2, 9);
+  });
+
+  it("understands cm, in, pt and pc", () => {
+    expect(lenOf('width="10cm" height="10cm" viewBox="0 0 10 10"').len).toBeCloseTo(100, 9);
+    expect(lenOf('width="1in" height="1in" viewBox="0 0 1 1"').len).toBeCloseTo(254, 9);
+    expect(lenOf('width="72pt" height="72pt" viewBox="0 0 72 72"').len).toBeCloseTo((10 * 25.4) / 72, 9);
+    expect(lenOf('width="6pc" height="6pc" viewBox="0 0 6 6"').len).toBeCloseTo((10 * 25.4) / 6, 9);
+    expect(lenOf('width="2in" height="2in" viewBox="0 0 2 2"').result.units.insUnits).toBe(1);
+    expect(lenOf('width="5cm" height="5cm" viewBox="0 0 5 5"').result.units.insUnits).toBe(5);
+  });
+
+  it("reads a unitless size as 96 dpi and says the size was assumed", () => {
+    const { len, result } = lenOf('width="96" height="96" viewBox="0 0 96 96"');
+    expect(len).toBeCloseTo(10 * (25.4 / 96), 9);
+    expect(result.units.source).toBe("assumed");
+    expect(lenOf('width="96px" height="96px" viewBox="0 0 96 96"').result.units.source).toBe("assumed");
+  });
+
+  it("with no viewBox a user unit is one px whatever width/height say", () => {
+    const { len, result } = lenOf('width="100mm" height="100mm"');
+    expect(len).toBeCloseTo(10 * (25.4 / 96), 9);
+    expect(result.units.source).toBe("assumed");
+  });
+
+  it("falls back to 96 dpi for percentages, missing sizes and junk", () => {
+    for (const attrs of ['width="100%" height="100%" viewBox="0 0 10 10"', 'viewBox="0 0 10 10"', "", 'width="auto" height="wide" viewBox="0 0 10 10"']) {
+      const { len, result } = lenOf(attrs);
+      expect(len).toBeCloseTo(10 * (25.4 / 96), 9);
+      expect(result.units.source).toBe("assumed");
+    }
+  });
+
+  it("derives a missing dimension from the viewBox aspect ratio", () => {
+    expect(lenOf('width="50mm" viewBox="0 0 10 20"').len).toBeCloseTo(50, 9);
+    expect(lenOf('height="40mm" viewBox="0 0 10 20"').len).toBeCloseTo(20, 9);
+  });
+
+  it("honours preserveAspectRatio: meet uses the smaller scale, slice the larger, none each axis", () => {
+    const box = 'width="100mm" height="50mm" viewBox="0 0 10 10"'; // sx = 10, sy = 5
+    expect(lenOf(`${box}`).len).toBeCloseTo(50, 9); // xMidYMid meet
+    expect(lenOf(`${box} preserveAspectRatio="xMidYMid slice"`).len).toBeCloseTo(100, 9);
+    expect(lenOf(`${box} preserveAspectRatio="none"`).len).toBeCloseTo(100, 9);
+    const vert = parseSvgText(svgOf('<line x1="0" y1="0" x2="0" y2="10"/>', `${box} preserveAspectRatio="none"`)).entities[0] as LineEntity;
+    expect(Math.abs(vert.b.y - vert.a.y)).toBeCloseTo(50, 9);
+  });
+
+  it("aligns the meet box: xMin/xMid/xMax move the content within the wider viewport", () => {
+    const at = (par: string) => (parseSvgText(svgOf('<line x1="0" y1="0" x2="10" y2="0"/>', `width="100mm" height="50mm" viewBox="0 0 10 10" preserveAspectRatio="${par}"`)).entities[0] as LineEntity).a.x;
+    expect(at("xMinYMid meet")).toBeCloseTo(0, 9);
+    expect(at("xMidYMid meet")).toBeCloseTo(25, 9);
+    expect(at("xMaxYMid meet")).toBeCloseTo(50, 9);
+  });
+
+  it("applies the viewBox origin", () => {
+    const e = parseSvgText(svgOf('<line x1="100" y1="100" x2="110" y2="100"/>', 'width="10mm" height="10mm" viewBox="100 100 10 10"')).entities[0] as LineEntity;
+    closeTo(e.a, 0, 0);
+    closeTo(e.b, 10, 0);
+  });
+
+  it("scales circle radii and image sizes with the physical size", () => {
+    const c = parseSvgText(svgOf('<circle cx="5" cy="5" r="5"/>', 'width="20mm" height="20mm" viewBox="0 0 10 10"')).entities[0] as CircleEntity;
+    expect(c.radius).toBeCloseTo(10, 9);
+  });
+});
+
+describe("entitiesToSvgDocument: physical size (SV-02)", () => {
+  it("writes width/height in mm by default, with the viewBox in world mm", () => {
+    const text = entitiesToSvgDocument([line()], { padding: 0 });
+    expect(text).toContain('width="100mm" height="50mm" viewBox="0 0 100 50"');
+  });
+
+  it("writes inches when asked, leaving the viewBox in mm so 1 viewBox unit stays 1 mm", () => {
+    const text = entitiesToSvgDocument([line()], { padding: 0, unit: "in" });
+    expect(text).toContain(`width="${Math.round((100 / 25.4) * 1e4) / 1e4}in"`);
+    expect(text).toContain('viewBox="0 0 100 50"');
+  });
+
+  it('writes bare numbers for unit "none" (inline embedding)', () => {
+    expect(entitiesToSvgDocument([line()], { padding: 0, unit: "none" })).toContain('width="100" height="50"');
+  });
+
+  it("round-trips real size: a 100 mm part comes back 100 mm, in either unit", () => {
+    for (const unit of ["mm", "in"] as const) {
+      const back = parseSvgText(entitiesToSvgDocument([line()], { padding: 0, unit }));
+      const e = back.entities.find((x) => x.type === "line") as LineEntity;
+      expect(Math.abs(e.b.x - e.a.x)).toBeCloseTo(100, 3);
+      expect(back.units.source).toBe("declared");
+    }
   });
 });
 

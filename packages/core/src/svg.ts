@@ -33,6 +33,14 @@ export interface SvgExportOptions {
    * black or white labels from the fill colour, which only works on solid.
    */
   fillOpacity?: number;
+  /**
+   * Unit of the root `width`/`height`, so the file opens at true size
+   * (world units are mm; the viewBox stays in mm and the browser/Inkscape/
+   * LightBurn scale it to the stated physical size). `"none"` writes bare
+   * numbers (read as px) for SVG embedded inline in an HTML page whose CSS
+   * sizes it. Default `"mm"`.
+   */
+  unit?: "mm" | "in" | "none";
 }
 
 /** Tessellates an arc into an SVG path's `d` attribute (sidesteps large-arc/sweep-flag sign risk entirely). */
@@ -155,9 +163,11 @@ export function entitiesToSvgDocument(entities: Entity[], opts: SvgExportOptions
     groups.push(`<g data-layer="${escapeXml(layer)}">${body.join("")}</g>`);
   }
 
+  const unit = opts.unit ?? "mm";
+  const sizeOf = (mm: number): string => (unit === "in" ? `${fmt(mm / 25.4)}in` : unit === "mm" ? `${fmt(mm)}mm` : fmt(mm));
   return (
     `<?xml version="1.0" encoding="UTF-8"?>\n` +
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${fmt(width)}" height="${fmt(height)}" ` +
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${sizeOf(width)}" height="${sizeOf(height)}" ` +
     `viewBox="0 0 ${fmt(width)} ${fmt(height)}" stroke="${stroke}" stroke-width="${fmt(strokeWidth)}" fill="none">\n` +
     `${groups.join("\n")}\n</svg>\n`
   );
@@ -519,14 +529,105 @@ function flattenCubic(p0: Point, p1: Point, p2: Point, p3: Point, tol: number, p
   flattenCubic(m, p123, p23, p3, tol, pts, depth + 1);
 }
 
+/** mm in one CSS pixel — what an SVG user unit is when the file gives no physical size. */
+export const SVG_MM_PER_PX = 25.4 / 96;
+
+/** Physical CSS units → mm. `null` for `%`, `auto`, font-relative units and junk (caller falls back). */
+const MM_PER_CSS_UNIT: Record<string, number> = { "": SVG_MM_PER_PX, px: SVG_MM_PER_PX, mm: 1, cm: 10, q: 0.25, in: 25.4, pt: 25.4 / 72, pc: 25.4 / 6 };
+/** Units that name a real-world size (px and unitless are only a 96 dpi convention). */
+const PHYSICAL_UNITS = new Set(["mm", "cm", "q", "in", "pt", "pc"]);
+
+function parseSvgLength(v: string | null): { mm: number; unit: string } | null {
+  if (v === null) return null;
+  const m = /^\s*([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)\s*([a-zA-Z%]*)\s*$/.exec(v);
+  if (!m) return null;
+  const unit = m[2].toLowerCase();
+  const perUnit = MM_PER_CSS_UNIT[unit];
+  const value = parseFloat(m[1]);
+  if (perUnit === undefined || !(value > 0)) return null;
+  return { mm: value * perUnit, unit };
+}
+
+/** How an SVG's user units relate to the real world, as read from its root element. */
+export interface SvgUnits {
+  /** Millimetres per user unit. Entities come back already scaled by this (world units are mm). */
+  mmPerUserUnit: number;
+  /**
+   * `declared` — width/height carry a physical unit (mm, cm, in, pt, pc), so
+   * the size is the author's. `assumed` — no physical size anywhere (unitless
+   * or px, percentages, nothing at all), so it was read at 96 dpi like a
+   * browser would; worth showing the user.
+   */
+  source: "declared" | "assumed";
+  /** `$INSUNITS` code matching the declared unit (1 in, 4 mm, 5 cm), when there is one. */
+  insUnits?: number;
+}
+
+/**
+ * Root-element mapping from user units to millimetres: `width`/`height`
+ * against `viewBox`, honouring `preserveAspectRatio` (uniform meet/slice with
+ * alignment, or `none` for independent x/y scale). The matrix maps user
+ * coordinates to viewport millimetres, Y still down.
+ */
+function svgViewport(root: Element): { mat: Mat; units: SvgUnits } {
+  const assumed = (): { mat: Mat; units: SvgUnits } => ({
+    mat: [SVG_MM_PER_PX, 0, 0, SVG_MM_PER_PX, 0, 0],
+    units: { mmPerUserUnit: SVG_MM_PER_PX, source: "assumed" },
+  });
+  const w = parseSvgLength(root.getAttribute("width"));
+  const h = parseSvgLength(root.getAttribute("height"));
+  const vbNums = (root.getAttribute("viewBox") ?? "").trim().split(/[\s,]+/).map(Number);
+  const hasVb = vbNums.length === 4 && vbNums.every(Number.isFinite) && vbNums[2] > 0 && vbNums[3] > 0;
+  // Without a viewBox a user unit is one CSS px whatever width/height say.
+  if (!hasVb) return assumed();
+  const [minX, minY, vbW, vbH] = vbNums;
+
+  // A missing dimension follows the viewBox's aspect ratio (SVG's `auto`).
+  let wMm = w?.mm ?? null;
+  let hMm = h?.mm ?? null;
+  if (wMm !== null && hMm === null) hMm = (wMm * vbH) / vbW;
+  else if (hMm !== null && wMm === null) wMm = (hMm * vbW) / vbH;
+  if (wMm === null || hMm === null) {
+    // No usable size at all: 1 user unit = 1 px, but the viewBox origin still applies.
+    return { mat: [SVG_MM_PER_PX, 0, 0, SVG_MM_PER_PX, -minX * SVG_MM_PER_PX, -minY * SVG_MM_PER_PX], units: assumed().units };
+  }
+
+  const par = (root.getAttribute("preserveAspectRatio") ?? "").trim().split(/\s+/).filter((t) => t !== "defer");
+  const align = par[0] ?? "xMidYMid";
+  const slice = par[1] === "slice";
+  const sx = wMm / vbW;
+  const sy = hMm / vbH;
+  const physical = (w !== null && PHYSICAL_UNITS.has(w.unit)) || (h !== null && PHYSICAL_UNITS.has(h.unit));
+  const unitCode = (u: string | undefined): number | undefined => (u === "in" ? 1 : u === "cm" ? 5 : u === "mm" ? 4 : undefined);
+  const declaredUnit = w && PHYSICAL_UNITS.has(w.unit) ? w.unit : h && PHYSICAL_UNITS.has(h.unit) ? h.unit : undefined;
+  const meta = (mmPerUserUnit: number): SvgUnits => ({
+    mmPerUserUnit,
+    source: physical ? "declared" : "assumed",
+    ...(unitCode(declaredUnit) !== undefined ? { insUnits: unitCode(declaredUnit) } : {}),
+  });
+
+  if (align === "none") {
+    return { mat: [sx, 0, 0, sy, -minX * sx, -minY * sy], units: meta((sx + sy) / 2) };
+  }
+  const s = slice ? Math.max(sx, sy) : Math.min(sx, sy);
+  const frac = (a: string): number => (a === "Min" ? 0 : a === "Max" ? 1 : 0.5);
+  const ax = frac(align.slice(1, 4));
+  const ay = frac(align.slice(5, 8));
+  return { mat: [s, 0, 0, s, (wMm - vbW * s) * ax - minX * s, (hMm - vbH * s) * ay - minY * s], units: meta(s) };
+}
+
 export interface SvgImportResult {
   entities: Entity[];
   warnings: string[];
+  /** How the file's user units map to mm — entities are already scaled. See {@link SvgUnits}. */
+  units: SvgUnits;
 }
 
 /**
  * Parses SVG into entities: line/circle/ellipse/rect/polyline/polygon
  * exactly, paths incl. Béziers (arcs and curves flattened).
+ * Coordinates come back in mm: the root `width`/`height`/`viewBox` give the
+ * real size when they name one, else 96 dpi is assumed (see {@link SvgUnits}).
  * Uses the browser's DOMParser (this module's one browser-API dependency).
  */
 export function parseSvgText(text: string): SvgImportResult {
@@ -535,7 +636,7 @@ export function parseSvgText(text: string): SvgImportResult {
   const doc = new DOMParser().parseFromString(text, "image/svg+xml");
   if (doc.querySelector("parsererror")) {
     warnings.push("the SVG could not be parsed (malformed XML)");
-    return { entities, warnings };
+    return { entities, warnings, units: { mmPerUserUnit: SVG_MM_PER_PX, source: "assumed" } };
   }
 
   const numAttr = (el: Element, name: string, fallback = 0): number => {
@@ -685,6 +786,7 @@ export function parseSvgText(text: string): SvgImportResult {
     }
   };
 
-  walk(doc.documentElement, IDENTITY);
-  return { entities, warnings: [...new Set(warnings)] };
+  const viewport = svgViewport(doc.documentElement);
+  walk(doc.documentElement, viewport.mat);
+  return { entities, warnings: [...new Set(warnings)], units: viewport.units };
 }

@@ -9,15 +9,16 @@ Written 2026-09-28 against `main` @ `8bafb82` (v0.28.0). Intended to be executed
 | Date | Items | Notes |
 |---|---|---|
 | 2026-09-28 | SV-01 | Path parser rewritten (own scanner: `1.5.5`, `-.5e-3`, packed arc flags); C/S/Q/T flattened to 0.01 mm until C-02 (arc-fitting via `simplify.ts` not applied — flat tolerance already minimal; revisit with C-02); bad/unknown command skips only itself. Inkscape/Illustrator/Figma fixtures deferred to SV-09 |
+| 2026-09-28 | SV-02 | `parseSvgText` returns `units` and scales to mm from width/height/viewBox/preserveAspectRatio (mm cm in pt pc; px/unitless/%/missing → 96 dpi, flagged `assumed`). New `importSvgText`/`overlaySvgText` in the store feed the amber "Read as" banner (`ImportUnits.fileUnitMm`); a declared mm/cm/in becomes the display unit. Export writes `width="…mm"` (or `in` for in/ft tabs); inline print/report embeds pass `unit: "none"`. Legacy Sketchor SVGs (unitless width) now read as 96 dpi and show the banner. Live check was store-level only (browser window hidden, banner not painted) |
 | — | — | nothing else started |
 
-### Open items checklist (status 2026-09-28: SV-01 done — the rest open)
+### Open items checklist (status 2026-09-28: SV-01, SV-02 done — the rest open)
 
 Tick `[x]` and add a progress-log row as items land. Order = recommended execution order.
 
 **1 · Do first — SVG bugs + foundation**
 - [x] SV-01 SVG Bézier paths (C/S/Q/T) — today they silently drop geometry
-- [ ] SV-02 SVG units + true physical size (import and export)
+- [x] SV-02 SVG units + true physical size (import and export)
 - [ ] Z-01 Entity-kind registry + new-entity checklist
 - [ ] Z-02 Document v3 + named tables (blocks, dimStyles, textStyles, linetypes, hatchPatterns, layouts, params)
 - [ ] X-01 Modern DXF writer (AC1032, handles, all sections; R12 kept for CAM; save back in source version)

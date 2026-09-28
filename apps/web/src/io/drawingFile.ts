@@ -1,4 +1,4 @@
-import { entitiesToDxf, entitiesToSvgDocument, parseSvgText } from "@sketchor/core";
+import { entitiesToDxf, entitiesToSvgDocument } from "@sketchor/core";
 import { DWG_UNREADABLE, dwgToDxfText } from "../browser/dwgImport";
 import { isModelFile, loadModel } from "../model3d/stepImport";
 import {
@@ -8,6 +8,8 @@ import {
   getSessions,
   importDxfText,
   importEntities,
+  importSvgText,
+  overlaySvgText,
   isModelSession,
   openIntoSession,
   openModelIntoSession,
@@ -77,7 +79,9 @@ function serialize(format: SaveFormat): string {
     // declared unit so the file's numbers represent real-world size.
     return entitiesToDxf(entities, displayUnitToDxfCode(displayUnit), factorFromMm(displayUnit));
   }
-  return entitiesToSvgDocument(entities);
+  // True physical size: inches only when the tab works in inches/feet.
+  const displayUnit = useApp.getState().displayUnit;
+  return entitiesToSvgDocument(entities, { unit: displayUnit === "in" || displayUnit === "ft" ? "in" : "mm" });
 }
 
 /* ----------------------------- save targets ----------------------------- */
@@ -282,8 +286,7 @@ export async function loadDrawingFile(name: string, file: File): Promise<void> {
     openModelBytes(name, await file.arrayBuffer());
   } else if (/\.svg$/i.test(name)) {
     const text = await file.text();
-    const { entities, warnings } = parseSvgText(text);
-    openIntoSession(name, () => importEntities(entities, warnings));
+    openIntoSession(name, () => importSvgText(text));
   } else if (/\.dwg$/i.test(name)) {
     const text = await dwgToDxfText(await file.arrayBuffer());
     openIntoSession(name, () => (text ? importDxfText(text) : importEntities([], [DWG_UNREADABLE])));
@@ -343,9 +346,7 @@ export async function overlayDrawingFile(name: string, file: File): Promise<{ co
   }
   if (/\.svg$/i.test(name)) {
     const text = await file.text();
-    const { entities, warnings } = parseSvgText(text);
-    useApp.getState().setFileWarnings(warnings);
-    return { ...overlayEntities(entities, label), warnings };
+    return overlaySvgText(text, label);
   }
   if (/\.dwg$/i.test(name)) {
     const text = await dwgToDxfText(await file.arrayBuffer());

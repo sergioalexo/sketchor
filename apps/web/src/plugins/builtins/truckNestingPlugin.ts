@@ -496,6 +496,7 @@ export function buildPrintHtml(
     padding,
     strokeWidth,
     strokeColor: "#111111",
+    unit: "none", // inline in the sheet page, sized by its CSS
     // Solid: the labels the plan drew on each pallet are black or white by how
     // dark that pallet's colour is, which a washed-out fill would undo.
     fillOpacity: 1,

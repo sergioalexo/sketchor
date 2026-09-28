@@ -131,7 +131,7 @@ export function buildNestReportHtml(lastNest: LastNest): string {
   const sheetsHtml = lastNest.sheets
     .map((_sheet, i) => {
       const entities = sheetDrawingEntities(lastNest, i);
-      const svg = entitiesToSvgDocument(entities, { strokeColor: "#111111" }).replace(/<\?xml[^>]*\?>\s*/, "");
+      const svg = entitiesToSvgDocument(entities, { strokeColor: "#111111", unit: "none" }).replace(/<\?xml[^>]*\?>\s*/, "");
       const rows = placementsOn(lastNest, i)
         .map(
           (p) =>

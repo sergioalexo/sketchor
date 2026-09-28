@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { parseSvgText } from "@sketchor/core";
-import { getSessions, importDxfText, importEntities, openIntoSession, useApp } from "../state/store";
+import { getSessions, importDxfText, importSvgText, openIntoSession, useApp } from "../state/store";
 import { bindSaveHandle, bindSavePath, openModelBytes } from "../io/drawingFile";
 import { isModelFile } from "../model3d/stepImport";
 import { fileToSvg, isDrawingFile, queueThumbnail } from "./thumbnail";
@@ -104,8 +104,7 @@ async function openEntry(entry: Entry, text: string): Promise<void> {
     return;
   }
   if (/\.svg$/i.test(entry.name)) {
-    const { entities, warnings } = parseSvgText(text);
-    openIntoSession(entry.name, () => importEntities(entities, warnings));
+    openIntoSession(entry.name, () => importSvgText(text));
   } else {
     openIntoSession(entry.name, () => importDxfText(text));
   }

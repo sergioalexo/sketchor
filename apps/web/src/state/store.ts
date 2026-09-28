@@ -34,6 +34,7 @@ import {
   parseCode,
   MM_PER_INSUNIT,
   parseDxf,
+  parseSvgText,
   patternCommands,
   polylineLength,
   polylineSegments,
@@ -58,6 +59,7 @@ import {
   type HealIssue,
   type HealOptions,
   type ParseIssue,
+  type SvgUnits,
   type PatternSpec,
   type Point,
 } from "@sketchor/core";
@@ -222,7 +224,9 @@ export function ungroupSelection(): boolean {
 export interface ImportUnits {
   /** `$INSUNITS` code the coordinates were read in (0 = left as-is). */
   code: number;
-  source: DxfUnitSource | "user";
+  source: DxfUnitSource | "user" | "svg-assumed";
+  /** mm per raw file unit when that isn't an `$INSUNITS` code — an SVG read at 96 dpi. Overrides `code` when re-reading. */
+  fileUnitMm?: number;
   /** Set for an overlay import: only that layer is re-read. */
   layer?: string;
 }
@@ -267,7 +271,7 @@ export function reinterpretImportUnits(to: DisplayUnit): void {
   const { importUnits } = useApp.getState();
   if (!importUnits) return;
   const toCode = displayUnitToDxfCode(to);
-  const factor = (MM_PER_INSUNIT[toCode] ?? 1) / (MM_PER_INSUNIT[importUnits.code] ?? 1);
+  const factor = (MM_PER_INSUNIT[toCode] ?? 1) / (importUnits.fileUnitMm ?? MM_PER_INSUNIT[importUnits.code] ?? 1);
   if (factor !== 1) {
     const targets = doc.all().filter((e) => importUnits.layer === undefined || layerOf(e) === importUnits.layer);
     const origin = { x: 0, y: 0 };
@@ -278,7 +282,7 @@ export function reinterpretImportUnits(to: DisplayUnit): void {
     if (commands.length) bus.execute({ type: "batch", commands });
   }
   if (importUnits.layer === undefined) useApp.getState().setDisplayUnit(to);
-  useApp.getState().setImportUnits({ ...importUnits, code: toCode, source: "user" });
+  useApp.getState().setImportUnits({ ...importUnits, code: toCode, source: "user", fileUnitMm: undefined });
   useApp.getState().requestFit();
 }
 
@@ -314,6 +318,52 @@ export function overlayDxfText(text: string, label: string): { count: number; wa
   useApp.getState().setImportReport(report);
   const added = overlayEntities(entities, label);
   useApp.getState().setImportUnits({ code: insUnits, source: unitSource, layer: added.layer });
+  return { ...added, warnings };
+}
+
+/** Import report for an SVG: what was read, in the DXF report's shape (an SVG has nothing to skip that we can count). */
+function svgReport(entities: Entity[]): DxfImportReport {
+  const counts = new Map<string, number>();
+  for (const e of entities) counts.set(e.type.toUpperCase(), (counts.get(e.type.toUpperCase()) ?? 0) + 1);
+  return { parsed: [...counts].map(([type, count]) => ({ type, count })), skipped: [] };
+}
+
+/** The banner's unit record for a parsed SVG. A size the file never stated (96 dpi assumed) is amber and re-readable, like a DXF with no $INSUNITS. */
+function svgImportUnits(units: SvgUnits, layer?: string): ImportUnits {
+  const assumed = units.source === "assumed";
+  return {
+    code: assumed ? 4 : (units.insUnits ?? 4),
+    source: assumed ? "svg-assumed" : "insunits",
+    ...(assumed ? { fileUnitMm: units.mmPerUserUnit } : {}),
+    ...(layer !== undefined ? { layer } : {}),
+  };
+}
+
+/**
+ * Imports SVG text: replaces the drawing (one undoable step) with geometry at
+ * the size the file states — `width`/`height` against `viewBox` — or at
+ * 96 dpi with an amber "Read as" banner when it states none (SV-02). A
+ * declared inch/cm/mm size also becomes the tab's display unit, as a DXF's
+ * `$INSUNITS` does.
+ */
+export function importSvgText(text: string): { count: number; warnings: string[] } {
+  const { entities, warnings, units } = parseSvgText(text);
+  applyImportedEntities(entities, true);
+  useApp.getState().setImportReport(svgReport(entities));
+  useApp.getState().setFileWarnings(warnings);
+  useApp.getState().setImportUnits(svgImportUnits(units));
+  const unit = units.source === "declared" ? dxfCodeToDisplayUnit(units.insUnits ?? 0) : null;
+  if (unit) useApp.getState().setDisplayUnit(unit);
+  return { count: entities.length, warnings };
+}
+
+/** SVG overlay: as {@link overlayDxfText} — the drawing keeps its own unit; only the overlay layer is re-readable. */
+export function overlaySvgText(text: string, label: string): { count: number; warnings: string[]; layer: string } {
+  const { entities, warnings, units } = parseSvgText(text);
+  useApp.getState().setImportReport(svgReport(entities));
+  useApp.getState().setFileWarnings(warnings);
+  const added = overlayEntities(entities, label);
+  useApp.getState().setImportUnits(svgImportUnits(units, added.layer));
   return { ...added, warnings };
 }
 
