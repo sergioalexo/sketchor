@@ -22,6 +22,49 @@ pipeline. Follow the repo's testing rules in `CLAUDE.md` → "Testing".
 Do **not** copy this file into the repo (it's company data, and the repo is
 public; auto mode also blocks copying from `K:`). Open it in place.
 
+
+## STATUS / HANDOFF (read this first — updated 2026-09-28)
+
+**Shipped in v0.29.0 and pushed to `main` (last commit `f1cf854`).** Nothing
+in this plan is half-done. The progress log at the bottom is the history;
+this section is the summary for a fresh session.
+
+| Item | State |
+|---|---|
+| S-00 root cause | Done. Not OOM: (1) `native/step-wire` `find_type` rejected `TYPE (args)` with a space; (2) occt-import-js never triangulated leaf nodes on this file. Both fixed (the wasm fix lives in `native/occt-import-js-build/patch_importer.py`, vendored wasm rebuilt). |
+| S-01 error text, S-02 memory/tessellation, S-03 binary IPC, S-04 progress | Done, tested. |
+| S-05 wireframe fallback | **Skipped on purpose** (scoped for "OCCT can't read it", disproved). Revisit only for a genuinely OCCT-hostile file. |
+| S-06 thumbnail size cap, S-07 cache guard | Done. |
+| S-08 tests | Done for the pure parts (`importError`, `tessellation`, `upAxis`, Rust `read_file_bytes`, step-wire). No worker-pool integration test (no mocking pattern in repo). |
+| U-01…U-06 Y/Z up toggle | Done. Deviation: the turn is applied to the model *data* (`reorientModel`), not a group matrix. Inventor detection deliberately omitted (no real export to verify). |
+| `linearUnit: "millimeter"` | Verified fine (inch file reads 457.2 mm = 18 in). |
+| `verify_shell_thumb` UNC bug | Fixed. |
+
+### What is genuinely left (all optional, none blocking)
+
+1. **Desktop (Tauri) live check** — not doable from the browser pane:
+   double-click a big STEP and open it from the in-app file browser to
+   exercise `read_file_bytes`; confirm non-UTF-8 STEP names open.
+2. **Reinstall the Explorer DLL** (`native/dxf-thumbnailer/install-thumbnailer.ps1`)
+   — the one on this PC predates the step-wire whitespace fix, so
+   `verify_shell_thumb` on the 24408 file returns `0x8004B200` until then.
+   Then re-verify the wireframe is upright (Y-up rule) in real Explorer.
+3. **Known limit:** the DLL wireframe follows the STEP header only, not the
+   user's per-file Y/Z override.
+4. **Inventor Y-up detection** — add to `detectUpAxis` (TS) and `is_y_up`
+   (Rust) only after checking a real Inventor export.
+5. No visual screenshot of the 24408 model was taken (pane screenshots
+   timed out on that scene; verified via status/DOM sizes only).
+
+### Rules for the next session
+
+- Do **not** copy the 24408 file (company data, public repo) or commit
+  anything derived from it; open it in place from `K:\`.
+- Other sessions release in parallel: `git pull` and read the current
+  version before any bump; don't tag unless the user asks.
+- `npm test` and `npm run build` must pass; `apps/web/vendor/occt-import-js`
+  is our own build — never reinstall the npm package.
+
 ---
 
 ## Part S — make large STEP files open
