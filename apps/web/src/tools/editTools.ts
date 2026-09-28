@@ -9,6 +9,7 @@ import {
   filletAllCorners,
   filletLines,
   filletPolylineCorner,
+  kindHitDistance,
   layerOf,
   newEntityId,
   offsetEntity,
@@ -64,7 +65,7 @@ function distanceTo(e: Entity, p: Point): number {
     case "polyline":
       return Math.min(...e.points.map((q, i) => pointToSegment(p, q, e.points[(i + 1) % e.points.length])));
     default:
-      return Infinity;
+      return kindHitDistance(e, p);
   }
 }
 

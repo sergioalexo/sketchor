@@ -218,6 +218,8 @@ function Geometry({ entity, unit }: { entity: Entity; unit: DisplayUnit }) {
           <NumberRow label="Rotation" value={deg(entity.rotation)} suffix="°" testId="prop-rotation" onCommit={(v) => update({ ...entity, rotation: rad(v) })} />
         </Section>
       );
+    default:
+      return null; // a kind with no geometry editor yet
   }
 }
 

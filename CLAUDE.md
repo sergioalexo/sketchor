@@ -33,6 +33,15 @@ reachable at runtime as `window.sketchor.toCode()` / `applyCode(text)`.
 parametric layer (`packages/core/src/constraints.ts` is a data-model scaffold; no
 solver yet).
 
+## Entity kinds (`packages/core/src/kinds/`)
+
+Every entity `type` is one registered `EntityKind` (Z-01). Generic code — bounds,
+selection, hit testing, snapping, grips, drawing, SVG/PDF/DXF-R12 export — asks
+the registry, and a kind needs only `tessellate` to work everywhere
+approximately; `bounds`/`transform`/`path`/`snaps`/`hitDistance`/`grips` make it
+exact. The seven built-ins live in `kinds/builtin.ts`. **Adding a type: follow
+`docs/new-entity-checklist.md`.**
+
 ## Build & run
 
 ```bash

@@ -1,6 +1,8 @@
 import type { ArcEntity, CircleEntity, Entity, ImageEntity, LineEntity, PointEntity, PolylineEntity, TextEntity } from "./entities";
 import { imageCorners, layerOf, transformed } from "./entities";
+import { dist } from "./geometry";
 import { boundsOf } from "./dxf";
+import { kindTessellate } from "./kinds/registry";
 
 const ORIGIN = { x: 0, y: 0 };
 
@@ -143,6 +145,15 @@ function entityDxf(e: Entity): string {
       return textEntity(e);
     case "image":
       return imageEntity(e);
+    default:
+      // A kind outside the built-in seven (kinds/registry.ts): R12 has no such entity, so write its tessellation as polylines.
+      return kindTessellate(e as Entity, 0.01)
+        .filter((run) => run.length >= 2)
+        .map((run) => {
+          const closed = run.length > 2 && dist(run[0], run[run.length - 1]) < 1e-9;
+          return polylineEntity({ id: (e as Entity).id, type: "polyline", layer: (e as Entity).layer, color: (e as Entity).color, points: closed ? run.slice(0, -1) : run, closed });
+        })
+        .join("");
   }
 }
 

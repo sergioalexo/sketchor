@@ -2,6 +2,7 @@ import type { Entity } from "./entities";
 import type { PointRef } from "./constraints";
 import { imageCorners } from "./entities";
 import { arcPointAt, arcSweep, dist, type Point } from "./geometry";
+import { kindApplyGrip, kindGrips } from "./kinds/registry";
 
 /**
  * Grips (roadmap T-27): the handles drawn on a selected entity and what
@@ -58,6 +59,8 @@ export function gripsOf(e: Entity): Grip[] {
       return [{ point: e.at, kind: "insert", index: 0 }];
     case "image":
       return [{ point: e.insert, kind: "insert", index: 0 }, ...imageCorners(e).slice(1, 3).map((p, i) => ({ point: p, kind: "vertex" as const, index: i + 1 }))];
+    default:
+      return kindGrips(e as Entity);
   }
 }
 
@@ -99,6 +102,8 @@ export function applyGrip(e: Entity, grip: Grip, to: Point): Entity {
       if (grip.index === 1) return { ...e, width: Math.max(1e-6, lx) };
       return { ...e, width: Math.max(1e-6, lx), height: Math.max(1e-6, ly) };
     }
+    default:
+      return kindApplyGrip(e as Entity, grip, to);
   }
 }
 
@@ -132,5 +137,7 @@ export function gripPointRef(entity: Entity, grip: Grip): PointRef | null {
     case "text":
     case "image":
       return null;
+    default:
+      return null; // a kind with no solver parameters
   }
 }

@@ -13,6 +13,7 @@ import {
   bulgeToArc,
   dist,
   distToArc,
+  kindHitDistance,
   distToSegment,
   polylineSegments,
   constraintAnchors,
@@ -253,53 +254,8 @@ function hitCandidates(view: View, world: Point): EntityId[] {
   const tol = 6 / view.scale;
   const found: { id: EntityId; d: number }[] = [];
   for (const e of selectableEntities()) {
-    const d =
-      e.type === "line"
-        ? distToSegment(world, e.a, e.b)
-        : e.type === "circle"
-          ? // A hatch-filled circle (e.g. a round pallet) is clickable anywhere
-            // inside it, not just on its rim — matching how a solid shape
-            // behaves in every other drawing app.
-            e.fill && dist(world, e.center) <= e.radius
-            ? 0
-            : Math.abs(dist(world, e.center) - e.radius)
-          : e.type === "point"
-            ? dist(world, e.p)
-            : e.type === "text"
-              ? // Anywhere inside the label's box counts.
-                textCorners(e).some((p, i, c) => distToSegment(world, p, c[(i + 1) % c.length]) < tol) ||
-                pointInPolygon(world, textCorners(e))
-                ? 0
-                : Infinity
-              : e.type === "arc"
-              ? distToArc(world, e.center, e.radius, e.startAngle, e.endAngle, e.ccw)
-              : e.type === "polyline"
-                ? // A closed, hatch-filled polyline (e.g. a pallet) is clickable
-                  // anywhere inside it, not just near its outline — otherwise
-                  // clicking the middle of a big filled shape selects nothing.
-                  e.closed && e.fill && pointInPolygon(world, e.points)
-                  ? 0
-                  : // Whichever of its segments the cursor is nearest to.
-                    Math.min(
-                      ...polylineSegments(e).map((seg) => {
-                        const bulgeArc = bulgeToArc(seg.a, seg.b, seg.bulge);
-                        return bulgeArc
-                          ? distToArc(
-                              world,
-                              bulgeArc.center,
-                              bulgeArc.radius,
-                              bulgeArc.startAngle,
-                              bulgeArc.endAngle,
-                              bulgeArc.ccw,
-                            )
-                          : distToSegment(world, seg.a, seg.b);
-                      }),
-                    )
-                : e.type === "image"
-                  ? pointInPolygon(world, imageCorners(e))
-                    ? 0
-                    : Infinity
-                  : Infinity;
+    // Per-kind distance (kinds/builtin.ts): filled shapes are clickable anywhere inside.
+    const d = kindHitDistance(e, world);
     if (d <= tol) found.push({ id: e.id, d });
   }
   // Nearest first; ties (two entities exactly under the cursor) keep

@@ -3,6 +3,7 @@ import { boundsOf } from "./dxf";
 import type { Entity, EntityId } from "./entities";
 import { imageCorners, polylineSegments, textCorners } from "./entities";
 import type { Point } from "./geometry";
+import { kindTessellate } from "./kinds/registry";
 import { dist } from "./geometry";
 
 /**
@@ -94,6 +95,11 @@ export function entityInBox(entity: Entity, box: Bounds, mode: BoxSelectMode): b
       const c = imageCorners(entity);
       return c.some((p, i) => segmentCrossesBox(p, c[(i + 1) % c.length], box));
     }
+    default:
+      // A kind outside the built-in seven: whatever its tessellation touches.
+      return kindTessellate(entity as Entity).some((run) =>
+        run.length === 1 ? pointInBounds(run[0], box) : run.some((p, i) => i + 1 < run.length && segmentCrossesBox(p, run[i + 1], box)),
+      );
   }
 }
 

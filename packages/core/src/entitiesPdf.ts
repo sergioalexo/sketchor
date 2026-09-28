@@ -3,6 +3,7 @@ import { polylineSegments } from "./entities";
 import type { Point } from "./geometry";
 import { arcPointAt, arcSweep, bulgeToArc } from "./geometry";
 import { boundsOf } from "./dxf";
+import { kindTessellate } from "./kinds/registry";
 import type { PdfBuilder, PdfPoint } from "./pdf";
 
 /**
@@ -118,6 +119,9 @@ export function drawEntitiesToPdf(
       pdf.text(p.x, p.y, e.text, { size: e.height * scale, color: e.color ?? stroke });
     } else if (e.type === "polyline") {
       pdf.polyline(polylinePoints(e), paint, e.closed);
+    } else {
+      // A kind outside the built-in seven (kinds/registry.ts): its tessellation, one path per run.
+      for (const run of kindTessellate(e as Entity, 0.01)) if (run.length >= 2) pdf.polyline(run.map(at), paint);
     }
   }
 

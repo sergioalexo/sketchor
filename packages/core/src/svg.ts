@@ -3,6 +3,7 @@ import { layerOf, newEntityId, polylineSegments } from "./entities";
 import type { Point } from "./geometry";
 import { arcPointAt, arcSweep, bulgeToArc, dist } from "./geometry";
 import { boundsOf } from "./dxf";
+import { kindTessellate } from "./kinds/registry";
 
 /**
  * Full-fidelity SVG import/export — unlike dxf.ts's `entitiesToSvg` (a
@@ -156,8 +157,18 @@ export function entitiesToSvgDocument(entities: Entity[], opts: SvgExportOptions
           `<image x="${fmt(topLeft.x)}" y="${fmt(topLeft.y)}" width="${fmt(e.width)}" height="${fmt(e.height)}" ` +
             `href="${escapeXml(e.dataUrl)}" preserveAspectRatio="none"${rot}/>`,
         );
-      } else {
+      } else if (e.type === "polyline") {
         body.push(`<path d="${polylinePathD(e, toSvg)}"${paint(e)}/>`);
+      } else {
+        // A kind outside the built-in seven (kinds/registry.ts): its tessellation, one path per run.
+        for (const run of kindTessellate(e, 0.01)) {
+          if (run.length < 2) continue;
+          const d = run.map((q, i) => {
+            const p = toSvg(q);
+            return `${i === 0 ? "M" : "L"}${fmt(p.x)} ${fmt(p.y)}`;
+          });
+          body.push(`<path d="${d.join(" ")}"${paint(e as Entity)}/>`);
+        }
       }
     }
     groups.push(`<g data-layer="${escapeXml(layer)}">${body.join("")}</g>`);

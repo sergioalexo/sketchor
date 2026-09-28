@@ -6,6 +6,7 @@ import {
   dist,
   entityPoints,
   gripsOf,
+  kindTessellate,
   layerOf,
   polylineSegments,
   transformed,
@@ -770,6 +771,15 @@ function drawEntity(
     // "counterclockwise" flag already matches our ccw once negated).
     const c = worldToScreen(view, entity.center);
     ctx.arc(c.x, c.y, entity.radius * view.scale, -entity.startAngle, -entity.endAngle, entity.ccw);
+  } else if (entity.type !== "polyline") {
+    // A kind outside the built-in seven (kinds/registry.ts): its tessellation to ~half a pixel.
+    for (const run of kindTessellate(entity, 0.5 / view.scale)) {
+      run.forEach((q, i) => {
+        const p = worldToScreen(view, q);
+        if (i === 0) ctx.moveTo(p.x, p.y);
+        else ctx.lineTo(p.x, p.y);
+      });
+    }
   } else {
     // One continuous stroke through every vertex; a bulged segment draws as
     // its real arc rather than the straight chord.

@@ -2,6 +2,7 @@ import type { Bounds } from "./dxf";
 import type { Entity } from "./entities";
 import { imageCorners, translated } from "./entities";
 import { arcPointAt, dist, type Point } from "./geometry";
+import { kindPoints } from "./kinds/registry";
 
 /**
  * Stretch (roadmap T-18): the AutoCAD tool that makes "lengthen this
@@ -51,6 +52,9 @@ export function stretchEntity(e: Entity, box: Bounds, dx: number, dy: number): E
       return inside(e.at, box) ? translated(e, dx, dy) : null;
     case "image":
       return imageCorners(e).some((p) => inside(p, box)) ? translated(e, dx, dy) : null;
+    default:
+      // A kind outside the built-in seven: moved whole if any of its points is in the box.
+      return kindPoints(e as Entity).some((p) => inside(p, box)) ? translated(e as Entity, dx, dy) : null;
   }
 }
 

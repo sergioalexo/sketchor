@@ -48,7 +48,8 @@ export function paramCount(entity: Entity): number {
       return entity.points.length * 2;
     case "text":
     case "image":
-      return 0;
+    default:
+      return 0; // no solver parameters — a new kind opts in by adding its own case
   }
 }
 
@@ -71,6 +72,7 @@ function pushValues(entity: Entity, out: number[]): void {
       return;
     case "text":
     case "image":
+    default:
       return;
   }
 }
@@ -207,6 +209,7 @@ export function pointOf(model: SketchModel, ref: PointRef): Vec | null {
     }
     case "text":
     case "image":
+    default:
       return null;
   }
 }
@@ -250,6 +253,7 @@ function withValues(entity: Entity, v: readonly number[], at: number): Entity {
       return { ...entity, points: entity.points.map((_, i) => ({ x: v[at + i * 2], y: v[at + i * 2 + 1] })) };
     case "text":
     case "image":
+    default:
       return entity;
   }
 }

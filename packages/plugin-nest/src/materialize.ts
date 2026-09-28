@@ -1,4 +1,4 @@
-import { newEntityId, rotated, translated, type Entity } from "@sketchor/core";
+import { kindTransform, newEntityId, rotated, translated, type Entity } from "@sketchor/core";
 import type { Point } from "./types";
 
 /**
@@ -65,5 +65,7 @@ function mirrorX<T extends Entity>(entity: T): T {
       return { ...entity, at: { x: -entity.at.x, y: entity.at.y } };
     case "image":
       return { ...entity, insert: { x: -entity.insert.x, y: entity.insert.y } };
+    default:
+      return (kindTransform(entity as Entity, [-1, 0, 0, 1, 0, 0]) ?? entity) as T;
   }
 }

@@ -1,5 +1,6 @@
 import type { ArcEntity, CircleEntity, Entity, LineEntity, PolylineEntity } from "./entities";
 import { polylineSegments } from "./entities";
+import { kindPath } from "./kinds/registry";
 import { angleInSweep, arcPointAt, arcSweep, bulgeToArc, dist, type Point } from "./geometry";
 
 /**
@@ -78,7 +79,7 @@ export function pathOf(entity: Entity): Path | null {
       return curves.length > 0 ? { curves, closed: entity.closed && curves.length > 1 } : null;
     }
     default:
-      return null;
+      return kindPath(entity as Entity);
   }
 }
 

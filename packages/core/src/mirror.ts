@@ -1,5 +1,6 @@
 import type { Entity } from "./entities";
 import type { Point } from "./geometry";
+import { kindTransform } from "./kinds/registry";
 
 /**
  * Reflection of an entity across the line through `a` and `b` (the mirror
@@ -57,5 +58,12 @@ export function mirrored<T extends Entity>(entity: T, a: Point, b: Point): T {
       return { ...entity, at: reflect(entity.at) };
     case "image":
       return { ...entity, insert: reflect(entity.insert) };
+    default: {
+      // A kind outside the built-in seven: reflect through its affine map (unchanged if it has none).
+      const c = Math.cos(2 * axisAngle);
+      const sn = Math.sin(2 * axisAngle);
+      const r0 = reflect({ x: 0, y: 0 });
+      return (kindTransform(entity as Entity, [c, sn, sn, -c, r0.x, r0.y]) ?? entity) as T;
+    }
   }
 }

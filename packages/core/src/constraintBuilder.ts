@@ -102,7 +102,8 @@ export function attachPoints(entity: Entity): { ref: PointRef; at: Point }[] {
       return [{ ref: ref("a"), at: entity.p }];
     case "text":
     case "image":
-      return [];
+    default:
+      return []; // nothing a constraint can attach to (yet)
   }
 }
 

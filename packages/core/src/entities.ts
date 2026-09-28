@@ -1,5 +1,6 @@
 import type { Point } from "./geometry";
 import { arcPointAt, arcSweep, bulgeToArc, dist, rotatePoint } from "./geometry";
+import { kindPoints, kindTransform } from "./kinds/registry";
 
 export type EntityId = string;
 
@@ -266,7 +267,17 @@ export function translated<T extends Entity>(entity: T, dx: number, dy: number):
       return { ...entity, at: { x: entity.at.x + dx, y: entity.at.y + dy } };
     case "image":
       return { ...entity, insert: { x: entity.insert.x + dx, y: entity.insert.y + dy } };
+    default:
+      // A kind outside the built-in seven (see kinds/registry.ts): its own affine map, or unmoved.
+      return (kindTransform(entity as Entity, [1, 0, 0, 1, dx, dy]) ?? entity) as T;
   }
+}
+
+/** Scale, then rotate, then translate about `pivot`, as the affine matrix the kind registry takes. */
+function similarityAbout(pivot: Point, dx: number, dy: number, rotation: number, scale: number): [number, number, number, number, number, number] {
+  const a = scale * Math.cos(rotation);
+  const b = scale * Math.sin(rotation);
+  return [a, b, -b, a, pivot.x + dx - (a * pivot.x - b * pivot.y), pivot.y + dy - (b * pivot.x + a * pivot.y)];
 }
 
 /**
@@ -296,6 +307,8 @@ export function rotated<T extends Entity>(entity: T, pivot: Point, angle: number
       return { ...entity, at: rotatePoint(entity.at, pivot, angle), rotation: entity.rotation + angle };
     case "image":
       return { ...entity, insert: rotatePoint(entity.insert, pivot, angle), rotation: entity.rotation + angle };
+    default:
+      return (kindTransform(entity as Entity, similarityAbout(pivot, 0, 0, angle, 1)) ?? entity) as T;
   }
 }
 
@@ -345,6 +358,8 @@ export function transformed<T extends Entity>(
         width: entity.width * scale,
         height: entity.height * scale,
       };
+    default:
+      return (kindTransform(entity as Entity, similarityAbout(pivot, dx, dy, rotation, scale)) ?? entity) as T;
   }
 }
 
@@ -373,6 +388,8 @@ export function entityPoints(entity: Entity): Point[] {
       return [entity.at, ...textCorners(entity)];
     case "image":
       return [entity.insert, ...imageCorners(entity)];
+    default:
+      return kindPoints(entity as Entity);
   }
 }
 

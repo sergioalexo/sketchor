@@ -1,7 +1,8 @@
 import type { Entity, EntityId } from "./entities";
 import { imageCorners, polylineSegments, textCorners } from "./entities";
 import type { Point } from "./geometry";
-import { arcPointAt, arcSweep, bulgeToArc } from "./geometry";
+import { arcPointAt, arcSweep, bulgeToArc, dist } from "./geometry";
+import { kindTessellate } from "./kinds/registry";
 import { pointInPolygon } from "./regions";
 
 /**
@@ -67,6 +68,13 @@ export function outlineOf(entity: Entity): { points: Point[]; closed: boolean } 
       return { points: textCorners(entity), closed: true };
     case "image":
       return { points: imageCorners(entity), closed: true };
+    default: {
+      // A kind outside the built-in seven: its longest tessellated run.
+      const runs = kindTessellate(entity as Entity);
+      const run = runs.reduce<Point[]>((best, r) => (r.length > best.length ? r : best), []);
+      const closed = run.length > 2 && dist(run[0], run[run.length - 1]) < 1e-9;
+      return { points: closed ? run.slice(0, -1) : run, closed };
+    }
   }
 }
 

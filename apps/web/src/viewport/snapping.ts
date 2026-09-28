@@ -6,8 +6,11 @@ import {
   closestParam,
   closestPointOnSegment,
   dist,
+  entityPoints,
   imageCorners,
   intersectCurves,
+  kindPath,
+  kindSnaps,
   mid,
   pathOf,
   polylineSegments,
@@ -112,51 +115,22 @@ export function findSnap(doc: SketchDocument, view: View, cursor: Point, options
   const extensions: Snap[] = [];
 
   for (const e of entities) {
+    // Feature and midpoint snaps come from the entity's kind (kinds/builtin.ts,
+    // or a registered plugin kind); only the cursor-dependent "nearest point
+    // along" candidates are worked out here.
+    for (const s of kindSnaps(e)) (s.kind === "midpoint" ? midpoints : featurePoints).push(s);
     if (e.type === "line") {
-      featurePoints.push({ point: e.a, kind: "endpoint" }, { point: e.b, kind: "endpoint" });
-      midpoints.push({ point: mid(e.a, e.b), kind: "midpoint" });
       onCurve.push({ point: closestPointOnSegment(cursor, e.a, e.b), kind: "on-line" });
-    } else if (e.type === "circle") {
-      const { center: c, radius: r } = e;
-      featurePoints.push(
-        { point: c, kind: "center" },
-        { point: { x: c.x + r, y: c.y }, kind: "quadrant" },
-        { point: { x: c.x - r, y: c.y }, kind: "quadrant" },
-        { point: { x: c.x, y: c.y + r }, kind: "quadrant" },
-        { point: { x: c.x, y: c.y - r }, kind: "quadrant" },
-      );
-    } else if (e.type === "point") {
-      featurePoints.push({ point: e.p, kind: "node" });
-    } else if (e.type === "text") {
-      featurePoints.push({ point: e.at, kind: "endpoint" });
-    } else if (e.type === "arc") {
-      featurePoints.push(
-        { point: e.center, kind: "center" },
-        { point: arcPointAt(e.center, e.radius, e.startAngle), kind: "endpoint" },
-        { point: arcPointAt(e.center, e.radius, e.endAngle), kind: "endpoint" },
-      );
-      const sweep = arcSweep(e.startAngle, e.endAngle, e.ccw);
-      const midAngle = e.ccw ? e.startAngle + sweep / 2 : e.startAngle - sweep / 2;
-      midpoints.push({ point: arcPointAt(e.center, e.radius, midAngle), kind: "midpoint" });
-    } else if (e.type === "image") {
-      for (const p of imageCorners(e)) featurePoints.push({ point: p, kind: "endpoint" });
-    } else {
-      // Every vertex is an endpoint snap; every segment additionally offers a
-      // midpoint and a nearest-point-along snap, exactly like a loose line.
-      for (const p of e.points) featurePoints.push({ point: p, kind: "endpoint" });
+    } else if (e.type === "polyline") {
       for (const seg of polylineSegments(e)) {
-        const bulgeArc = bulgeToArc(seg.a, seg.b, seg.bulge);
-        if (bulgeArc) {
-          featurePoints.push({ point: bulgeArc.center, kind: "center" });
-          const sweep = arcSweep(bulgeArc.startAngle, bulgeArc.endAngle, bulgeArc.ccw);
-          const midAngle = bulgeArc.ccw
-            ? bulgeArc.startAngle + sweep / 2
-            : bulgeArc.startAngle - sweep / 2;
-          midpoints.push({ point: arcPointAt(bulgeArc.center, bulgeArc.radius, midAngle), kind: "midpoint" });
-        } else {
-          midpoints.push({ point: mid(seg.a, seg.b), kind: "midpoint" });
+        if (!bulgeToArc(seg.a, seg.b, seg.bulge)) {
           onCurve.push({ point: closestPointOnSegment(cursor, seg.a, seg.b), kind: "on-line" });
         }
+      }
+    } else if (e.type !== "circle" && e.type !== "arc" && e.type !== "point" && e.type !== "text" && e.type !== "image") {
+      // A kind outside the built-in seven: nearest point on each straight piece of its outline.
+      for (const c of kindPath(e)?.curves ?? []) {
+        if (c.kind === "segment") onCurve.push({ point: closestPointOnSegment(cursor, c.a, c.b), kind: "on-line" });
       }
     }
   }
@@ -311,8 +285,10 @@ function featureAnchors(doc: SketchDocument, excludeIds: readonly string[]): Poi
       );
     } else if (e.type === "image") {
       out.push(...imageCorners(e));
-    } else {
+    } else if (e.type === "polyline") {
       for (const p of e.points) out.push(p);
+    } else {
+      out.push(...entityPoints(e));
     }
   }
   return out;

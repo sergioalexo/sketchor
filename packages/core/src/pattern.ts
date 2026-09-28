@@ -1,6 +1,7 @@
 import type { Entity, EntityId } from "./entities";
 import { newEntityId, transformed, translated } from "./entities";
 import { rotatePoint, type Point } from "./geometry";
+import { kindBounds, kindTransform } from "./kinds/registry";
 import type { Command } from "./commands";
 import type { SketchDocument } from "./document";
 
@@ -119,5 +120,9 @@ function centerOf(entity: Entity): Point {
       return entity.at;
     case "image":
       return entity.insert;
+    default: {
+      const b = kindBounds(entity as Entity);
+      return b ? { x: (b.minX + b.maxX) / 2, y: (b.minY + b.maxY) / 2 } : { x: 0, y: 0 };
+    }
   }
 }

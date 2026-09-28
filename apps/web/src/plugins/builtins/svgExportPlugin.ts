@@ -67,6 +67,11 @@ function svgFor(e: Entity): string {
         `</g>`
       );
     }
+    default: {
+      // A kind this serializer does not know: its defining points as an open polyline.
+      const pts = entityPoints(e as Entity).map((p) => `${num(p.x)},${num(p.y)}`).join(" ");
+      return `<polyline points="${pts}" />`;
+    }
   }
 }
 

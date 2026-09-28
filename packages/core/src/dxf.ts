@@ -1,6 +1,7 @@
 import type { Entity } from "./entities";
 import { imageCorners, newEntityId, polylineSegments, textCorners, transformed } from "./entities";
 import type { Point } from "./geometry";
+import { kindBounds, kindTessellate } from "./kinds/registry";
 import { arcExtentPoints, arcPointAt, arcSweep, bulgeToArc, dist } from "./geometry";
 
 /** Minimal XML text-content escape for the thumbnail SVG. */
@@ -888,6 +889,13 @@ export function boundsOf(entities: Entity[]): Bounds | null {
       for (const p of textCorners(e)) acc(p.x, p.y);
     } else if (e.type === "image") {
       for (const p of imageCorners(e)) acc(p.x, p.y);
+    } else if (e.type !== "polyline") {
+      // A kind outside the built-in seven: its own bounds (or its tessellation's).
+      const kb = kindBounds(e);
+      if (kb) {
+        acc(kb.minX, kb.minY);
+        acc(kb.maxX, kb.maxY);
+      }
     } else {
       for (const seg of polylineSegments(e)) {
         acc(seg.a.x, seg.a.y);
@@ -973,6 +981,12 @@ export function entitiesToSvg(entities: Entity[], opts: ThumbnailOptions = {}): 
           d.push(`${i === 0 ? "M" : "L"}${f(sx(p.x))} ${f(sy(p.y))}`);
         }
         body.push(`<path d="${d.join(" ")}" fill="none"/>`);
+      } else if (e.type !== "polyline") {
+        // A kind outside the built-in seven: its tessellation, drawn as open paths.
+        for (const run of kindTessellate(e)) {
+          if (run.length < 2) continue;
+          body.push(`<path d="${run.map((p, i) => `${i === 0 ? "M" : "L"}${f(sx(p.x))} ${f(sy(p.y))}`).join(" ")}" fill="none"/>`);
+        }
       } else {
         // Tessellated for display only — the document keeps each segment's true geometry (line or bulge-arc).
         const d: string[] = [];

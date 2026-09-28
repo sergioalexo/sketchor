@@ -39,6 +39,7 @@ export function entityAnchor(entity: Entity): Point | null {
     }
     case "text":
     case "image":
+    default:
       return null;
   }
 }
@@ -65,6 +66,7 @@ export function pointRefAt(lookup: EntityLookup, ref: PointRef): Point | null {
     }
     case "text":
     case "image":
+    default:
       return null;
   }
 }
