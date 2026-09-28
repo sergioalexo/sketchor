@@ -101,7 +101,20 @@ the worker imports the vendored `.mjs`/`.wasm` directly. So:
   the extraction changes. LRU-evicted past 768 MB.
 - `modelThumbnail.ts` renders the file-browser's isometric PNG through one
   shared offscreen WebGL context (browsers cap live contexts).
-- Z is up. View presets live in `modelScene.ts`.
+- Z is up *as displayed*. View presets live in `modelScene.ts`. A STEP file's
+  own up axis is detected from its FILE_NAME header (`upAxis.ts`:
+  SolidWorks/SwSTEP → Y-up; the worker stamps `Model3D.detectedUp`, and
+  `native/step-wire` `is_y_up` mirrors the rule for Explorer's wireframe).
+  The user can override per file (toolbar "Z up / Y up", `view.toggleUpAxis`,
+  saved in localStorage `sketchor.modelUpAxis.v1` by hash). The turn is
+  applied to the **model data** — `reorientModel()` returns a copy with every
+  coordinate array rotated — not to a scene matrix, so picking, measure,
+  overlays, fit and thumbnails all agree without each needing the matrix.
+  If you add a coordinate-bearing field to `Model3D`, add it to
+  `reorientModel` (its test lists what must move).
+- Files over `COARSE_THRESHOLD_BYTES` (30 MB) tessellate coarser, get no
+  thumbnail parse (`THUMBNAIL_MAX_BYTES`), and hold back thumbnail workers
+  while they open.
 - **Selection is Onshape's**: a click picks the topology under the cursor —
   vertex, then edge, then the face the ray hit (`picking.ts`, pure: the
   viewer passes a world→pixel projector, so the search is testable without a

@@ -52,6 +52,8 @@ export interface Model3D {
   tree: ModelNode;
   bounds: Bounds3;
   triangleCount: number;
+  /** Up axis guessed from the STEP header (upAxis.ts); the viewer starts there unless the user overrode it for this file. Absent = Z. */
+  detectedUp?: "z" | "y";
 }
 
 export type ModelFormat = "step" | "iges";

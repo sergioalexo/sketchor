@@ -4,6 +4,7 @@ import { buildModel } from "./buildModel";
 import { describeImportError } from "./importError";
 import { getCachedModel, putCachedModel } from "./modelCache";
 import { tessellationFor } from "./tessellation";
+import { detectUpAxisFromBytes } from "./upAxis";
 import { modelArrays } from "./types";
 import type { Model3D, ModelFormat, OcctResult } from "./types";
 
@@ -81,6 +82,8 @@ async function handle(req: ParseRequest): Promise<void> {
   const lib = await occt();
   const byteLength = req.buffer.byteLength;
   const params = tessellationFor(byteLength);
+  // The header has to be read before the buffer is dropped below.
+  const detectedUp = req.format === "step" ? detectUpAxisFromBytes(req.buffer) : "z";
   let bytes: Uint8Array | null = new Uint8Array(req.buffer);
   let result: OcctResult;
   try {
@@ -108,8 +111,15 @@ async function handle(req: ParseRequest): Promise<void> {
     post({ id: req.id, ok: false, error: "the file contains no solid or surface geometry to show" });
     return;
   }
-  // Cache before transferring: the put needs the buffers still attached.
-  await putCachedModel(model);
+  model.detectedUp = detectedUp;
+  // Cache before transferring: the put needs the buffers still attached. A
+  // model that parsed fine is still worth showing if the cache refuses it
+  // (quota, a structured-clone failure on a huge one) — it just isn't kept.
+  try {
+    await putCachedModel(model);
+  } catch (err) {
+    console.warn("model cache write failed; showing the model uncached", err);
+  }
   post({ id: req.id, ok: true, model, fromCache: false, ms: performance.now() - t0 }, transferables(model));
 }
 

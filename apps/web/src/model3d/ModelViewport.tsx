@@ -3,6 +3,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import type { DocSession } from "../state/store";
 import { useApp } from "../state/store";
+import { matchesBinding } from "../keybindings";
 import { formatArea, formatLength, formatMass, formatVolume } from "../units";
 import {
   buildLights,
@@ -19,6 +20,7 @@ import { measureSelection, partOf, refLabel, type MeasureSegment, type SelRef } 
 import { pickEdge, pickVertex, type Projector } from "./picking";
 import { useOpenLoads } from "./stepImport";
 import type { Model3D } from "./types";
+import { reorientModel, saveUpAxis, savedUpAxis, type UpAxis } from "./upAxis";
 import { useViewer } from "./viewerStore";
 
 /**
@@ -64,7 +66,25 @@ export function ModelViewport({ session }: Props) {
   const model = session.model ?? null;
   if (session.modelError) return <ModelError name={session.name} message={session.modelError} />;
   if (!model) return <ModelLoading name={session.name} />;
-  return <Viewer key={model.hash} model={model} />;
+  return <OrientedViewer key={model.hash} model={model} />;
+}
+
+/**
+ * Owns the file's up axis: the header's guess unless the user overrode it
+ * for this file. The viewer is handed the model already turned upright
+ * (see upAxis.ts), so nothing below it knows there is a choice.
+ */
+function OrientedViewer({ model }: { model: Model3D }) {
+  const [up, setUp] = useState<UpAxis>(() => savedUpAxis(model.hash) ?? model.detectedUp ?? "z");
+  const shown = useMemo(() => reorientModel(model, up), [model, up]);
+  const toggleUp = () => {
+    const next: UpAxis = up === "z" ? "y" : "z";
+    saveUpAxis(model.hash, next);
+    setUp(next);
+    // The file browser's picture of this file was drawn the old way up.
+    void import("./modelThumbnail").then(({ refreshThumbnail }) => refreshThumbnail(model)).catch(() => undefined);
+  };
+  return <Viewer model={shown} up={up} onToggleUp={toggleUp} />;
 }
 
 /* ------------------------------ loading/error --------------------------- */
@@ -174,7 +194,7 @@ interface Scene {
   dispose: () => void;
 }
 
-function Viewer({ model }: { model: Model3D }) {
+function Viewer({ model, up, onToggleUp }: { model: Model3D; up: UpAxis; onToggleUp: () => void }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sceneRef = useRef<Scene | null>(null);
@@ -673,6 +693,11 @@ function Viewer({ model }: { model: Model3D }) {
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
       if (e.ctrlKey || e.metaKey || e.altKey) return;
+      if (matchesBinding(e, "view.toggleUpAxis")) {
+        e.preventDefault();
+        onToggleUp();
+        return;
+      }
       switch (e.key) {
         case "f":
         case "F":
@@ -800,6 +825,14 @@ function Viewer({ model }: { model: Model3D }) {
         <ToolButton title="Top (2)" label="Top" icon={ICONS.top} onClick={() => fitAll("top")} testId="model-view-top" />
         <ToolButton title="Front (3)" label="Front" icon={ICONS.front} onClick={() => fitAll("front")} testId="model-view-front" />
         <ToolButton title="Right (4)" label="Right" icon={ICONS.right} onClick={() => fitAll("right")} testId="model-view-right" />
+        <ToolButton
+          title="Exported Y-up (SolidWorks)? Toggle which axis is up"
+          label={up === "z" ? "Z up" : "Y up"}
+          icon={ICONS.upAxis}
+          active={up === "y"}
+          onClick={onToggleUp}
+          testId="model-up-axis"
+        />
         <span className="model-toolbar-sep" />
         <ToolButton title="Fit everything visible (F)" label="Fit" icon={ICONS.fit} onClick={() => fitAll()} testId="model-fit" />
         <ToolButton
@@ -957,6 +990,11 @@ const ICONS = {
     <svg viewBox="0 0 24 24" width="18" height="18">
       <rect x="4" y="4" width="16" height="16" rx="1.5" {...stroke} />
       <path d="M15 4v16" {...stroke} />
+    </svg>
+  ),
+  upAxis: (
+    <svg viewBox="0 0 24 24" width="18" height="18">
+      <path d="M12 20V5M12 5l-3.5 3.5M12 5l3.5 3.5M5 20h14" {...stroke} />
     </svg>
   ),
   fit: (

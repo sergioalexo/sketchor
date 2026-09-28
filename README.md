@@ -234,6 +234,13 @@ is under the cursor, `H` hides the selected part, `I` isolates it and
 `Shift+H` shows everything again; `E` toggles edges, `F` fits, and `1`–`4` jump to
 isometric / top / front / right.
 
+**Which way is up?** The viewer draws Z up (Onshape's convention), but
+SolidWorks exports Y-up. Sketchor reads the STEP header and stands a
+SolidWorks file upright by itself; if it guesses wrong for a file, the
+**Z up / Y up** toolbar button (or `Shift+U`, rebindable) turns it, and the
+choice is remembered for that file. Measurements read in the displayed
+frame, so ΔZ is always the height you see.
+
 **Clicking picks geometry, the way Onshape does** — the vertex, edge or
 face under the cursor, in that order of preference, so aiming at a corner
 gets the corner and not the edge it sits on. The bottom-right readout says

@@ -558,3 +558,41 @@ to the user (see the release procedure in the user's notes / README).
     confirm the size hint/error wording look right, and desktop-test
     S-03's IPC path specifically (the browser dev server can't exercise
     `window.__TAURI__`).
+
+- 2026-09-28 — S-06, S-07, U-01…U-06 done; S-05 deliberately skipped.
+  - **U (deviation from the plan):** the up-axis turn is applied to the
+    model *data* (`upAxis.ts` `reorientModel`, a rotated copy sharing the
+    non-coordinate arrays), not to a group matrix. Picking, measure, the
+    selection overlays, fit and thumbnails all read positions off the
+    `Model3D`, so one rotated copy makes them agree by construction — no
+    projector/overlay/measure plumbing to keep in sync, and `measure.ts`
+    stays untouched (ΔZ is display-frame automatically). `upAxisMatrix` is
+    kept + tested as the reference definition. Detection: the worker calls
+    `detectUpAxisFromBytes` before dropping the buffer and stamps
+    `Model3D.detectedUp` (LAYOUT_VERSION 4→5). `OrientedViewer` in
+    `ModelViewport.tsx` owns the choice (saved override → detected → z),
+    toolbar `model-up-axis`, rebindable `view.toggleUpAxis` (default
+    Shift+U, unused elsewhere). Toggling re-renders the thumbnail
+    (`refreshThumbnail`, mirrored to Explorer). `native/step-wire`:
+    `is_y_up` + `y_up_to_z_up`, used by the DLL's wireframe tier (Rust
+    tests added). Inventor not added — no real export to verify against.
+  - **Verified live** with the real 24408 file (58 MB, served from K: by a
+    throwaway local server, since stopped): opens with 1,366 parts / 353,639
+    triangles (coarse tessellation), size hint "Large file (55 MB)…" shows,
+    header detected as Y-up → status size reads 7647 × 8909 × **457** mm
+    (Z = height); toggling reads 7647 × 457 × 8909 and back; override lands
+    in localStorage. The browser pane's screenshots timed out on this scene
+    (heavy), so the visual check was by status/DOM, not a picture. Test
+    override was removed from localStorage afterwards.
+  - **S-06:** `THUMBNAIL_MAX_BYTES` (=30 MB): `thumbnailForModelFile` returns
+    null above it (card shows the 3D tile; opening the file renders + caches
+    the thumbnail), and `pump()` holds thumbnail jobs while a >30 MB open is
+    running. **S-07:** `putCachedModel` already swallowed failures itself;
+    added a belt-and-braces try/catch around it in the worker.
+  - **S-05 skipped:** it was scoped for "OCCT can't read it", which the root
+    cause work disproved (the file reads fine now). The step-wire text
+    reader also works on it after the whitespace fix. Revisit only if a
+    genuinely OCCT-hostile file turns up.
+  - Not done / caveats: no desktop (Tauri) run of S-03's IPC path or the
+    Explorer wireframe orientation (the DLL wasn't rebuilt/installed);
+    the DLL wireframe follows the header only, not the user's override.

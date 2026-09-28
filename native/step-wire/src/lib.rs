@@ -735,6 +735,36 @@ fn walk(
     }
 }
 
+/* ----------------------------- up axis ----------------------------- */
+
+/// True when the file's FILE_NAME record names SolidWorks (`SwSTEP`), which
+/// exports Y-up. Mirrors `detectUpAxis` in apps/web/src/model3d/upAxis.ts —
+/// keep the two in step. Only the first 4 KB is read; never panics.
+pub fn is_y_up(text: &str) -> bool {
+    let mut end = text.len().min(4096);
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    let head = &text[..end];
+    let upper = head.to_ascii_uppercase();
+    let Some(at) = upper.find("FILE_NAME") else { return false };
+    let rest = &upper[at..];
+    let Some(close) = rest.find(");") else { return false };
+    let record = &rest[..close];
+    record.contains("SOLIDWORKS") || record.contains("SWSTEP")
+}
+
+/// Turns Y-up segments upright (+90° about X: (x, y, z) → (x, −z, y)).
+pub fn y_up_to_z_up(segments: &mut [Segment]) {
+    for s in segments {
+        for p in [&mut s.a, &mut s.b] {
+            let (y, z) = (p[1], p[2]);
+            p[1] = -z;
+            p[2] = y;
+        }
+    }
+}
+
 /* ----------------------------- projection ----------------------------- */
 
 /// Projects segments to 2D with the same isometric view Sketchor's in-app
@@ -762,6 +792,32 @@ pub fn thin(segments: &[Segment], max: usize) -> Vec<Segment> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn detects_solidworks_header_as_y_up() {
+        let sw = "ISO-10303-21;
+HEADER;
+FILE_NAME('a.STEP','2023',(''),(''),'SwSTEP 2.0','SolidWorks 2023','');
+ENDSEC;";
+        let onshape = "ISO-10303-21;
+HEADER;
+FILE_NAME('a.step','2023',(''),(''),'Onshape','Onshape','');
+ENDSEC;";
+        assert!(super::is_y_up(sw));
+        assert!(!super::is_y_up(onshape));
+        assert!(!super::is_y_up(""));
+        assert!(!super::is_y_up("FILE_NAME('a','b',(''),(''),'SwSTE"));
+        // A multi-byte character straddling the 4 KB cut must not panic.
+        assert!(!super::is_y_up(&"é".repeat(5000)));
+    }
+
+    #[test]
+    fn y_up_turn_maps_y_to_z() {
+        let mut segs = [Segment { a: [1.0, 2.0, 3.0], b: [0.0, 1.0, 0.0] }];
+        y_up_to_z_up(&mut segs);
+        assert_eq!(segs[0].a, [1.0, -3.0, 2.0]);
+        assert_eq!(segs[0].b, [0.0, 0.0, 1.0]);
+    }
+
     use super::*;
 
     /// A unit cube as B-rep topology: 8 vertices, 12 LINE edges. Only the

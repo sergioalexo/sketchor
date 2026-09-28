@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { describeImportError } from "./importError";
+import { COARSE_THRESHOLD_BYTES } from "./tessellation";
 import type { ParseRequest, ParseResponse } from "./occt.worker";
 import type { Model3D, ModelFormat } from "./types";
 
@@ -140,8 +141,19 @@ function onMessage(slot: Slot, msg: ParseResponse): void {
   pump();
 }
 
+/** Thumbnails of files this big aren't parsed at all: a wasm heap can reach 4 GB per file, and the card can live without a picture. */
+export const THUMBNAIL_MAX_BYTES = COARSE_THRESHOLD_BYTES;
+
+/** True while a big *open* is being read — the one job worth all the memory. */
+function bigOpenRunning(): boolean {
+  return slots.some((s) => s.job?.priority === "open" && s.job.bytes > THUMBNAIL_MAX_BYTES);
+}
+
 function pump(): void {
   while (queue.length > 0) {
+    // While a huge file is opening, other workers' wasm heaps would compete
+    // with it for memory: let only further opens through, thumbnails wait.
+    if (bigOpenRunning() && queue[0].priority !== "open") return;
     const free = slots.find((s) => !s.job) ?? (slots.length < MAX_WORKERS ? spawn() : null);
     if (!free) return;
     const job = queue.shift()!;

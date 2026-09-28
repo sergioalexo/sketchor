@@ -88,7 +88,10 @@ pub fn wireframe(path: &str, text: &str) -> Vec<Shape> {
     if !is_step(path) {
         return Vec::new();
     }
-    let segments = step_wire::parse(text);
+    let mut segments = step_wire::parse(text);
+    if step_wire::is_y_up(text) {
+        step_wire::y_up_to_z_up(&mut segments);
+    }
     let segments = step_wire::thin(&segments, MAX_DRAWN_SEGMENTS);
     step_wire::project_iso(&segments)
         .into_iter()

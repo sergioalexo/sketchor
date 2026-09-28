@@ -1,8 +1,9 @@
 import * as THREE from "three";
 import { getCachedThumb, putCachedThumb } from "./modelCache";
 import { buildLights, buildModelObjects, frameOrthographic, STAGE_BACKGROUND } from "./modelScene";
-import { hashBytes, loadModel } from "./stepImport";
+import { hashBytes, loadModel, THUMBNAIL_MAX_BYTES } from "./stepImport";
 import type { Model3D } from "./types";
+import { reorientModel, savedUpAxis } from "./upAxis";
 
 /**
  * Isometric preview thumbnails for 3D model files, for the file browser.
@@ -42,9 +43,11 @@ function sharedRenderer(): { renderer: THREE.WebGLRenderer; canvas: HTMLCanvasEl
 }
 
 /** Draws `model` in isometric view and returns a PNG data URL, or null if WebGL is unavailable. */
-export function renderModelThumbnail(model: Model3D): string | null {
+export function renderModelThumbnail(fileModel: Model3D): string | null {
   const ctx = sharedRenderer();
   if (!ctx) return null;
+  // Upright the way the viewer would open it: the user's saved override, else the header's guess.
+  const model = reorientModel(fileModel, savedUpAxis(fileModel.hash) ?? fileModel.detectedUp ?? "z");
   const scene = new THREE.Scene();
   const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
   scene.add(...buildLights(camera));
@@ -88,6 +91,10 @@ export async function thumbnailForModelFile(name: string, buffer: ArrayBuffer): 
     void mirrorToExplorer(hash, cached);
     return cached;
   }
+  // Too big to parse just for a card (see THUMBNAIL_MAX_BYTES). Opening the
+  // file renders and caches its thumbnail then; until that, the card shows
+  // its generic 3D tile (and Explorer the wireframe).
+  if (buffer.byteLength > THUMBNAIL_MAX_BYTES) return null;
   const model = await loadModel(name, buffer, "thumbnail", hash);
   const dataUrl = renderModelThumbnail(model);
   if (dataUrl) {
@@ -110,5 +117,13 @@ export async function ensureThumbnail(model: Model3D): Promise<void> {
     if (!dataUrl) return;
     await putCachedThumb(model.hash, dataUrl);
   }
+  await mirrorToExplorer(model.hash, dataUrl);
+}
+
+/** Re-renders a model's thumbnail unconditionally — after the user flips its up axis, the cached picture is lying on its side. */
+export async function refreshThumbnail(model: Model3D): Promise<void> {
+  const dataUrl = renderModelThumbnail(model);
+  if (!dataUrl) return;
+  await putCachedThumb(model.hash, dataUrl);
   await mirrorToExplorer(model.hash, dataUrl);
 }
