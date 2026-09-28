@@ -10,6 +10,157 @@ Written 2026-09-28 against `main` @ `8bafb82` (v0.28.0). Intended to be executed
 |---|---|---|
 | — | — | nothing started |
 
+### Open items checklist (status 2026-09-28: **nothing started** — every item below is open)
+
+Tick `[x]` and add a progress-log row as items land. Order = recommended execution order.
+
+**1 · Do first — SVG bugs + foundation**
+- [ ] SV-01 SVG Bézier paths (C/S/Q/T) — today they silently drop geometry
+- [ ] SV-02 SVG units + true physical size (import and export)
+- [ ] Z-01 Entity-kind registry + new-entity checklist
+- [ ] Z-02 Document v3 + named tables (blocks, dimStyles, textStyles, linetypes, hatchPatterns, layouts, params)
+- [ ] X-01 Modern DXF writer (AC1032, handles, all sections; R12 kept for CAM; save back in source version)
+- [ ] X-02 DXF audit harness (ezdxf, golden files, optional ODA)
+- [ ] Z-03 Theme tokens (renderer, 3D, UI) + light theme
+- [ ] Z-04 Linetypes + lineweights (was T-36)
+- [ ] X-04 Colours (ACI table, true colour, BYLAYER/BYBLOCK)
+- [ ] X-06 Units + extents header vars
+- [ ] X-07 Text encoding (UTF-8, Cyrillic, codepages)
+- [ ] F-09 Format registry (one table for all formats)
+
+**2 · Themes as plugins**
+- [ ] TH-01 Theme file format + validator (colours only)
+- [ ] TH-02 `contributes.themes`; unsigned theme-only bundles allowed (decided)
+- [ ] TH-03 Theme picker + live preview, dark/light pairing
+- [ ] TH-04 Theme editor + contrast checker + export/package
+- [ ] TH-05 Install paths (drag-drop, file, association, deep link)
+- [ ] TH-06 Built-in themes (Dark, Light, High Contrast, Classic CAD, Blueprint, Paper, +3)
+- [ ] TH-07 Theme gallery on sketchor-site
+- [ ] TH-08 Remove every hard-coded colour; theme reaches plugin panels (`ui.theme`)
+
+**3 · Splines and ellipses**
+- [ ] C-01 EllipseEntity
+- [ ] C-02 SplineEntity (NURBS) + `nurbs.ts`
+- [ ] C-03 Import DXF/SVG curves as real entities
+- [ ] C-04 Export curves (DXF 2018, SVG, PDF, sketch code)
+- [ ] C-05 Ellipse tool
+- [ ] C-06 Spline tools (fit points / CVs)
+- [ ] C-07 Spline/ellipse editing (grips, SPLINEDIT actions, convert)
+- [ ] C-08 Every tool handles curves (fillet, offset, join, explode, measure, nest, G-code)
+- [ ] C-09 Constraints on curves
+
+**4 · SVG + EPS complete**
+- [ ] SV-03 SVG styles (attributes, `style=`, `<style>` CSS)
+- [ ] SV-04 SVG text, `<symbol>`/`<use>` → blocks, Inkscape layers
+- [ ] SV-05 SVG export fidelity (layers, curves, Laser/CAM vs Document modes)
+- [ ] SV-06 Desktop "Open with" for .svg/.eps/.ai
+- [ ] SV-07 Explorer thumbnails for .svg/.eps/.ai (sidecar + resvg)
+- [ ] F-01 EPS import (own PostScript subset interpreter)
+- [ ] F-02 EPS export
+- [ ] F-03 EPS thumbnails everywhere
+- [ ] SV-08 EPS extras (.ai detection, CMYK, preview header, round-trip)
+- [ ] SV-09 SVG/EPS fixture corpus + malformed-input tests
+- [ ] SV-10 SVG/EPS in format registry + embed
+
+**5 · Blocks (static)**
+- [ ] B-01 Block definition + insert entity + evaluator
+- [ ] B-02 Block commands (define, update, rename, delete, explode)
+- [ ] B-03 Create-block UX
+- [ ] B-04 Block editor with live update + edit in place
+- [ ] B-05 Attributes + ATTEDIT + CSV extraction + fields
+- [ ] B-06 Block library panel (drawing, folders, favourites)
+- [ ] B-07 DXF import keeps blocks
+- [ ] B-08 DXF/SVG export writes real blocks
+- [ ] B-09 Purge, rename, replace, count
+- [ ] B-10 Block-aware editing (properties, grips, mirror, nest)
+
+**6 · Hatching**
+- [ ] H-01 HatchEntity
+- [ ] H-02 Pattern engine (.pat parser, line clipping, islands, LOD, worker)
+- [ ] H-03 Built-in pattern library ≥ 60 (clean-room ANSI/AR/ISO/GOST/DIN/JIS/geometric)
+- [ ] H-04 Hatch tool + boundary detection with islands
+- [ ] H-05 Associativity
+- [ ] H-06 Pattern library panel, .pat import/export, pattern designer, plugin patterns
+- [ ] H-07 Gradients + transparency
+- [ ] H-08 Hatch editing ops + draw order
+- [ ] H-09 Hatch DXF/SVG/PDF import/export
+- [ ] H-10 Hatch performance + print
+
+**7 · Dimensions + annotation**
+- [ ] D-01 Text styles + fonts (opentype.js, SHX mapping)
+- [ ] D-02a DimensionEntity (9 kinds)
+- [ ] D-02b Driving dimensions (= T-42)
+- [ ] D-02c Dimension tools (smart DIM, baseline, continue, QDIM)
+- [ ] D-03 Dimension styles + manager + presets (ISO, ANSI, DIN, JIS, GOST, Architectural)
+- [ ] D-04 MTEXT + rich editor
+- [ ] D-05 Leaders / multileaders / balloons
+- [ ] D-06 GD&T frames + symbols
+- [ ] D-07 Center marks + centerlines
+- [ ] D-08 Annotative scaling
+- [ ] D-09 Dimension editing
+- [ ] D-10 DXF DIMSTYLE / DIMENSION / MTEXT / LEADER / MULTILEADER
+- [ ] D-11 Dims in SVG/PDF/print
+- [ ] D-12 Tables (optional)
+
+**8 · Constraints (finish the roadmap)**
+- [ ] T-43 Inference / auto-constraints
+- [ ] T-44 DOF colouring + conflicts panel
+- [ ] T-45 Parameters + expressions + Variables panel
+- [ ] T-46 Associative tools
+- [ ] K-01 Constraints for new entity kinds
+- [ ] K-02 Solver scale + robustness
+- [ ] K-03 Sketch vs drafting mode
+
+**9 · Dynamic + parametric blocks**
+- [ ] B-20 Dynamic spec + evaluator
+- [ ] B-21 Authoring in the block editor (+ test block)
+- [ ] B-22 Instance UX (custom properties, grips)
+- [ ] B-23 Shipped dynamic block library
+- [ ] B-24 `contributes.blocks`
+- [ ] B-25 DXF export of dynamic blocks (*U + SKETCHOR XDATA)
+- [ ] B-26 DXF import of AutoCAD dynamic blocks
+- [ ] B-27 Dynamic block tests
+
+**10 · Paper space**
+- [ ] L-01 Layout model
+- [ ] L-02 Layout tabs + page setup
+- [ ] L-03 ViewportEntity + MSPACE/PSPACE
+- [ ] L-04 Title blocks + fields
+- [ ] L-05 Annotative scale per viewport
+- [ ] L-06 Plot / multi-page PDF per layout
+- [ ] L-07 DXF LAYOUT/VIEWPORT round-trip
+- [ ] L-08 Layout-from-model wizard
+- [ ] L-09 `contributes.layoutTemplates`
+
+**11 · DXF fidelity (continuous, after each phase)**
+- [ ] X-03 Import coverage sweep over K:/01 PROD FILES
+- [ ] X-05 DXF GROUP objects
+- [ ] X-08 Lossless SKETCHOR XDATA round-trip
+- [ ] X-09 Preserve unknown DXF data on re-save
+- [ ] X-10 DWG save via ODA converter (optional)
+- [ ] X-11 Binary DXF read
+- [ ] X-12 Fidelity scorecard vs LibreCAD
+
+**12 · Other formats**
+- [ ] F-04 DXF preview upgrades (blocks/hatch/dims in thumbnails, TS ↔ Rust parity)
+- [ ] F-05 Mesh 3D formats (STL, OBJ, 3MF, glTF/GLB, PLY)
+- [ ] F-06 BREP + 3DM
+- [ ] F-07 2D from 3D (projection, flat-face outline)
+- [ ] F-10 Large-file behaviour
+- [ ] F-08 PDF vector import
+
+**13 · Embeddable animated preview**
+- [ ] E-01 `@sketchor/embed` package + shared renderer extraction
+- [ ] E-02 `<sketchor-view>` web component, auto-upgrade mode, iframe + oEmbed
+- [ ] E-03 Loading (CORS, worker, cache, errors)
+- [ ] E-04 Idle look (play button, faint logo, full-view button)
+- [ ] E-05 Motion engine (springs, float/draw/turntable, pointer flow, reduced motion)
+- [ ] E-06 Full view + "Open in Sketchor" (`/app?open=`)
+- [ ] E-07 Embed theming
+- [ ] E-08 Distribution (npm/jsDelivr + site mirror; MIT — decided)
+- [ ] E-09 Site integration + /embed docs page
+- [ ] E-10 Embed tests + demo page
+
 ---
 
 ## 0. Rules for whoever executes this plan
@@ -55,7 +206,7 @@ Phase 4  Dims + annot.    D-01..D-12  (incl. T-42)                              
 Phase 5  Constraints      T-43..T-46, K-01..K-03                                 needs D (T-42 lands in D-02)
 Phase 6  Dynamic blocks   B-20..B-27                                             needs B + Phase 5
 Phase 7  Layouts          L-01..L-09                                             needs B (title blocks), D (annotative), X-01
-Phase 8  Formats/previews F-01..F-10  (EPS, STL/OBJ/3MF/glTF/PLY/BREP/3DM)       independent — can run in parallel from Phase 1
+Phase 8  Formats/previews F-01..F-10, SV-01..SV-10 (EPS, SVG, 3D)  independent — SV-01/SV-02 are live bugs: do them first
 Phase 9  Embed widget     E-01..E-10                                             needs Z-03, F (for formats it shows)
 Phase 10 Themes plugins   TH-01..TH-08                                           needs Z-03 only — can run in parallel from Phase 1
 Always   DXF              X-03..X-12 land *with* each feature, not at the end
@@ -421,6 +572,42 @@ Coordinate with `docs/large-step-and-up-axis-plan.md` (S-xx/U-xx): binary reads 
 
 ---
 
+## 12a. SVG and EPS — complete support (added 2026-09-28)
+
+Both formats must be first-class: open by double-click, preview everywhere (file browser, Explorer, embed), import with full fidelity, export at true physical size. EPS items F-01 (import), F-02 (export), F-03 (thumbnails) above are part of this; the items below finish the job.
+
+**SVG today** (`packages/core/src/svg.ts`, audited 2026-09-28): import handles `line/circle/ellipse/rect/image/polyline/polygon/path/g` with `transform`s; path commands **M L H V Z A only** — any `C/S/Q/T` Bézier makes the parser *bail out of the rest of that path* (`i = tokens.length`), so an Inkscape/Illustrator/Figma drawing loses most of its curves. `<text>`, `<use>`/`<symbol>`, `<style>`/`class`, `style="…"` attributes and units are ignored. Export writes a viewBox 1:1 in world units but `width`/`height` **without units** (read as px at 96 dpi → a 100 mm part prints as 26.5 mm). The desktop shell already emits `open-svg`, but `tauri.conf.json` has **no `.svg` file association** and the Explorer DLL doesn't register `.svg`.
+
+### SV-01 · Bézier paths — **P0, M** (bug-level, do first)
+Add `C c S s Q q T t` to the path parser with correct reflected control points for `S`/`T`, implicit repeated command sequences, and number-token edge cases (`1.5.5`, `-.5e-3`, flags run together). Each Bézier → a degree-3/2 spline segment (C-02) when available; **until C-02 lands**, flatten to the polyline with `simplify.ts` arc-fitting at 0.01 mm so geometry is never dropped. Unknown commands add a warning and skip only that command, never the rest of the path. Tests: every command, relative/absolute, fixtures exported from Inkscape, Illustrator and Figma.
+
+### SV-02 · Units and physical size — **P0, S**
+Import: honour `width`/`height` with units (`mm cm in pt pc px`; `%` = fall back) against `viewBox` to get mm per user unit; unitless/px → 96 dpi (CSS) with the import report stating the assumption and the same amber "Read as" reinterpret control DXF has (`reinterpretImportUnits`). `preserveAspectRatio` handled. Export: `width="123.4mm" height="…mm"` (or `in` when the tab's display unit is imperial) + matching viewBox, so the file prints and opens at true size in Inkscape/Illustrator/browsers and laser software (LightBurn, RDWorks).
+
+### SV-03 · Styles — **P1, M**
+Resolve presentation attributes, `style="…"`, and `<style>` CSS (type/class/id selectors + descendant combinator — no full CSS engine) with inheritance through `<g>`. Map: `stroke` → colour, `fill` → hatch-solid fill (H-01; today's `fill` field until then), `stroke-dasharray` → linetype (Z-04), `stroke-width` → lineweight, `display:none`/`visibility:hidden` → skipped with a report line, `opacity` → transparency.
+
+### SV-04 · Text, symbols, layers — **P1, M**
+`<text>`/`<tspan>` → text/MTEXT entities (position, font-size, anchor, rotation; font family recorded as text style). `<symbol>`/`<use>` and `<defs>` reuse → **blocks + inserts** (B-01), falling back to expanded geometry before B-01 lands. Inkscape layers (`<g inkscape:groupmode="layer" inkscape:label="…">`) and Illustrator layer `<g id>`s → Sketchor layers; other `<g>` → groups. Gradients → H-07 gradient fills; `<clipPath>`/`<mask>`/filters ignored with a report line.
+
+### SV-05 · Export fidelity — **P1, M**
+Layers as Inkscape-compatible layers (`inkscape:groupmode="layer"` + `inkscape:label`), blocks as `<symbol>`/`<use>` (B-08), exact curves (arcs as `A`, splines as `C` — C-04), hatches (H-09), dims/MTEXT/leaders (D-11), linetypes → `stroke-dasharray` in world units, lineweights → `stroke-width`. Export dialog modes: **"Laser / CAM"** (hairline 0.01 mm strokes, no fills, text omitted or as outlines via opentype.js, one colour per layer — what LightBurn/Glowforge expect) vs **"Document"** (as displayed). Layout export: one SVG per layout (L-06).
+
+### SV-06 · Desktop integration — **P1, S**
+Add `.svg`, `.eps`, `.ai` (≤ v8, routed to the EPS importer) to `tauri.conf.json` `fileAssociations` as a secondary "Open with Sketchor" handler (`role: "Viewer"`) — don't steal the default `.svg` association from the browser. Desktop file browser (`list_drawings_in_dir`/`scan_drawings`) lists `.eps`/`.ai`. Driven from the F-09 format registry.
+
+### SV-07 · Explorer + Quick Look thumbnails for SVG and EPS — **P1, M**
+Windows Explorer does not thumbnail SVG natively. Register `.svg`, `.eps`, `.ai` in the thumbnailer DLL (`EXTENSIONS` in `native/dxf-thumbnailer/src/lib.rs`) **under `SystemFileAssociations\<ext>\ShellEx`** so another installed SVG handler (PowerToys, Inkscape) isn't clobbered, plus the HKLM marker rule from CLAUDE.md (extend `enable_explorer_previews` to the new extensions). Rendering: tier 1 = the app-rendered PNG sidecar (as for STEP); tier 2 = **resvg** (MPL-2.0, pure Rust, GPL-compatible — record in NOTICE.md) for SVG, and for EPS the DOS-EPS TIFF preview header when present. Check DLL size growth (resvg ≈ 1–2 MB); put it behind a cargo feature if it's worse. macOS: Finder already previews SVG; add `.eps` to Quick Look only if the system doesn't (verify first).
+
+### SV-08 · EPS extras — **P1, S**
+Beyond F-01/F-02/F-03: `.ai` detection (PDF-based AI ≥ 9 → a clear "save as EPS/SVG, or use PDF import (F-08)" message, not a crash), DOS-EPS binary header stripping, CMYK → RGB, EPS export option "include TIFF preview" (off by default), EPS in the file browser, embed (E-02) and drag-drop open. Round-trip test: Sketchor → EPS → Sketchor geometry equal within 0.001 mm.
+
+### SV-09 · Corpus + tests — **P1, S**
+`packages/core/src/fixtures/svg/` and `fixtures/eps/`: small files exported from Inkscape, Illustrator, Figma, LibreCAD, AutoCAD (user-supplied where needed), each with a test asserting entity counts, bounds in mm, and no dropped-geometry warnings. Every parser gets CLAUDE.md's "empty, truncated, malformed → returns, never throws, always terminates" tests.
+
+### SV-10 · Embed + format registry — **P1, S**
+SVG and EPS in F-09's registry with importer, exporter, thumbnailer and association flags, so the embed (E-02), file browser, Open dialog and desktop shell pick them up from one table. SVG is the embed's best "draw-on" format — make sure E-05's stroke-trace works on imported Béziers.
+
 ## 13. Phase 9 — Embeddable animated preview ("Sketchor Embed")
 
 **Goal:** any website shows a Sketchor-rendered preview of a DXF/SVG/.sketchor/EPS/STEP/STL/… by adding one script tag — **no rebuild of the host site**. It animates on demand like the reference site the user named (forgexus.com — its preview is JS-rendered and couldn't be inspected from here; confirm the exact feel with the user or by looking at it in the browser before E-05): press play → the object starts moving smoothly; moving the mouse adds a subtle "flow" (parallax/tilt that eases, never snaps). A faint Sketchor logo sits in the corner, and a button opens the full view.
@@ -510,12 +697,12 @@ Audit every hard-coded colour: `grep -rn "#[0-9a-fA-F]\{3,6\}" apps/web/src --in
 | **D · Hatching** | H-01 → H-10 | Needs C-01/C-02 only for curve edges — can start with line/arc edges. |
 | **E · Annotation + constraints** | D-01 → D-11, then T-43, T-44, T-45, T-46, K-01, K-02, K-03 | D-02 is T-42. |
 | **F · Layouts** | L-01 → L-09 | After B-01..B-05 and D-08. |
-| **G · Formats** | F-09, F-01, F-02, F-03, F-05, F-04, F-06, F-07, F-10, F-08 | Independent. |
+| **G · Formats** | SV-01, SV-02, F-09, SV-03..SV-06, F-01, F-02, F-03, SV-07..SV-10, F-05, F-04, F-06, F-07, F-10, F-08 | Independent. SV-01/SV-02 first — they're live bugs. |
 | **H · Embed** | E-01 → E-10 | After Z-03 and F-09. |
 | **I · Themes** | TH-01 → TH-08 | After Z-03; small, good warm-up track. |
 | **X · Fidelity** | X-03, X-05, X-08, X-09, X-11, X-12 continuously | Scorecard after each phase. |
 
-**Recommended first handoff batch:** Z-01, Z-02, X-01, X-02, Z-03 (foundation), then TH-01..TH-03 as a quick visible win, then C-01..C-04.
+**Recommended first handoff batch:** SV-01, SV-02 (live SVG bugs), then Z-01, Z-02, X-01, X-02, Z-03 (foundation), then TH-01..TH-03 as a quick visible win, then C-01..C-04.
 
 ---
 
