@@ -304,6 +304,25 @@ when that group is "entered"; an ungrouped entity returns itself;
   method; plugin storage keys are namespaced so one plugin can't read another's.
 - **`browser/thumbnail.test.ts`** — `isDrawingFile` extension matching; `fileToSvg`
   dispatches by extension and doesn't throw on malformed content.
+- **`metrics/metrics.test.ts`, `metrics/actions.test.ts`** — DONE. Opt-out
+  analytics, so the privacy guarantees are the tests: nothing sent after
+  `setMetricsEnabled(false)` (queued events included) and the stored id is
+  wiped; events before init are dropped, not queued; a failed SDK load gives
+  up for the session; a first launch and a version change are each counted
+  once, and a launch once per tab however many times the page reloads or
+  `initMetrics` is called; `formatOf` keeps only the extension; `reportError` queues like an
+  event, is silent when off and stops at `MAX_EXCEPTIONS_PER_SESSION`;
+  `scrubText` removes file names (with spaces), both path flavours and URLs
+  from the app's own notice strings while leaving ordinary runtime messages
+  alone; every `TRACKED_BUTTONS` entry
+  names a real `data-testid` and every `TRACKED_PREFIXES` rule a family a
+  component really builds (both checked against the `.tsx` sources), no rule
+  is shadowed by an earlier one, a kept suffix is a real tool/snap/constraint
+  constant while a layer, part, tag or plugin name is dropped or the id
+  ignored, and the app's own `snap-popover`/`install-prompt`/`tool-prompt`
+  don't pass as runtime ids; every command-line alias maps to an action id,
+  and a button reports the same id as the shortcut for the same feature;
+  shortcuts follow rebinding and stay quiet in text fields.
 
 ---
 

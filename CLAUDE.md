@@ -348,6 +348,28 @@ viewer's touch handling is OrbitControls plus tap/double-tap/long-press.
 `pointer: coarse` media query, toggle in the topbar) that puts `.app.touch`
 on the root — the tool rail moves to the bottom as big labelled buttons, and
 so does the model toolbar. A "pan" tool exists so one finger can pan too.
+## Usage statistics (`apps/web/src/metrics/`)
+
+Opt-out PostHog analytics; `README.md` says what is sent. The rules that
+matter when touching it: events go through `track()` only, `actions.ts` is a
+*whitelist* — `TRACKED_BUTTONS` for fixed `data-testid`s, `TRACKED_PREFIXES`
+for the runtime-built ones, where the suffix is kept only if it is an app
+constant checked against the real list (a tool id, a snap or constraint kind)
+and dropped when it is the user's words or a plugin id (`layer-<name>`,
+`structure-part-<name>`, `install-<plugin id>`); a family with no rule stays
+uncounted. A button and the shortcut, command-line command or palette entry
+that do the same thing report the **same** action id and differ only by
+`source` (`COMMAND_LINE_ACTIONS` maps the command line's bare words onto
+them), so don't invent a second id for a second path. `app_launched` goes out
+once per tab (`shouldCountLaunch`, marked in *session* storage): a reload is
+not a launch, and `npm run dev` forces one by itself the first time Vite
+optimizes a lazily imported dependency. File events carry an
+extension and a `magnitudeBucket`, never a
+name, errors go through `reportError(err, context)` (window `error` /
+`unhandledrejection` are already hooked) and every exception message passes
+`scrubText` in `before_send`, and anything new must survive
+`setMetricsEnabled(false)` — see `metrics.test.ts`. `POSTHOG_KEY` empty or a dev build without
+`VITE_METRICS_DEV=1` makes the module inert, which is what tests run against.
 
 ## Testing
 

@@ -89,7 +89,7 @@ export function StructurePanel({ model }: { model: Model3D }) {
     <aside className="layerpanel" data-testid="structure-panel">
       <div className="layerpanel-header">
         <span>Structure</span>
-        <button className="btn ghost sm" onClick={showAll} disabled={hidden.size === 0} title="Show every hidden part">
+        <button className="btn ghost sm" onClick={showAll} disabled={hidden.size === 0} title="Show every hidden part" data-testid="structure-show-all">
           Show all{hidden.size > 0 ? ` (${hidden.size})` : ""}
         </button>
       </div>
@@ -178,6 +178,7 @@ export function StructurePanel({ model }: { model: Model3D }) {
             Isolate{menu.parts.length > 1 ? ` (${menu.parts.length} parts)` : ""}
           </button>
           <button
+            data-testid="structure-menu-hide"
             onClick={() => {
               for (const p of menu.parts) hide(p);
               setMenu(null);
@@ -186,6 +187,7 @@ export function StructurePanel({ model }: { model: Model3D }) {
             Hide
           </button>
           <button
+            data-testid="structure-menu-zoom"
             onClick={() => {
               requestFrame(menu.parts[0] ?? 0);
               setMenu(null);
@@ -194,6 +196,7 @@ export function StructurePanel({ model }: { model: Model3D }) {
             Zoom to
           </button>
           <button
+            data-testid="structure-menu-show-all"
             disabled={hidden.size === 0}
             onClick={() => {
               showAll();

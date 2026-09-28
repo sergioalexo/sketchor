@@ -8,6 +8,7 @@ import {
   setAutoUpdate,
   useUpdate,
 } from "./updateService";
+import { isMetricsConfigured, setMetricsEnabled, useMetrics } from "../metrics/metrics";
 
 /**
  * The update UI, in two pieces:
@@ -39,6 +40,7 @@ function progressText(received: number, total: number | null): string {
 
 export function UpdateButton({ open, onToggle }: { open: boolean; onToggle: () => void }) {
   const { phase, version, notes, channel, received, total, message, autoUpdate } = useUpdate();
+  const metricsEnabled = useMetrics((s) => s.enabled);
   const busy = phase === "checking" || phase === "downloading" || phase === "installing";
   const downloaded = phase === "downloaded";
 
@@ -168,6 +170,23 @@ export function UpdateButton({ open, onToggle }: { open: boolean; onToggle: () =
                 onChange={(e) => setAutoUpdate(e.target.checked)}
               />
               Update automatically
+            </label>
+          )}
+
+          {/* The usage-statistics switch lives here because this popover is
+              the closest thing to a settings panel; see metrics/metrics.ts. */}
+          {isMetricsConfigured() && (
+            <label
+              className="update-auto"
+              title="Send anonymous usage statistics (which features get used, app version, OS). Never drawings or file names."
+            >
+              <input
+                type="checkbox"
+                data-testid="metrics-enabled"
+                checked={metricsEnabled}
+                onChange={(e) => setMetricsEnabled(e.target.checked)}
+              />
+              Send anonymous usage statistics
             </label>
           )}
         </div>

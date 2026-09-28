@@ -23,6 +23,7 @@
  */
 
 import { create } from "zustand";
+import { reportError, track } from "../metrics/metrics";
 
 declare const __APP_VERSION__: string;
 
@@ -136,6 +137,7 @@ export async function openExternal(url: string): Promise<void> {
     }
   } catch (err) {
     console.error("Failed to open", url, err);
+    reportError(err, "open_external");
     const { useApp } = await import("../state/store");
     useApp.getState().setSaveNotice({ kind: "error", message: `Couldn't open ${url}`, at: Date.now() });
   }
@@ -235,6 +237,7 @@ export async function checkForUpdates({ silent = false } = {}): Promise<void> {
         notes: viaPlugin.body?.trim() || null,
         lastCheckedAt: Date.now(),
       });
+      track("update", { outcome: "found", to: viaPlugin.version.replace(/^v/, "") });
       return;
     }
 
@@ -282,6 +285,7 @@ async function downloadPending(): Promise<boolean> {
     return true;
   } catch (err) {
     set({ phase: "error", message: err instanceof Error ? err.message : "Download failed" });
+    track("update", { outcome: "download_failed" });
     return false;
   }
 }
@@ -300,6 +304,7 @@ export async function installPending(): Promise<void> {
     await relaunch();
   } catch (err) {
     set({ phase: "error", message: err instanceof Error ? err.message : "Install failed" });
+    track("update", { outcome: "install_failed" });
   }
 }
 
