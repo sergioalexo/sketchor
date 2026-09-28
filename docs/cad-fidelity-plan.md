@@ -163,6 +163,43 @@ Tick `[x]` and add a progress-log row as items land. Order = recommended executi
 - [ ] E-09 Site integration + /embed docs page
 - [ ] E-10 Embed tests + demo page
 
+**14 · Leftovers from the older plans (added 2026-09-28)**
+
+These keep their original IDs; the full spec for each is in the named doc. Tick them here **and** update that doc's own status/progress log in the same commit. Items those docs list as superseded are not repeated here (T-30/31 → C-xx, T-32 → H-xx, T-33 → D-04/D-05, T-34 → B-xx, T-36 → Z-04, T-42 → D-02b, P-01/P-04..06 → C-xx).
+
+*Sketching tools — `docs/sketching-tools-roadmap.md`*
+- [ ] T-00 Migrate the legacy tools (select, measure, text, image, fill, straighten, dim, pan) out of `Viewport.tsx`'s switch onto the `tools/` framework; delete their `interaction` kinds. Do this **before** C-05/C-06, B-04, H-04, D-02c add more tools.
+- [ ] T-08 Post-commit quick-edit box (edit the length/radius just drawn) — becomes a driving dimension once D-02b lands; build it on D-02b if that's done first
+- [ ] T-15 Offset "through point" mode + round-gap option (`OFFSETGAPTYPE`)
+- [ ] T-16 Trim / extend by fence drag
+- [ ] T-17 Fillet / chamfer between arcs and circles (and line–arc)
+- [ ] T-21 Parallel snap + apparent intersection
+- [ ] T-27 Multifunction grip menu (hover a vertex grip → stretch / add vertex / remove vertex / convert to arc)
+- [ ] T-29 Zoom selected
+- [ ] T-35 Array along a path (extends `pattern.ts`)
+
+*Polyline + nest fixes — `docs/polyline-and-nest-fixes-plan.md`*
+- [ ] NF-03b Canvas markers for open contour ends (needs an additive host-API capability for plugin overlays, e.g. `ui.highlight`; bump `HOST_API_VERSION` minor)
+- [ ] P-03b Import-time "Simplify polylines" option + tolerance setting for the Simplify command (Shift+P is fixed at 0.1 mm today)
+- [ ] NF-05 Nest on simplified geometry
+- [ ] NF-06 Add whole files as parts (one part per file — decided)
+- [ ] NF-07 Nest result opens in a new tab (decided)
+- [ ] NF-08 Nest print / PDF report like the Load Planner
+
+*Sheet metal nesting — `docs/sheet-metal-nesting-plan.md`*
+- [ ] N-42 More G-code post profiles (controller dialects)
+- [ ] N-43 Canvas toolpath preview with dashed rapids
+- [ ] N-50 Spatial indexing so a sheet can hold more than ~600 identical instances (the current cap)
+- [ ] N-51 Common-line cutting
+- [ ] N-52 Remnant library (save offcuts as stock)
+- [ ] N-53 Micro-joints / tabs
+- [ ] N-54 Save and reopen a nest job file
+- [ ] N-55 Part priority / due dates
+
+*Large STEP + up axis — `docs/large-step-and-up-axis-plan.md`*
+- [ ] S-09 Desktop live check: double-click a big STEP and open it from the in-app file browser (`read_file_bytes`), including a non-UTF-8 file name — needs the Tauri app, **ask the user to run it**
+- [ ] U-07 Inventor Y-up detection in `detectUpAxis` (TS) and `is_y_up` (Rust) — only once a real Inventor export is available; ask the user for one
+
 ---
 
 ## 0. Rules for whoever executes this plan
