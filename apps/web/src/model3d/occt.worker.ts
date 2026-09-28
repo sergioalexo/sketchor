@@ -1,7 +1,9 @@
 import occtimportjs from "../../vendor/occt-import-js/occt-import-js.mjs";
 import wasmUrl from "../../vendor/occt-import-js/occt-import-js.wasm?url";
 import { buildModel } from "./buildModel";
+import { describeImportError } from "./importError";
 import { getCachedModel, putCachedModel } from "./modelCache";
+import { tessellationFor } from "./tessellation";
 import { modelArrays } from "./types";
 import type { Model3D, ModelFormat, OcctResult } from "./types";
 
@@ -40,18 +42,8 @@ interface OcctModule {
   ReadIgesFile(content: Uint8Array, params: Record<string, unknown> | null): OcctResult;
 }
 
-/**
- * Tessellation density. Measured on real Onshape assemblies: reading the
- * B-rep dominates and the deflection barely moves the wall time, so this is
- * chosen for how the result *looks* and how much it weighs in the cache —
- * about 1.6M triangles for a 3,000-part assembly, smooth on any GPU.
- */
-const TESSELLATION = {
-  linearUnit: "millimeter",
-  linearDeflectionType: "bounding_box_ratio",
-  linearDeflection: 0.002,
-  angularDeflection: 0.5,
-};
+/** A file's bytes, once OCCT has copied them into the wasm heap, become dead weight for the rest of `handle()` — see the `finally` below. */
+const EMPTY_BUFFER = new ArrayBuffer(0);
 
 let occtPromise: Promise<OcctModule> | null = null;
 
@@ -87,13 +79,25 @@ async function handle(req: ParseRequest): Promise<void> {
 
   post({ id: req.id, phase: "reading" });
   const lib = await occt();
-  const bytes = new Uint8Array(req.buffer);
+  const byteLength = req.buffer.byteLength;
+  const params = tessellationFor(byteLength);
+  let bytes: Uint8Array | null = new Uint8Array(req.buffer);
   let result: OcctResult;
   try {
-    result = req.format === "iges" ? lib.ReadIgesFile(bytes, TESSELLATION) : lib.ReadStepFile(bytes, TESSELLATION);
+    result = req.format === "iges" ? lib.ReadIgesFile(bytes, params) : lib.ReadStepFile(bytes, params);
   } catch (err) {
-    post({ id: req.id, ok: false, error: `OpenCascade failed to read the file: ${(err as Error)?.message ?? String(err)}` });
+    const raw = (err as Error)?.message ?? String(err);
+    post({ id: req.id, ok: false, error: describeImportError(raw, req.name, byteLength) });
     return;
+  } finally {
+    // OCCT has copied the bytes into the wasm heap by now; buildModel below
+    // allocates its own (often larger) merged arrays, so the JS-side input
+    // copy is dead weight while that happens on a big file. Drop every
+    // reference to it, including `req.buffer` itself (the same backing
+    // store `bytes` is a view over) — `req` otherwise stays reachable for
+    // the rest of this function.
+    bytes = null;
+    req.buffer = EMPTY_BUFFER;
   }
   if (!result?.success) {
     post({ id: req.id, ok: false, error: "not a readable STEP/IGES file (unsupported schema or corrupt data)" });
@@ -110,7 +114,13 @@ async function handle(req: ParseRequest): Promise<void> {
 }
 
 self.onmessage = (ev: MessageEvent<ParseRequest>) => {
+  // Captured before handle() runs: it clears req.buffer partway through to
+  // free the input bytes early (see the finally block above), so reading
+  // it again here after a later failure (e.g. inside buildModel) would see
+  // an empty buffer instead of the file's real size.
+  const byteLength = ev.data.buffer.byteLength;
   void handle(ev.data).catch((err) => {
-    post({ id: ev.data.id, ok: false, error: (err as Error)?.message ?? String(err) });
+    const raw = (err as Error)?.message ?? String(err);
+    post({ id: ev.data.id, ok: false, error: describeImportError(raw, ev.data.name, byteLength) });
   });
 };

@@ -31,13 +31,19 @@ interface PreparedMesh {
 }
 
 export function buildModel(result: OcctResult, name: string, hash: string, format: ModelFormat): Model3D {
-  const source = Array.isArray(result?.meshes) ? result.meshes : [];
+  const source: (OcctMesh | undefined)[] = Array.isArray(result?.meshes) ? result.meshes : [];
   // Index into `source` -> index into `prepared` (skipped meshes have none),
   // so the hierarchy can still point at the parts that survived.
   const partIndexOf = new Map<number, number>();
   const prepared: PreparedMesh[] = [];
   for (let i = 0; i < source.length; i++) {
     const m = prepareMesh(source[i]);
+    // Each raw mesh's own position/index/normal arrays are dead weight once
+    // copied into `m` (or discarded) — on a big assembly (thousands of
+    // meshes) holding both the raw and the prepared copy at once roughly
+    // doubles peak memory for no reason, so drop it as we go rather than
+    // waiting for `result` to go out of scope.
+    source[i] = undefined;
     if (!m) continue;
     partIndexOf.set(i, prepared.length);
     prepared.push(m);

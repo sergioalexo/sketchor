@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { describeImportError } from "./importError";
 import type { ParseRequest, ParseResponse } from "./occt.worker";
 import type { Model3D, ModelFormat } from "./types";
 
@@ -48,6 +49,7 @@ export interface ModelLoad {
   priority: LoadPriority;
   phase: "queued" | "hashing" | "reading" | "cached";
   startedAt: number;
+  bytes: number;
 }
 
 interface LoadState {
@@ -73,6 +75,8 @@ interface Job {
   hash: string;
   format: ModelFormat;
   buffer: ArrayBuffer;
+  /** Captured before `buffer` is transferred to a worker and its byteLength goes to 0. */
+  bytes: number;
   priority: LoadPriority;
   resolve: (m: Model3D) => void;
   reject: (e: Error) => void;
@@ -99,7 +103,10 @@ function spawn(): Slot {
     const job = slot.job;
     slot.job = null;
     retire(slot);
-    job?.reject(new Error(ev.message || "import worker crashed"));
+    if (job) {
+      const raw = ev.message || "import worker crashed";
+      job.reject(new Error(describeImportError(raw, job.name, job.bytes)));
+    }
     pump();
   };
   slots.push(slot);
@@ -169,8 +176,9 @@ export function loadModel(
   const format = modelFormatOf(name);
   if (!format) return Promise.reject(new Error(`${name} is not a supported 3D model file`));
   const id = nextId++;
+  const bytes = buffer.byteLength;
   const loads = useModelLoads.getState();
-  loads.add({ id, name, priority, phase: "hashing", startedAt: Date.now() });
+  loads.add({ id, name, priority, phase: "hashing", startedAt: Date.now(), bytes });
 
   return (knownHash ? Promise.resolve(knownHash) : hashBytes(buffer)).then((hash) => {
     const existing = inflight.get(hash);
@@ -183,7 +191,7 @@ export function loadModel(
       return existing;
     }
     const promise = new Promise<Model3D>((resolve, reject) => {
-      const job: Job = { id, name, hash, format, buffer, priority, resolve, reject, cancelled: false };
+      const job: Job = { id, name, hash, format, buffer, bytes, priority, resolve, reject, cancelled: false };
       loads.set(id, { phase: "queued" });
       // Opens go to the front of the line, behind any other open already waiting.
       if (priority === "open") {

@@ -495,3 +495,66 @@ to the user (see the release procedure in the user's notes / README).
     anything above since Explorer itself resolves paths differently, but
     worth a fix if anyone tries to verify a thumbnail for a file on a
     network share with this tool again.
+
+- 2026-09-28 — S-01, S-02, S-03, S-04 done (user asked to continue with
+  S-01..S-08).
+  - **S-01**: extracted `model3d/importError.ts` (`describeImportError`,
+    `formatBytes`, `isOomError`, all pure + tested) and used it in both of
+    `occt.worker.ts`'s catch paths and `stepImport.ts`'s `worker.onerror`.
+    An OOM now reads "Ran out of memory reading `<name>` (`<size>`) —
+    OpenCascade's wasm import is capped at 4 GB and this file exceeded
+    it."; any other crash still gets the file name and size appended.
+    Didn't add a worker-pool integration test (mocking `Worker` +
+    `crypto.subtle` under vitest/jsdom is its own yak-shave and there's no
+    existing pattern for it in this repo) — only the error-string
+    transform changed, not the retire/pump control flow itself, which the
+    plan's own caveat allows.
+  - **S-02**: `occt.worker.ts` now drops `bytes`/`req.buffer` (replaced
+    with a shared zero-length `ArrayBuffer`) right after OCCT has copied
+    them into the wasm heap, before `buildModel`'s own allocations run;
+    `buildModel.ts` nulls `source[i]` (the raw per-mesh arrays) as each is
+    consumed into the merged buffers instead of holding both until the
+    function returns. Size-adaptive tessellation lives in the new
+    `model3d/tessellation.ts` (`tessellationFor`, pure, tested): fine
+    (0.002/0.5) at or under 30 MB, coarser (0.005/0.8) above it.
+    `modelCache.ts`'s `LAYOUT_VERSION` bumped 3→4 (chose this over
+    including the level in the key — tessellation is a pure function of
+    byte length, so a given file's hash always picks the same level; the
+    version bump is only to invalidate what earlier sessions already
+    cached under the old always-fine setting).
+  - **S-03**: new Tauri command `read_file_bytes` (`src-tauri/src/main.rs`,
+    `spawn_blocking` like `list_drawings_in_dir`, returns
+    `tauri::ipc::Response` — arrives as an `ArrayBuffer` in JS, no base64).
+    `emit_file` now sends only `{name, dir, path}` for `open-model`/
+    `open-dwg` (checks the file exists rather than reading+encoding it);
+    `desktopBridge.ts`'s handlers fetch bytes via the new command
+    (`payloadBytes` helper), falling back to `payload.base64` if a build
+    ever sends it (kept for one release per the plan). `FileExplorerPanel.tsx`'s
+    `readEntryBytes` uses `read_file_bytes` for a desktop `entry.path`
+    instead of routing through `read_drawing_file`'s `read_to_string` +
+    `TextEncoder` round-trip, which choked outright on non-UTF-8 bytes
+    (Latin-1 part names, common from SolidWorks) even before this file's
+    other problems. Rust test `read_bytes_round_trips_non_utf8_bytes_unchanged`
+    added next to the `write_thumbnail_cache` tests. No capabilities-file
+    change needed — custom app commands here aren't gated by
+    `capabilities/default.json` (only plugin commands are; verified by
+    checking none of the existing custom commands are listed there
+    either).
+  - **S-04**: `ModelLoad` gained `bytes` (captured in `loadModel` before
+    the buffer is transferred, since `ArrayBuffer.byteLength` reads 0
+    after a transfer); `ModelViewport.tsx`'s loading card shows "Large
+    file (`<size>`) — this can take a few minutes." above 20 MB, reusing
+    `formatBytes` from S-01.
+  - Also fixed in passing, unrelated to this plan: `posthog-js` was added
+    to `apps/web/package.json` by the usage-metrics commit merged into
+    this branch on 2026-09-28, but `npm install` was never re-run, so
+    `tsc`/`npm run build` failed with "Cannot find module 'posthog-js'".
+    Ran `npm install`; `package-lock.json` updated.
+  - Verified: `npm test` (905/905), `npx tsc --noEmit` clean, `cargo test`
+    in `src-tauri` (3/3, including the new one).
+  - Not yet verified **live** in the browser/desktop app for this batch
+    (S-00's manual repro is still the most recent live check, before
+    these changes) — next session should re-open the real 24408 file and
+    confirm the size hint/error wording look right, and desktop-test
+    S-03's IPC path specifically (the browser dev server can't exercise
+    `window.__TAURI__`).

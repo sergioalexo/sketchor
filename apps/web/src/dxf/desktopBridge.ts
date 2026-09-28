@@ -11,15 +11,23 @@ import { parseSvgText } from "@sketchor/core";
  *
  *  - `open-dxf` → import DXF geometry (payload.text)
  *  - `open-svg` → import SVG geometry (payload.text)
- *  - `open-dwg` → import DWG geometry (payload.base64, since DWG is binary
- *    — see dwgImport.ts)
- *  - `open-model` → open a STEP/IGES model in a 3D viewer tab (payload.base64;
- *    the exact bytes are the model cache key — see model3d/)
+ *  - `open-dwg` → import DWG geometry, since DWG is binary — see dwgImport.ts
+ *  - `open-model` → open a STEP/IGES model in a 3D viewer tab; the exact
+ *    bytes are the model cache key — see model3d/
+ *
+ * `open-dwg`/`open-model` carry only `payload.path`: the bytes are fetched
+ * separately via `read_file_bytes`, which arrives as raw bytes over IPC
+ * rather than a base64 string that both inflates the transfer by a third
+ * and fails outright on a STEP file with non-UTF-8 bytes if read any other
+ * way. `payload.base64` is still handled if present — a UI briefly out of
+ * step with the Rust binary during an update — but the desktop shell no
+ * longer sends it.
  *
  * On the web there is no `window.__TAURI__`, so this is a no-op — the same
  * bundle runs in the browser and the desktop shell.
  */
 interface TauriGlobal {
+  core: { invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown> };
   event: {
     listen: (
       event: string,
@@ -51,6 +59,16 @@ function base64ToArrayBuffer(base64: string): ArrayBuffer {
   return bytes.buffer;
 }
 
+/** Bytes for a binary `open-*` payload: the new path-only form, or the base64 fallback (see the module docblock). */
+async function payloadBytes(
+  tauri: TauriGlobal,
+  payload: { base64?: string; path?: string },
+): Promise<ArrayBuffer | undefined> {
+  if (payload.base64) return base64ToArrayBuffer(payload.base64);
+  if (payload.path) return (await tauri.core.invoke("read_file_bytes", { path: payload.path })) as ArrayBuffer;
+  return undefined;
+}
+
 export function initDesktopFileOpen(): void {
   const tauri = (window as unknown as { __TAURI__?: TauriGlobal }).__TAURI__;
   if (!tauri?.event) return;
@@ -71,16 +89,22 @@ export function initDesktopFileOpen(): void {
   });
 
   tauri.event.listen("open-model", ({ payload }) => {
-    if (!payload?.base64) return;
-    openModelBytes(payload.name, base64ToArrayBuffer(payload.base64));
-    revealFolder(payload.dir);
+    if (!payload) return;
+    payloadBytes(tauri, payload).then((bytes) => {
+      if (!bytes) return;
+      openModelBytes(payload.name, bytes);
+      revealFolder(payload.dir);
+    });
   });
 
   tauri.event.listen("open-dwg", ({ payload }) => {
-    if (!payload?.base64) return;
-    dwgToDxfText(base64ToArrayBuffer(payload.base64)).then((text) => {
-      openIntoSession(payload.name, () => (text ? importDxfText(text) : importEntities([], [DWG_UNREADABLE])));
-      revealFolder(payload.dir);
+    if (!payload) return;
+    payloadBytes(tauri, payload).then((bytes) => {
+      if (!bytes) return;
+      dwgToDxfText(bytes).then((text) => {
+        openIntoSession(payload.name, () => (text ? importDxfText(text) : importEntities([], [DWG_UNREADABLE])));
+        revealFolder(payload.dir);
+      });
     });
   });
 }

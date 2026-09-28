@@ -6,8 +6,12 @@ use tauri::{AppHandle, Emitter, Manager};
 
 /// Payload sent to the UI when a drawing is opened from the OS
 /// (double-click, "Open with", or a file argument on launch). Text formats
-/// (DXF, SVG) use `text`; DWG is binary, so it's base64-encoded into
-/// `base64` instead — see apps/web/src/dxf/desktopBridge.ts.
+/// (DXF, SVG) use `text`. DWG and 3D models are binary and travel as just a
+/// `path`: the UI fetches the bytes itself via `read_file_bytes`, which
+/// arrives as raw bytes over IPC rather than a base64 string doubling the
+/// transfer size — see apps/web/src/dxf/desktopBridge.ts. `base64` is kept
+/// on the wire (unset here) only so a UI briefly out of step with this
+/// binary during an update still has a field to fall back to.
 #[derive(serde::Serialize, Clone)]
 struct OpenFile {
     name: String,
@@ -19,7 +23,8 @@ struct OpenFile {
     /// browser (R9) pre-loaded with its sibling drawings.
     dir: String,
     /// The full path, so a plain "Save" can write straight back to the file
-    /// that was double-clicked (see write_drawing_file).
+    /// that was double-clicked (see write_drawing_file), and so binary
+    /// formats can be fetched via `read_file_bytes`.
     path: String,
 }
 
@@ -36,8 +41,6 @@ fn emit_file(app: &AppHandle, path: &str) {
     } else if lower.ends_with(".dwg") {
         ("open-dwg", true)
     } else if is_model_path(&lower) {
-        // STEP/IGES are text, but the UI hashes the exact bytes as its model
-        // cache key, so they travel as bytes like DWG does.
         ("open-model", true)
     } else {
         return;
@@ -54,11 +57,12 @@ fn emit_file(app: &AppHandle, path: &str) {
         .unwrap_or_default();
 
     if is_binary {
-        if let Ok(bytes) = std::fs::read(path) {
-            let base64 = base64::engine::general_purpose::STANDARD.encode(bytes);
+        // Existence check only — the bytes themselves are fetched by the UI
+        // via read_file_bytes, once it has a worker/tab ready to receive them.
+        if p.is_file() {
             let _ = app.emit(
                 event,
-                OpenFile { name, text: None, base64: Some(base64), dir, path: path.to_string() },
+                OpenFile { name, text: None, base64: None, dir, path: path.to_string() },
             );
         }
     } else if let Ok(text) = std::fs::read_to_string(path) {
@@ -156,6 +160,26 @@ fn scan_drawings(dir: &str) -> Result<Vec<DrawingEntry>, String> {
 #[tauri::command]
 fn read_drawing_file(path: String) -> Result<String, String> {
     std::fs::read_to_string(&path).map_err(|e| e.to_string())
+}
+
+/// Reads a file's raw bytes by full path, for binary formats (DWG, 3D
+/// models) and for any file whose bytes might not be valid UTF-8 (STEP/IGES
+/// are technically text, but SolidWorks and friends sometimes write Latin-1
+/// names into them — `read_drawing_file`'s `read_to_string` would fail
+/// outright on those). Returns a `tauri::ipc::Response`, which arrives in JS
+/// as an `ArrayBuffer` rather than a string, so callers that need the exact
+/// bytes (the model cache key is a hash of them) get them unchanged with no
+/// base64 round trip inflating the transfer by a third. Runs on the blocking
+/// pool like `list_drawings_in_dir` — a model file can be tens of megabytes.
+#[tauri::command]
+async fn read_file_bytes(path: String) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || read_bytes(&path).map(tauri::ipc::Response::new))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn read_bytes(path: &str) -> Result<Vec<u8>, String> {
+    std::fs::read(path).map_err(|e| e.to_string())
 }
 
 /// Writes a drawing back to a full native path. The desktop file browser and
@@ -329,6 +353,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             list_drawings_in_dir,
             read_drawing_file,
+            read_file_bytes,
             write_drawing_file,
             write_thumbnail_cache,
             explorer_previews_status,
@@ -381,6 +406,20 @@ mod tests {
         assert!(write_thumbnail_cache(other.clone(), "%%%not base64".into()).is_err());
         assert!(!tmp.join("Sketchor").join("thumbs").join(format!("{other}.png")).exists());
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// S-03: the old desktop-file-browser path read a model file with
+    /// `read_to_string` and re-encoded it, which fails outright on a STEP
+    /// file with non-UTF-8 bytes (Latin-1 part names are common from
+    /// SolidWorks). `read_bytes` must return exactly what was written.
+    #[test]
+    fn read_bytes_round_trips_non_utf8_bytes_unchanged() {
+        let tmp = std::env::temp_dir().join(format!("sketchor-bytes-test-{}", std::process::id()));
+        let bytes: Vec<u8> = vec![0x53, 0x54, 0x45, 0x50, 0xE9, 0xFF, 0x00, 0x01, 0x02];
+        std::fs::write(&tmp, &bytes).unwrap();
+        let result = read_bytes(tmp.to_str().unwrap());
+        let _ = std::fs::remove_file(&tmp);
+        assert_eq!(result, Ok(bytes));
     }
 
     /// The .reg import is the only way the markers get created on a user's

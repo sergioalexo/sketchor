@@ -81,11 +81,18 @@ async function readEntryText(entry: Entry): Promise<string> {
 /**
  * Raw bytes of an entry, for 3D model files — read raw rather than through
  * the text path so the content hash (the model cache key) matches what the
- * Open dialog and desktop file association produce from the same file.
+ * Open dialog and desktop file association produce from the same file, and
+ * so a STEP/IGES file with non-UTF-8 bytes (Latin-1 part names, common from
+ * SolidWorks) doesn't fail outright the way `read_to_string` would.
  */
 async function readEntryBytes(entry: Entry): Promise<ArrayBuffer> {
   if (entry.file) return entry.file.arrayBuffer();
   if (entry.handle) return (await entry.handle.getFile()).arrayBuffer();
+  if (entry.path) {
+    const t = tauri();
+    if (!t) return new ArrayBuffer(0);
+    return (await t.core.invoke("read_file_bytes", { path: entry.path })) as ArrayBuffer;
+  }
   const text = await readEntryText(entry);
   return new TextEncoder().encode(text).buffer as ArrayBuffer;
 }

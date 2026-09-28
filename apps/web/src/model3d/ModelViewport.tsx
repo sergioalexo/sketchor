@@ -14,6 +14,7 @@ import {
   type ModelObjects,
   type ViewPreset,
 } from "./modelScene";
+import { formatBytes } from "./importError";
 import { measureSelection, partOf, refLabel, type MeasureSegment, type SelRef } from "./measure";
 import { pickEdge, pickVertex, type Projector } from "./picking";
 import { useOpenLoads } from "./stepImport";
@@ -68,6 +69,9 @@ export function ModelViewport({ session }: Props) {
 
 /* ------------------------------ loading/error --------------------------- */
 
+/** Above this, the loading card calls out the size — reading dominates wall time on a big assembly. */
+const LARGE_FILE_BYTES = 20 * 1024 * 1024;
+
 function ModelLoading({ name }: { name: string }) {
   const loads = useOpenLoads();
   const load = loads.find((l) => l.name === name) ?? loads[0];
@@ -95,6 +99,11 @@ function ModelLoading({ name }: { name: string }) {
           {seconds > 0 ? `${seconds}s · ` : ""}
           Large assemblies take a while the first time; this file opens instantly afterwards.
         </div>
+        {load && load.bytes > LARGE_FILE_BYTES && (
+          <div className="model-loading-hint" data-testid="model-loading-size-hint">
+            Large file ({formatBytes(load.bytes)}) — this can take a few minutes.
+          </div>
+        )}
       </div>
     </div>
   );
