@@ -11,9 +11,10 @@ Written 2026-09-28 against `main` @ `8bafb82` (v0.28.0). Intended to be executed
 | 2026-09-28 | SV-01 | Path parser rewritten (own scanner: `1.5.5`, `-.5e-3`, packed arc flags); C/S/Q/T flattened to 0.01 mm until C-02 (arc-fitting via `simplify.ts` not applied — flat tolerance already minimal; revisit with C-02); bad/unknown command skips only itself. Inkscape/Illustrator/Figma fixtures deferred to SV-09 |
 | 2026-09-28 | SV-02 | `parseSvgText` returns `units` and scales to mm from width/height/viewBox/preserveAspectRatio (mm cm in pt pc; px/unitless/%/missing → 96 dpi, flagged `assumed`). New `importSvgText`/`overlaySvgText` in the store feed the amber "Read as" banner (`ImportUnits.fileUnitMm`); a declared mm/cm/in becomes the display unit. Export writes `width="…mm"` (or `in` for in/ft tabs); inline print/report embeds pass `unit: "none"`. Legacy Sketchor SVGs (unitless width) now read as 96 dpi and show the banner. Live check was store-level only (browser window hidden, banner not painted) |
 | 2026-09-28 | Z-01 | `kinds/registry.ts` (EntityKind: only `tessellate` required; derived bounds/hit/snaps/grips/path/transform fallbacks) + `kinds/builtin.ts` (7 kinds; hit-test and feature-snap code moved out of Viewport/snapping). Generic consumers now consult it: boundsOf, entityPoints, translated/rotated/transformed, mirror, stretch, pattern, box/lasso select, pathOf, grips, snapping, hit test, renderer, SVG/PDF/thumbnail/R12-DXF export. `docs/new-entity-checklist.md` written. The plan's `native/sketchor-shell/src/model.rs` does not exist in this repo, so no Rust change (noted in the checklist). 939 → 961 tests, none changed |
+| 2026-09-28 | Z-02 | `tables.ts` (8 named tables + `DocSettings`, ref-rewriter registry), `SketchDocument` tables/settings + v3 `toJSON`/`fromJSON` (v1/v2 load unchanged, unknown tables kept, malformed records dropped), commands `put-table-record` / `delete-table-record` (undo restores position) / `rename-table-record` (rewrites entities + other tables' records, one undo step) / `set-settings`. Layers moved into the `layers` table: store API unchanged, `layers` is now `layerList(doc)` re-projected after every command. Side effects: layer toggle/lock/add/rename/delete are now undoable and mark the tab dirty; **rename now actually rewrites the layer's entities** (before, it renamed only the panel row and the geometry reappeared under the old name); an import that replaces the drawing clears layer records so hidden/locked state does not carry over by name. No native reader exists in this repo, so nothing in Rust. `docs/testing-plan.md` untouched |
 | — | — | nothing else started |
 
-### Open items checklist (status 2026-09-28: SV-01, SV-02, Z-01 done — the rest open)
+### Open items checklist (status 2026-09-28: SV-01, SV-02, Z-01, Z-02 done — the rest open)
 
 Tick `[x]` and add a progress-log row as items land. Order = recommended execution order.
 
@@ -21,7 +22,7 @@ Tick `[x]` and add a progress-log row as items land. Order = recommended executi
 - [x] SV-01 SVG Bézier paths (C/S/Q/T) — today they silently drop geometry
 - [x] SV-02 SVG units + true physical size (import and export)
 - [x] Z-01 Entity-kind registry + new-entity checklist
-- [ ] Z-02 Document v3 + named tables (blocks, dimStyles, textStyles, linetypes, hatchPatterns, layouts, params)
+- [x] Z-02 Document v3 + named tables (blocks, dimStyles, textStyles, linetypes, hatchPatterns, layouts, params)
 - [ ] X-01 Modern DXF writer (AC1032, handles, all sections; R12 kept for CAM; save back in source version)
 - [ ] X-02 DXF audit harness (ezdxf, golden files, optional ODA)
 - [ ] Z-03 Theme tokens (renderer, 3D, UI) + light theme

@@ -42,6 +42,21 @@ approximately; `bounds`/`transform`/`path`/`snaps`/`hitDistance`/`grips` make it
 exact. The seven built-ins live in `kinds/builtin.ts`. **Adding a type: follow
 `docs/new-entity-checklist.md`.**
 
+## Document tables and settings (`packages/core/src/tables.ts`)
+
+`SketchDocument` also holds named **tables** (`layers`, `blocks`, `dimStyles`,
+`textStyles`, `linetypes`, `hatchPatterns`, `layouts`, `params`) and
+**settings** (`$INSUNITS`, current styles, `LTSCALE`, annotation scale) — all
+changed only by `put-table-record` / `delete-table-record` /
+`rename-table-record` / `set-settings`. An entity refers to a record by name;
+`rename-table-record` rewrites every reference in one undo step through the
+rewriters a feature registers (`registerEntityRefRewriter` — a new entity field
+that names a table record must register one). The format is **v3**
+(`toJSON`/`fromJSON`; v1/v2 load unchanged; unknown tables are kept). Layers
+live in the `layers` table: the store's `layers` array is a projection
+(`layerList(doc)`) refreshed after every command, so layer toggles are undoable
+and saved with the drawing.
+
 ## Build & run
 
 ```bash

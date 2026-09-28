@@ -18,6 +18,8 @@ export * from "./constraintDisplay";
 export * from "./solver";
 export * from "./connectivity";
 export * from "./document";
+export * from "./tables";
+export * from "./layerTable";
 export * from "./commands";
 export * from "./sketchtext";
 export * from "./dxf";

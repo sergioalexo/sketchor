@@ -5,6 +5,7 @@ import type { Constraint, ConstraintId } from "./constraints";
 import { solveSketch, type SolveOptions, type SolveResult } from "./solver/solve";
 import type { Point } from "./geometry";
 import type { SketchDocument } from "./document";
+import { entityRefRewritersFor, recordRefRewritersFor, type DocSettings, type TableRecord } from "./tables";
 
 /**
  * Every mutation of the document is a plain-data command.
@@ -31,6 +32,17 @@ export type Command =
   | { type: "ungroup"; groupId: GroupId }
   | { type: "add-constraint"; constraint: Constraint }
   | { type: "remove-constraint"; id: ConstraintId }
+  /** Inserts or replaces the record of that name. `index` places a new record (used to undo a delete in its old position). */
+  | { type: "put-table-record"; table: string; record: TableRecord; index?: number }
+  | { type: "delete-table-record"; table: string; name: string }
+  /**
+   * Renames a record and (unless `rewrite` is false) every entity and record
+   * that refers to it — one command, one undo step. A no-op if `from` is
+   * missing or `to` is taken.
+   */
+  | { type: "rename-table-record"; table: string; from: string; to: string; rewrite?: boolean }
+  /** Merges into the document settings; a key set to `null` (or `undefined`) is removed. */
+  | { type: "set-settings"; patch: DocSettings }
   | { type: "batch"; commands: Command[] };
 
 interface HistoryEntry {
@@ -235,6 +247,57 @@ export class CommandBus {
         if (!existing) return [];
         doc._removeConstraint(command.id);
         return [{ type: "add-constraint", constraint: existing }];
+      }
+      case "put-table-record": {
+        const previous = doc.getRecord(command.table, command.record.name);
+        doc._putRecord(command.table, command.record, command.index);
+        return [
+          previous
+            ? { type: "put-table-record", table: command.table, record: previous }
+            : { type: "delete-table-record", table: command.table, name: command.record.name },
+        ];
+      }
+      case "delete-table-record": {
+        const previous = doc.getRecord(command.table, command.name);
+        if (!previous) return [];
+        const index = doc.records(command.table).findIndex((r) => r.name === command.name);
+        doc._removeRecord(command.table, command.name);
+        return [{ type: "put-table-record", table: command.table, record: previous, index }];
+      }
+      case "rename-table-record": {
+        const { table, from, to } = command;
+        if (from === to || to === "" || !doc.hasRecord(table, from) || doc.hasRecord(table, to)) return [];
+        doc._renameRecord(table, from, to);
+        // Undo renames back *without* rewriting (rewriting again could catch
+        // entities that already used the old name for another reason), then
+        // puts every rewritten entity and record back exactly as it was.
+        const inverse: Command[] = [{ type: "rename-table-record", table, from: to, to: from, rewrite: false }];
+        if (command.rewrite !== false) {
+          for (const rewrite of entityRefRewritersFor(table)) {
+            for (const entity of doc.all()) {
+              const next = rewrite(entity, from, to);
+              if (!next) continue;
+              inverse.push({ type: "update-entity", entity });
+              doc._put(next);
+            }
+          }
+          for (const { owner, fn } of recordRefRewritersFor(table)) {
+            for (const record of doc.records(owner)) {
+              const next = fn(record, from, to);
+              if (!next) continue;
+              inverse.push({ type: "put-table-record", table: owner, record });
+              doc._putRecord(owner, next);
+            }
+          }
+        }
+        return inverse;
+      }
+      case "set-settings": {
+        const before = doc.settings;
+        const undo: DocSettings = {};
+        for (const key of Object.keys(command.patch)) undo[key] = before[key] ?? null; // absent → null → removed (survives JSON)
+        doc._patchSettings(command.patch);
+        return [{ type: "set-settings", patch: undo }];
       }
       case "batch": {
         const inverse: Command[] = [];

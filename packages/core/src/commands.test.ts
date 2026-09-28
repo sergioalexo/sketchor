@@ -38,7 +38,7 @@ const polyline = (id: string): PolylineEntity => ({
 });
 const constraint: Constraint = { id: "k1", type: "horizontal", entityId: "e1" };
 
-/** e1 (line), e2 (circle), e3 (polyline); group g1 over e1+e2; constraint k1. */
+/** e1 (line), e2 (circle), e3 (polyline on layer "outline"); group g1 over e1+e2; constraint k1; layers outline + notes; settings insUnits 4. */
 function fixture(): { doc: SketchDocument; bus: CommandBus } {
   const doc = new SketchDocument();
   doc._put(line("e1", "L1"));
@@ -46,6 +46,9 @@ function fixture(): { doc: SketchDocument; bus: CommandBus } {
   doc._put(polyline("e3"));
   doc._putGroup({ id: "g1", name: "Plate", members: ["e1", "e2"] });
   doc._putConstraint(constraint);
+  doc._putRecord("layers", { name: "outline", visible: true });
+  doc._putRecord("layers", { name: "notes", visible: false, locked: true });
+  doc._patchSettings({ insUnits: 4 });
   return { doc, bus: new CommandBus(doc) };
 }
 
@@ -70,7 +73,8 @@ function snapshot(doc: SketchDocument): string {
   const byId = <T extends { id: string }>(xs: T[]): T[] => [...xs].sort((a, b) => a.id.localeCompare(b.id));
   const json = doc.toJSON();
   return JSON.stringify(
-    sortKeys({ entities: byId(json.entities), groups: byId(json.groups), constraints: byId(json.constraints) }),
+    // Table records keep their order: a layer's position is part of the drawing, and undoing a delete must restore it.
+    sortKeys({ entities: byId(json.entities), groups: byId(json.groups), constraints: byId(json.constraints), tables: json.tables, settings: json.settings }),
   );
 }
 
@@ -98,6 +102,14 @@ const CASES: { name: string; command: Command }[] = [
     command: { type: "add-constraint", constraint: { id: "k2", type: "radius", entityId: "e2", value: 4 } },
   },
   { name: "remove-constraint", command: { type: "remove-constraint", id: "k1" } },
+  { name: "put-table-record (new)", command: { type: "put-table-record", table: "layers", record: { name: "dims", visible: true } } },
+  { name: "put-table-record (replace)", command: { type: "put-table-record", table: "layers", record: { name: "outline", visible: false } } },
+  { name: "put-table-record (at an index)", command: { type: "put-table-record", table: "layers", record: { name: "first", visible: true }, index: 0 } },
+  { name: "delete-table-record", command: { type: "delete-table-record", table: "layers", name: "outline" } },
+  { name: "rename-table-record (rewrites entities)", command: { type: "rename-table-record", table: "layers", from: "outline", to: "profile" } },
+  { name: "rename-table-record (no rewrite)", command: { type: "rename-table-record", table: "layers", from: "outline", to: "profile", rewrite: false } },
+  { name: "set-settings", command: { type: "set-settings", patch: { insUnits: 1, ltscale: 2.5 } } },
+  { name: "set-settings (remove a key)", command: { type: "set-settings", patch: { insUnits: null as unknown as undefined } } },
   {
     name: "batch",
     command: {

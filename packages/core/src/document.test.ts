@@ -32,7 +32,21 @@ describe("SketchDocument serialization", () => {
   });
 
   it("stamps the format version", () => {
-    expect(new SketchDocument().toJSON().version).toBe(2);
+    expect(new SketchDocument().toJSON().version).toBe(3);
+  });
+
+  it("round-trips tables and settings, keeping record order", () => {
+    const doc = new SketchDocument();
+    doc._putRecord("layers", { name: "b", visible: true });
+    doc._putRecord("layers", { name: "a", visible: false, locked: true });
+    doc._putRecord("blocks", { name: "bolt", entities: [] });
+    doc._patchSettings({ insUnits: 4, annotationScale: "1:50" });
+    const restored = SketchDocument.fromJSON(JSON.parse(JSON.stringify(doc.toJSON())));
+    expect(restored.records("layers").map((r) => r.name)).toEqual(["b", "a"]);
+    expect(restored.getRecord("layers", "a")).toEqual({ name: "a", visible: false, locked: true });
+    expect(restored.getRecord("blocks", "bolt")).toBeDefined();
+    expect(restored.settings).toEqual({ insUnits: 4, annotationScale: "1:50" });
+    expect(restored.toJSON()).toEqual(doc.toJSON());
   });
 
   it("accepts JSON with no groups or constraints (a v1-shaped file)", () => {

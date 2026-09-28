@@ -27,7 +27,9 @@ import {
   fixIssue,
   freeEndpointEntityIds,
   issueEntityIds,
+  layerList,
   layerOf,
+  layerRecordWith,
   mid,
   newGroupId,
   PALETTE,
@@ -176,6 +178,8 @@ function applyImportedEntities(entities: Entity[], replace: boolean): void {
   if (replace) {
     const ids = doc.all().map((e) => e.id);
     if (ids.length) commands.push({ type: "delete-entities", ids });
+    // A fresh file brings its own layers: what was hidden or locked in the old drawing must not carry over by name.
+    for (const r of doc.records("layers")) commands.push({ type: "delete-table-record", table: "layers", name: r.name });
   }
   for (const entity of entities) commands.push({ type: "add-entity", entity });
   if (commands.length === 1) bus.execute(commands[0]);
@@ -913,86 +917,81 @@ export const useApp = create<AppState>((set, get) => ({
     set({ displayUnit });
   },
   setActiveLayer: (name) => set({ activeLayer: name }),
-  addLayer: () =>
-    set((s) => {
-      const used = new Set(s.layers.map((l) => l.name));
-      let i = 1;
-      while (used.has(`layer${i}`)) i += 1;
-      const name = `layer${i}`;
-      return { layers: [...s.layers, { name, visible: true }], activeLayer: name };
-    }),
+  // Layers live in the document's `layers` table (Z-02); `layers` above is a
+  // projection of it that syncFromBus refreshes whenever a table changes, so
+  // every action here is a command — undoable, and saved with the drawing.
+  addLayer: () => {
+    const used = new Set(get().layers.map((l) => l.name));
+    let i = 1;
+    while (used.has(`layer${i}`)) i += 1;
+    const name = `layer${i}`;
+    bus.execute({ type: "put-table-record", table: "layers", record: layerRecordWith(doc, name, {}) });
+    set({ activeLayer: name });
+  },
   deleteLayer: (name) => {
     if (name === DEFAULT_LAYER) return; // the default layer is permanent
     // Deleting a layer removes the grouping, not the geometry: its entities
-    // move to the default layer as one undoable step rather than being
-    // destroyed along with the layer.
-    const entities = doc.all().filter((e) => layerOf(e) === name);
-    if (entities.length > 0) {
-      bus.execute({ type: "batch", commands: entities.map((e) => ({ type: "update-entity", entity: withoutLayer(e) })) });
-    }
-    set((s) => {
-      const layers = s.layers.filter((l) => l.name !== name);
-      const activeLayer = s.activeLayer === name ? DEFAULT_LAYER : s.activeLayer;
-      return { layers, activeLayer };
-    });
+    // move to the default layer, and the record goes, as one undoable step
+    // rather than being destroyed along with the layer.
+    const commands: Command[] = doc
+      .all()
+      .filter((e) => layerOf(e) === name)
+      .map((e) => ({ type: "update-entity", entity: withoutLayer(e) }));
+    if (doc.hasRecord("layers", name)) commands.push({ type: "delete-table-record", table: "layers", name });
+    if (get().activeLayer === name) set({ activeLayer: DEFAULT_LAYER });
+    if (commands.length > 0) bus.execute({ type: "batch", commands });
+    get().syncLayersFromDoc();
   },
-  renameLayer: (from, to) =>
-    set((s) => {
-      const t = to.trim();
-      if (from === DEFAULT_LAYER || t === "" || s.layers.some((l) => l.name === t)) return s;
-      return {
-        layers: s.layers.map((l) => (l.name === from ? { ...l, name: t } : l)),
-        activeLayer: s.activeLayer === from ? t : s.activeLayer,
-      };
-    }),
-  toggleLayer: (name) =>
-    set((s) => ({
-      layers: s.layers.map((l) => (l.name === name ? { ...l, visible: !l.visible } : l)),
-    })),
+  renameLayer: (from, to) => {
+    const t = to.trim();
+    if (from === DEFAULT_LAYER || t === "" || t === from || get().layers.some((l) => l.name === t)) return;
+    const commands: Command[] = [];
+    // A layer only entities mention has no record yet; rename needs one to move.
+    if (!doc.hasRecord("layers", from)) commands.push({ type: "put-table-record", table: "layers", record: layerRecordWith(doc, from, {}) });
+    commands.push({ type: "rename-table-record", table: "layers", from, to: t });
+    // Set first: the sync that follows the command validates the active layer against the new list.
+    if (get().activeLayer === from) set({ activeLayer: t });
+    bus.execute({ type: "batch", commands });
+  },
+  toggleLayer: (name) => {
+    const visible = get().layers.find((l) => l.name === name)?.visible ?? true;
+    bus.execute({ type: "put-table-record", table: "layers", record: layerRecordWith(doc, name, { visible: !visible }) });
+  },
   toggleLayerLock: (name) => {
-    set((s) => ({ layers: s.layers.map((l) => (l.name === name ? { ...l, locked: !l.locked } : l)) }));
+    const locked = get().layers.find((l) => l.name === name)?.locked ?? false;
+    bus.execute({ type: "put-table-record", table: "layers", record: layerRecordWith(doc, name, { locked: !locked }) });
     // Anything on the layer that just locked has to leave the selection, or
     // the next Delete or drag would edit what the user just protected.
-    const locked = lockedLayerSet();
+    const lockedNow = lockedLayerSet();
     const selection = get().selection.filter((id) => {
       const e = doc.get(id);
-      return e ? !locked.has(layerOf(e)) : false;
+      return e ? !lockedNow.has(layerOf(e)) : false;
     });
     if (selection.length !== get().selection.length) set({ selection });
   },
-  syncLayersFromDoc: (reset = false) => {
-    const present = new Set(doc.all().map((e) => layerOf(e)));
-    present.add(DEFAULT_LAYER);
-    const prev = get().layers;
-    const prevByName = new Map(prev.map((l) => [l.name, l]));
-    const layers: Layer[] = [];
-    // Keep the default first, then the rest in document order.
-    layers.push(prevByName.get(DEFAULT_LAYER) ?? { name: DEFAULT_LAYER, visible: true });
-    for (const name of present) {
-      if (name === DEFAULT_LAYER) continue;
-      // On a fresh import, previously-toggled visibility is irrelevant.
-      const existing = reset ? undefined : prevByName.get(name);
-      layers.push(existing ?? { name, visible: true });
-    }
-    const activeLayer = layers.some((l) => l.name === get().activeLayer)
-      ? get().activeLayer
-      : DEFAULT_LAYER;
+  syncLayersFromDoc: () => {
+    const layers: Layer[] = layerList(doc);
+    const activeLayer = layers.some((l) => l.name === get().activeLayer) ? get().activeLayer : DEFAULT_LAYER;
     set({ layers, activeLayer });
   },
   flattenLayers: () => {
-    const toMove = doc.all().filter((e) => layerOf(e) !== DEFAULT_LAYER);
-    if (toMove.length > 0) {
-      bus.execute({ type: "batch", commands: toMove.map((e) => ({ type: "update-entity", entity: withoutLayer(e) })) });
-    }
-    set({ layers: [{ name: DEFAULT_LAYER, visible: true }], activeLayer: DEFAULT_LAYER });
+    const commands: Command[] = doc
+      .all()
+      .filter((e) => layerOf(e) !== DEFAULT_LAYER)
+      .map((e) => ({ type: "update-entity", entity: withoutLayer(e) }));
+    for (const r of doc.records("layers")) commands.push({ type: "delete-table-record", table: "layers", name: r.name });
+    set({ activeLayer: DEFAULT_LAYER });
+    if (commands.length > 0) bus.execute({ type: "batch", commands });
+    get().syncLayersFromDoc();
   },
   deleteEmptyLayers: () => {
-    set((s) => {
-      const used = new Set(doc.all().map((e) => layerOf(e)));
-      const layers = s.layers.filter((l) => l.name === DEFAULT_LAYER || used.has(l.name));
-      const activeLayer = layers.some((l) => l.name === s.activeLayer) ? s.activeLayer : DEFAULT_LAYER;
-      return { layers, activeLayer };
-    });
+    const used = new Set(doc.all().map((e) => layerOf(e)));
+    const commands: Command[] = doc
+      .records("layers")
+      .filter((r) => r.name !== DEFAULT_LAYER && !used.has(r.name))
+      .map((r) => ({ type: "delete-table-record", table: "layers", name: r.name }));
+    if (commands.length > 0) bus.execute({ type: "batch", commands });
+    get().syncLayersFromDoc();
   },
 }));
 
@@ -1028,11 +1027,27 @@ function syncFromBus(): void {
   });
 }
 
+// After any command, undo or redo the layer list is re-projected from the
+// document — a layer can appear or vanish with a table edit *or* just because
+// entities moved onto or off it (undoing a layer delete). Re-set only on a real
+// change, so subscribers to `layers` are not woken on every edit.
+function refreshLayers(): void {
+  const next = layerList(doc);
+  const prev = useApp.getState().layers;
+  const same =
+    next.length === prev.length &&
+    next.every((l, i) => l.name === prev[i].name && l.visible === prev[i].visible && !!l.locked === !!prev[i].locked);
+  if (!same) useApp.getState().syncLayersFromDoc();
+}
+
 let unbindBus: (() => void) | null = null;
 /** Re-subscribes the revision/selection/dirty sync to whichever session's bus is now active. */
 function rebindBus(): void {
   unbindBus?.();
-  unbindBus = bus.onChange(syncFromBus);
+  unbindBus = bus.onChange(() => {
+    syncFromBus();
+    refreshLayers();
+  });
 }
 rebindBus();
 
@@ -1086,7 +1101,6 @@ export function switchToSession(id: string): void {
   useApp.setState({
     activeSessionId: id,
     selection: incoming.selection,
-    layers: incoming.layers,
     activeLayer: incoming.activeLayer,
     displayUnit: incoming.displayUnit,
     revision: incoming.doc.revision,
@@ -1103,6 +1117,7 @@ export function switchToSession(id: string): void {
     importUnits: null,
   });
   rebindBus();
+  useApp.getState().syncLayersFromDoc(); // the layers are the incoming document's own
   bumpSessionsVersion();
 }
 
