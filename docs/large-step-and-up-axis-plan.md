@@ -45,16 +45,21 @@ this section is the summary for a fresh session.
 1. **Desktop (Tauri) live check** — not doable from the browser pane:
    double-click a big STEP and open it from the in-app file browser to
    exercise `read_file_bytes`; confirm non-UTF-8 STEP names open.
-2. **Reinstall the Explorer DLL** (`native/dxf-thumbnailer/install-thumbnailer.ps1`)
-   — the one on this PC predates the step-wire whitespace fix, so
-   `verify_shell_thumb` on the 24408 file returns `0x8004B200` until then.
-   Then re-verify the wireframe is upright (Y-up rule) in real Explorer.
-3. **Known limit:** the DLL wireframe follows the STEP header only, not the
-   user's per-file Y/Z override.
+2. ~~Reinstall the Explorer DLL~~ Done 2026-09-28: reinstalled, Explorer
+   restarted; `verify_shell_thumb` on the 24408 file now returns a 256x256
+   wireframe, upright (thin slab lying flat, Y-up rule applied). Note:
+   `install-thumbnailer.ps1` without `-SkipBuild` aborts under PowerShell 5.1
+   because cargo's stderr progress line trips `$ErrorActionPreference = Stop`;
+   run `cargo build --release` first, then the script with `-SkipBuild`.
+3. ~~Known limit: DLL wireframe ignores the per-file Y/Z override.~~ **Moot:**
+   an override can only be set on a file that is open, and toggling re-renders
+   the thumbnail PNG and mirrors it to Explorer (`refreshThumbnail`), which
+   tier 1 serves ahead of the wireframe.
 4. **Inventor Y-up detection** — add to `detectUpAxis` (TS) and `is_y_up`
    (Rust) only after checking a real Inventor export.
-5. No visual screenshot of the 24408 model was taken (pane screenshots
-   timed out on that scene; verified via status/DOM sizes only).
+5. ~~No visual screenshot of the 24408 model.~~ Done 2026-09-28: pane
+   screenshot works; the Top view looks down on the curved slatted deck
+   (upright, Y-up header detected).
 
 ### Rules for the next session
 
