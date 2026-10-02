@@ -1,4 +1,6 @@
 import * as THREE from "three";
+import type { Model3dTokens } from "@sketchor/core";
+import { DEFAULT_DARK } from "@sketchor/core";
 import type { Bounds3, Model3D } from "./types";
 
 /**
@@ -11,9 +13,31 @@ import type { Bounds3, Model3D } from "./types";
  * view presets assume.
  */
 
-export const STAGE_BACKGROUND = 0x17181c;
-export const EDGE_COLOR = 0x1c1d21;
-export const SELECT_COLOR: [number, number, number] = [0x5a, 0x8d, 0xff];
+function hexToInt(hex: string): number {
+  return parseInt(hex.replace("#", ""), 16);
+}
+
+function hexToRgb255(hex: string): [number, number, number] {
+  const n = hexToInt(hex);
+  return [(n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff];
+}
+
+// Z-03: mutable, starting from `DEFAULT_DARK.model3d` (today's hard-coded
+// values) so the first frame before the theme store's init effect runs still
+// renders exactly as before. `setModel3dTheme` is the only writer (see
+// `apps/web/src/theme/themeStore.ts`); a part's own colour is unaffected
+// (baked at import time — see theme.ts's module doc).
+export let STAGE_BACKGROUND = hexToInt(DEFAULT_DARK.model3d.bg);
+export let EDGE_COLOR = hexToInt(DEFAULT_DARK.model3d.edge);
+export let SELECT_COLOR: [number, number, number] = hexToRgb255(DEFAULT_DARK.model3d.highlight);
+export let HOVER_COLOR: [number, number, number] = hexToRgb255(DEFAULT_DARK.model3d.hover);
+
+export function setModel3dTheme(tokens: Model3dTokens): void {
+  STAGE_BACKGROUND = hexToInt(tokens.bg);
+  EDGE_COLOR = hexToInt(tokens.edge);
+  SELECT_COLOR = hexToRgb255(tokens.highlight);
+  HOVER_COLOR = hexToRgb255(tokens.hover);
+}
 
 export type ViewPreset = "iso" | "top" | "front" | "right" | "back" | "left" | "bottom";
 

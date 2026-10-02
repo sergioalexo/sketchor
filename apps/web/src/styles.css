@@ -4,6 +4,14 @@
   box-sizing: border-box;
 }
 
+/*
+ * Z-03: these are the dark-theme defaults, byte-identical to
+ * packages/core/src/theme.ts's DEFAULT_DARK.ui — kept here too so the very
+ * first paint (before theme/themeStore.ts's init effect runs) still looks
+ * right. themeStore.ts overwrites these as inline styles on :root once it
+ * loads; it never removes this block, so a `--mono`-style var with no entry
+ * here just keeps falling back to its own `var(--x, fallback)` default.
+ */
 :root {
   --bg: #1e2025;
   --panel: #24262c;
@@ -12,6 +20,7 @@
   --text-dim: #9a9da6;
   --accent: #3574f0;
   --accent-soft: #2c3d63;
+  --danger: #e06c75;
 }
 
 html,

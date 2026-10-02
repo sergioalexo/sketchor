@@ -1,8 +1,9 @@
-import type { Bounds, BoxSelectMode, ClosedRegion, Entity, EntityId, Point, SketchDocument } from "@sketchor/core";
+import type { Bounds, BoxSelectMode, CanvasTokens, ClosedRegion, Entity, EntityId, Point, SketchDocument } from "@sketchor/core";
 import {
   arcPointAt,
   arcSweep,
   bulgeToArc,
+  DEFAULT_DARK,
   dist,
   entityPoints,
   gripsOf,
@@ -90,31 +91,17 @@ export const CONSTRAINT_GLYPH_OFFSET = { x: 11, y: -11 };
 /** Must match GROUP_HANDLE_OFFSET_PX in Viewport.tsx, which hit-tests this same handle. */
 const GROUP_HANDLE_OFFSET_PX = 26;
 
-const COLORS = {
-  bg: "#17181c",
-  gridMinor: "#212329",
-  gridMajor: "#2b2e36",
-  axis: "#3d4250",
-  entity: "#e8e9ec",
-  selected: "#5b96ff",
-  preview: "#5b96ff",
-  snap: "#ffb02e",
-  handle: "#5b96ff",
-  measure: "#5ad1c5",
-  hover: "#8fd9ff",
-  measureLabelBg: "#0c2b28",
-  reference: "#ff5c5c",
-  connectivityHint: "#4d7ac7",
-  windowSelect: "#5b96ff",
-  crossingSelect: "#5adc7a",
-  closedRegionFill: "rgba(180, 190, 205, 0.16)",
-  duplicateMarker: "#f0b968",
-  crossingMarker: "#c77dff",
-  origin: "#9aa4b8",
-  originOff: "#4a5165",
-  axisX: "#e06c75",
-  axisY: "#7ec96f",
-};
+// Z-03: mutable so a theme change takes effect on the next frame without
+// touching any of the ~45 call sites below. `apps/web/src/theme/themeStore.ts`
+// is the only writer, via `setCanvasTheme`. Starts as `DEFAULT_DARK.canvas`
+// from `@sketchor/core/theme` — the single source of truth these values used
+// to be hard-coded from — so the very first frame (before the theme store's
+// init effect runs) still renders today's dark theme exactly.
+let COLORS: CanvasTokens = DEFAULT_DARK.canvas;
+
+export function setCanvasTheme(tokens: CanvasTokens): void {
+  COLORS = tokens;
+}
 
 function fmtNum(n: number): string {
   const r = Math.round(n * 100) / 100;

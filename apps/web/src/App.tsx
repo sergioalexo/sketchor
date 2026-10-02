@@ -36,6 +36,7 @@ const StructurePanel = lazy(() => import("./model3d/StructurePanel").then((m) =>
 import { UpdateBanner, UpdateButton } from "./update/UpdatePanel";
 import { MetricsNotice } from "./metrics/MetricsNotice";
 import { openExternal } from "./update/updateService";
+import { useTheme } from "./theme/themeStore";
 
 /**
  * The project's home page, opened by the logo in the toolbar. Must stay
@@ -534,6 +535,9 @@ export function App() {
   const [showPluginMenu, setShowPluginMenu] = useState(false);
   const [showPalette, setShowPalette] = useState(false);
   const [showShortcuts, setShowShortcuts] = useState(false);
+  const [showThemeMenu, setShowThemeMenu] = useState(false);
+  const themeSetting = useTheme((s) => s.setting);
+  const setThemeSetting = useTheme((s) => s.setSetting);
   const touchMode = useTouchMode((s) => s.enabled);
   const toggleTouchMode = useTouchMode((s) => s.toggle);
   const prompt = useApp((s) => s.prompt);
@@ -629,16 +633,17 @@ export function App() {
 
   // Close the Save-format, update and plugin popovers on an outside click.
   useEffect(() => {
-    if (!showSaveMenu && !showUpdateMenu && !showPluginMenu) return;
+    if (!showSaveMenu && !showUpdateMenu && !showPluginMenu && !showThemeMenu) return;
     const onClick = (e: MouseEvent) => {
       if ((e.target as HTMLElement).closest(".action-menu-wrap")) return;
       setShowSaveMenu(false);
       setShowUpdateMenu(false);
       setShowPluginMenu(false);
+      setShowThemeMenu(false);
     };
     document.addEventListener("click", onClick);
     return () => document.removeEventListener("click", onClick);
-  }, [showSaveMenu, showUpdateMenu, showPluginMenu]);
+  }, [showSaveMenu, showUpdateMenu, showPluginMenu, showThemeMenu]);
 
   // Which real file a plain Save would overwrite. Subscribing to
   // `sessionsVersion` is what makes it refresh: the binding itself lives in
@@ -1207,6 +1212,44 @@ export function App() {
               <circle cx="12" cy="17" r="1.1" fill="currentColor" />
             </svg>
           </button>
+          <div className="action-menu-wrap">
+            <button
+              className="action"
+              title={`Theme: ${themeSetting} — click to change`}
+              data-testid="toggle-theme-menu"
+              onClick={() => setShowThemeMenu((v) => !v)}
+            >
+              <svg viewBox="0 0 24 24" width="18" height="18">
+                <path
+                  d="M12 3a9 9 0 100 18c.8 0 1-.6.6-1.2-.5-.7-.8-1.5-.6-2.3.3-1 1.3-1.5 2.3-1.5h1.9c2 0 3.3-2.1 2.4-3.9C17.3 9.4 15 8 12 8a6 6 0 00-5 2.7"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  fill="none"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <circle cx="8.5" cy="10.5" r="1" fill="currentColor" />
+                <circle cx="12" cy="7" r="1" fill="currentColor" />
+              </svg>
+            </button>
+            {showThemeMenu && (
+              <div className="action-menu" data-testid="theme-menu">
+                {(["dark", "light", "system"] as const).map((setting) => (
+                  <button
+                    key={setting}
+                    className={themeSetting === setting ? "action-menu-default" : undefined}
+                    data-testid={`theme-${setting}`}
+                    onClick={() => {
+                      setThemeSetting(setting);
+                      setShowThemeMenu(false);
+                    }}
+                  >
+                    {setting === "dark" ? "Dark" : setting === "light" ? "Light" : "System"}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
         <div className="hint">{TOOL_HINTS[tool]}</div>
       </header>

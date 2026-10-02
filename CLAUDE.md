@@ -71,6 +71,23 @@ explicit "Save As DXF R12"), tracked per-session in `dxfSourceVersions`.
 `tools/dxf-audit/` runs the AC1032 writer's output through ezdxf's auditor
 (`npm run dxf:audit`) — a local/manual check, not wired into CI.
 
+## Theming
+
+`packages/core/src/theme.ts`'s `ThemeTokens` (`ui`/`canvas`/`model3d`/`code`)
+is the one place colour is defined; `DEFAULT_DARK` is byte-identical to what
+used to be hard-coded three separate times (`styles.css`'s `:root`,
+`viewport/renderer.ts`'s `COLORS`, `model3d/modelScene.ts`'s
+`STAGE_BACKGROUND`/`EDGE_COLOR`/`SELECT_COLOR`). `apps/web/src/theme/themeStore.ts`
+(zustand, Dark/Light/System, `localStorage` `sketchor.theme.v1`) resolves a
+mode and pushes it to all three: CSS custom properties on `:root`, the
+renderer's mutable `COLORS` via `setCanvasTheme`, and the 3D viewer's mutable
+colour exports via `setModel3dTheme` (lazy-imported so three.js doesn't load
+until something actually sets a theme touching it). A part's own 3D colour
+is baked into its mesh at import time and isn't re-themed — `model3d` tokens
+are deliberately identical in both themes. `Viewport.tsx`'s and
+`ModelViewport.tsx`'s redraw effects both depend on the resolved theme so a
+switch repaints immediately.
+
 ## Build & run
 
 ```bash

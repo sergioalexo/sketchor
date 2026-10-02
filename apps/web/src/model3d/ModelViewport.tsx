@@ -8,13 +8,16 @@ import { formatArea, formatLength, formatMass, formatVolume } from "../units";
 import {
   buildLights,
   buildModelObjects,
+  EDGE_COLOR,
   framePerspective,
+  HOVER_COLOR,
   SELECT_COLOR,
   STAGE_BACKGROUND,
   toBox3,
   type ModelObjects,
   type ViewPreset,
 } from "./modelScene";
+import { useTheme } from "../theme/themeStore";
 import { formatBytes } from "./importError";
 import { measureSelection, partOf, refLabel, type MeasureSegment, type SelRef } from "./measure";
 import { pickEdge, pickVertex, type Projector } from "./picking";
@@ -142,10 +145,12 @@ function ModelError({ name, message }: { name: string; message: string }) {
 
 /* ------------------------------ highlighting ----------------------------- */
 
-const HIGHLIGHT_SELECT = (SELECT_COLOR[0] << 16) | (SELECT_COLOR[1] << 8) | SELECT_COLOR[2];
-/** Hover is the selection colour washed toward white, so the two read apart at a glance. */
-const HOVER_RGB: [number, number, number] = SELECT_COLOR.map((c) => Math.round(c + (255 - c) * 0.45)) as [number, number, number];
-const HIGHLIGHT_HOVER = (HOVER_RGB[0] << 16) | (HOVER_RGB[1] << 8) | HOVER_RGB[2];
+const rgbToHex = (rgb: readonly [number, number, number]): number => (rgb[0] << 16) | (rgb[1] << 8) | rgb[2];
+// Read live, not cached at module load: SELECT_COLOR/HOVER_COLOR (modelScene.ts)
+// are reassigned by the theme store, and a function call picks up whatever
+// they are when a viewer mounts rather than freezing in the first theme seen.
+const highlightSelect = (): number => rgbToHex(SELECT_COLOR);
+const highlightHover = (): number => rgbToHex(HOVER_COLOR);
 
 /** Push the edges and vertices of `refs` into the overlay line/point objects. */
 function setOverlay(lines: THREE.LineSegments, points: THREE.Points, model: Model3D, refs: readonly SelRef[]) {
@@ -198,6 +203,7 @@ function Viewer({ model, up, onToggleUp }: { model: Model3D; up: UpAxis; onToggl
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sceneRef = useRef<Scene | null>(null);
+  const themeResolved = useTheme((s) => s.resolved);
   const selection = useViewer((v) => v.selection);
   const hover = useViewer((v) => v.hover);
   const hidden = useViewer((v) => v.hidden);
@@ -296,10 +302,10 @@ function Viewer({ model, up, onToggleUp }: { model: Model3D; up: UpAxis; onToggl
       o.frustumCulled = false;
       return o;
     };
-    const selLines = lineObject(HIGHLIGHT_SELECT);
-    const hoverLines = lineObject(HIGHLIGHT_HOVER);
-    const selPoints = pointObject(HIGHLIGHT_SELECT, 11);
-    const hoverPoints = pointObject(HIGHLIGHT_HOVER, 9);
+    const selLines = lineObject(highlightSelect());
+    const hoverLines = lineObject(highlightHover());
+    const selPoints = pointObject(highlightSelect(), 11);
+    const hoverPoints = pointObject(highlightHover(), 9);
     scene.add(selLines, hoverLines, selPoints, hoverPoints);
 
     const partBoxes = model.parts.map((p) => toBox3(p.bounds));
@@ -334,6 +340,23 @@ function Viewer({ model, up, onToggleUp }: { model: Model3D; up: UpAxis; onToggl
       sceneRef.current = null;
     };
   }, [model]);
+
+  // Live theme switch (Z-03): the scene above only reads STAGE_BACKGROUND/
+  // EDGE_COLOR/SELECT_COLOR/HOVER_COLOR once, at creation, so a theme change
+  // needs to push the new colours onto the already-built renderer/materials
+  // itself — a part's own baked colour is unaffected (see theme.ts's doc).
+  useEffect(() => {
+    const s = sceneRef.current;
+    if (!s) return;
+    s.renderer.setClearColor(STAGE_BACKGROUND, 1);
+    (s.objects.edges.material as THREE.LineBasicMaterial).color.setHex(EDGE_COLOR);
+    (s.selLines.material as THREE.LineBasicMaterial).color.setHex(highlightSelect());
+    (s.selPoints.material as THREE.PointsMaterial).color.setHex(highlightSelect());
+    (s.hoverLines.material as THREE.LineBasicMaterial).color.setHex(highlightHover());
+    (s.hoverPoints.material as THREE.PointsMaterial).color.setHex(highlightHover());
+    s.requestRender();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [themeResolved]);
 
   // ---- derived scene state ------------------------------------------------
   useEffect(() => {
@@ -384,7 +407,7 @@ function Viewer({ model, up, onToggleUp }: { model: Model3D; up: UpAxis; onToggl
         }
       }
     };
-    if (hover) paint([hover], HOVER_RGB);
+    if (hover) paint([hover], HOVER_COLOR);
     paint(selection, SELECT_COLOR);
     attr.needsUpdate = true;
 

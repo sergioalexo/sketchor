@@ -74,6 +74,7 @@ import { parseCommand, type AppCommandId } from "../tools/commandLine";
 import { COMMAND_LINE_ACTIONS } from "../metrics/actions";
 import { track } from "../metrics/metrics";
 import { CommandBar, type CommandEcho } from "../tools/CommandBar";
+import { useTheme } from "../theme/themeStore";
 
 /**
  * The half-finished states a pan can interrupt. Panning or zooming mid-draw
@@ -343,6 +344,7 @@ export function Viewport() {
   const promptText = useApp((s) => s.prompt);
   const selection = useApp((s) => s.selection);
   const revision = useApp((s) => s.revision);
+  const themeResolved = useTheme((s) => s.resolved);
   const layers = useApp((s) => s.layers);
 
   // The floating text editor: open while placing or editing a text entity.
@@ -685,7 +687,7 @@ export function Viewport() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [revision]);
 
-  // Redraw when document, selection, tool, measurement, layers, the straighten pick, or heal findings change
+  // Redraw when document, selection, tool, measurement, layers, the straighten pick, heal findings, or the theme change
   useEffect(redraw, [
     revision,
     selection,
@@ -701,6 +703,7 @@ export function Viewport() {
     crossingIssues,
     showConnectivityHint,
     showClosedRegions,
+    themeResolved,
   ]);
 
   // Diagnostics panel row click: frame that finding.
