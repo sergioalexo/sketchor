@@ -11,7 +11,8 @@
     "dev": "npm run dev --workspace @sketchor/web",
     "build": "npm run build --workspace @sketchor/core && npm run build --workspace @sketchor/web",
     "desktop": "npm run tauri dev --workspace @sketchor/web",
-    "test": "vitest run"
+    "test": "vitest run",
+    "dxf:audit": "python tools/dxf-audit/audit.py"
   },
   "devDependencies": {
     "jsdom": "^30.0.1",

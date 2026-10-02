@@ -57,6 +57,20 @@ live in the `layers` table: the store's `layers` array is a projection
 (`layerList(doc)`) refreshed after every command, so layer toggles are undoable
 and saved with the drawing.
 
+## DXF writers
+
+Two, on purpose. `dxfExport.ts` writes R12 (AC1009) — flat geometry, no
+handles, what CAM/laser shops want. `dxfw/` (X-01) writes AC1032 ("DXF
+2018") — handles + owner pointers on every record, the TABLES/BLOCKS/OBJECTS
+skeleton modern CAD expects, and `SKETCHOR` XDATA carrying each entity's
+sketch-code name, so a file this writer wrote round-trips names through
+Sketchor's own parser (`dxf.ts`'s `sketchorXdataName`) where R12 export
+never could. `apps/web/src/io/drawingFile.ts` picks AC1032 for a new save
+and R12 only for a tab that was *opened* from an R12/earlier file (or an
+explicit "Save As DXF R12"), tracked per-session in `dxfSourceVersions`.
+`tools/dxf-audit/` runs the AC1032 writer's output through ezdxf's auditor
+(`npm run dxf:audit`) — a local/manual check, not wired into CI.
+
 ## Build & run
 
 ```bash
@@ -441,7 +455,7 @@ which tier each gap sits in. Update its status when you close one out.
 - **A new entity type** needs `translated`/`rotated`/`transformed` preserving
   id/name/layer/colour/fill, a sketch-code round-trip (`toCode` -> `parseCode` ->
   `diffToCommands` updating in place with the same id), and DXF + SVG round-trips.
-- **Any change to an IO module** (`dxf`, `dxfExport`, `svg`) needs a *round-trip*
+- **Any change to an IO module** (`dxf`, `dxfExport`, `dxfw`, `svg`) needs a *round-trip*
   test, not a golden string: write it, read it back, compare geometry. Assert on
   file text only for what a round-trip can't see — header variables, the layer
   table, the numeric formatting convention.

@@ -264,6 +264,18 @@ function allNums(raw: RawEntity, code: number): number[] {
   return raw.pairs.filter((p) => p.code === code).map((p) => parseFloat(p.value));
 }
 
+/**
+ * The entity's sketch-code name, if this file is one the AC1032 writer
+ * produced (dxfw/index.ts): a `1001 SKETCHOR` extended-data group followed
+ * by `1000 <name>`. Any other application's XDATA (or none) is ignored.
+ */
+function sketchorXdataName(raw: RawEntity): string | undefined {
+  const i = raw.pairs.findIndex((p) => p.code === 1001 && p.value.trim() === "SKETCHOR");
+  if (i === -1) return undefined;
+  const nameTag = raw.pairs.slice(i + 1).find((p) => p.code === 1000 || p.code === 1001);
+  return nameTag?.code === 1000 ? nameTag.value : undefined;
+}
+
 function line(a: Point, b: Point, layer?: string): Entity {
   return { id: newEntityId(), type: "line", a, b, ...(layer ? { layer } : {}) };
 }
@@ -618,6 +630,7 @@ function convertRecords(raws: RawEntity[], ctx: ConvertContext): Entity[] {
   for (const raw of raws) {
     const rawLayer = str(raw, 8, "0") || "0";
     const layer = rawLayer === "0" && ctx.insertLayer ? ctx.insertLayer : rawLayer;
+    const beforeCount = entities.length;
     switch (raw.type) {
       case "LINE":
         entities.push(
@@ -748,6 +761,13 @@ function convertRecords(raws: RawEntity[], ctx: ConvertContext): Entity[] {
         if (!KNOWN_IGNORED.has(raw.type)) {
           warnings.push(`unsupported entity: ${raw.type}`);
         }
+    }
+    // Restore a Sketchor-written name onto the one entity this record
+    // produced (ELLIPSE/SPLINE/INSERT can expand into several — a name
+    // wouldn't unambiguously belong to just one of them, so it's dropped there).
+    if (entities.length === beforeCount + 1) {
+      const name = sketchorXdataName(raw);
+      if (name) entities[entities.length - 1].name = name;
     }
   }
 

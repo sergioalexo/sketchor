@@ -1,6 +1,6 @@
 import { importDxfText, importEntities, importSvgText, openIntoSession, useApp } from "../state/store";
 import { DWG_UNREADABLE, dwgToDxfText } from "../browser/dwgImport";
-import { bindSavePath, openModelBytes } from "../io/drawingFile";
+import { bindDxfVersion, bindSavePath, openModelBytes } from "../io/drawingFile";
 
 /**
  * Desktop-only: when Sketchor is launched by double-clicking a file (or via
@@ -75,6 +75,7 @@ export function initDesktopFileOpen(): void {
   tauri.event.listen("open-dxf", ({ payload }) => {
     if (!payload?.text) return;
     openIntoSession(payload.name, () => importDxfText(payload.text!));
+    bindDxfVersion(payload.text!);
     bindOpened(payload.path, payload.name);
     revealFolder(payload.dir);
   });

@@ -797,7 +797,16 @@ export function App() {
                     void saveDrawing("dxf", undefined, "save-as");
                   }}
                 >
-                  Save As DXF...
+                  Save As DXF 2018...
+                </button>
+                <button
+                  data-testid="save-as-dxf-r12"
+                  onClick={() => {
+                    setShowSaveMenu(false);
+                    void saveDrawing("dxf-r12", undefined, "save-as");
+                  }}
+                >
+                  Save As DXF R12 (simple geometry, for CAM)...
                 </button>
                 <button
                   data-testid="save-as-svg"
@@ -815,7 +824,16 @@ export function App() {
                     void saveDrawing("dxf", undefined, "save-copy");
                   }}
                 >
-                  Save a Copy as DXF...
+                  Save a Copy as DXF 2018...
+                </button>
+                <button
+                  data-testid="save-copy-dxf-r12"
+                  onClick={() => {
+                    setShowSaveMenu(false);
+                    void saveDrawing("dxf-r12", undefined, "save-copy");
+                  }}
+                >
+                  Save a Copy as DXF R12...
                 </button>
                 <button
                   data-testid="save-copy-svg"

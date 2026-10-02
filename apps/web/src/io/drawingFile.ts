@@ -1,4 +1,4 @@
-import { entitiesToDxf, entitiesToSvgDocument } from "@sketchor/core";
+import { entitiesToDxf, entitiesToDxf2018, entitiesToSvgDocument } from "@sketchor/core";
 import { DWG_UNREADABLE, dwgToDxfText } from "../browser/dwgImport";
 import { isModelFile, loadModel } from "../model3d/stepImport";
 import {
@@ -32,12 +32,37 @@ import { reportError, track } from "../metrics/metrics";
  * download / hidden `<input type=file>` where the API is missing.
  */
 
-export type SaveFormat = "dxf" | "svg";
+export type SaveFormat = "dxf" | "dxf-r12" | "svg";
 
 const SAVE_FORMAT: Record<SaveFormat, { mime: string; description: string }> = {
   dxf: { mime: "application/dxf", description: "DXF Drawing" },
+  "dxf-r12": { mime: "application/dxf", description: "DXF R12 Drawing (CAM)" },
   svg: { mime: "image/svg+xml", description: "SVG Drawing" },
 };
+
+/**
+ * Which DXF flavour a plain "Save"/"Save As DXF" writes (X-01): AC1032
+ * ("DXF 2018") by default — what modern CAD expects, with handles and
+ * entity-name XDATA that round-trips through Sketchor itself — except a
+ * file **opened** as R12 saves back as R12, since CAM/laser shops that hand
+ * out R12 files generally want flat geometry back, not a format upgrade.
+ * `dxf-r12` (an explicit "Save As DXF R12") always writes R12 regardless of
+ * what the tab was opened from.
+ */
+const dxfSourceVersions = new Map<string, "r12" | "2018">();
+
+/** Reads `$ACADVER` out of a DXF's HEADER section without a full parse. */
+function detectDxfVersion(text: string): "r12" | "2018" {
+  const m = text.match(/\$ACADVER\s*\n\s*1\s*\n\s*(AC\d+)/);
+  // AC1009 and older are R12-and-earlier (all geometry, no handles/tables
+  // worth preserving); anything from AC1012 (R13) on gets the modern writer.
+  return m && m[1] <= "AC1009" ? "r12" : "2018";
+}
+
+/** Call after a DXF has been loaded into the active tab, so a later plain Save writes back in the same flavour. */
+export function bindDxfVersion(text: string): void {
+  dxfSourceVersions.set(activeSessionId(), detectDxfVersion(text));
+}
 
 // Minimal shape of the File System Access API we use — declared locally so we
 // don't need the `@types/wicg-file-system-access` package. Supported by
@@ -73,11 +98,14 @@ const OPEN_ACCEPT = ".dxf,.svg,.dwg,.step,.stp,.iges,.igs";
 
 function serialize(format: SaveFormat): string {
   const entities = doc.all();
-  if (format === "dxf") {
+  if (format === "dxf" || format === "dxf-r12") {
     const displayUnit = useApp.getState().displayUnit;
     // Stored coordinates are always millimeters — rescale to match the
     // declared unit so the file's numbers represent real-world size.
-    return entitiesToDxf(entities, displayUnitToDxfCode(displayUnit), factorFromMm(displayUnit));
+    const insUnits = displayUnitToDxfCode(displayUnit);
+    const scale = factorFromMm(displayUnit);
+    const r12 = format === "dxf-r12" || dxfSourceVersions.get(activeSessionId()) === "r12";
+    return r12 ? entitiesToDxf(entities, insUnits, scale) : entitiesToDxf2018(entities, { insUnits, scale });
   }
   // True physical size: inches only when the tab works in inches/feet.
   const displayUnit = useApp.getState().displayUnit;
@@ -173,11 +201,17 @@ export type SaveMode = "save" | "save-as" | "save-copy";
  * generic `drawing.dxf`. Falls back to `drawing.<fmt>` for a tab that has
  * never been named (an untouched "Untitled-1").
  */
+/** The real file extension for a {@link SaveFormat} — "dxf" and "dxf-r12" are both plain `.dxf` files. */
+function fileExtension(format: SaveFormat): string {
+  return format === "dxf-r12" ? "dxf" : format;
+}
+
 function defaultSaveName(format: SaveFormat): string {
   const target = activeSaveTarget();
   const base = target?.name ?? getSessions().find((s) => s.id === activeSessionId() && s.named)?.name;
-  if (!base) return `drawing.${format}`;
-  return `${base.replace(/\.(dxf|svg|dwg|step|stp|iges|igs)$/i, "")}.${format}`;
+  const ext = fileExtension(format);
+  if (!base) return `drawing.${ext}`;
+  return `${base.replace(/\.(dxf|svg|dwg|step|stp|iges|igs)$/i, "")}.${ext}`;
 }
 
 /** Saves the current drawing as DXF or SVG. No-op if the location prompt is cancelled. */
@@ -220,7 +254,7 @@ export async function saveDrawing(format: SaveFormat, suggestedName?: string, mo
     try {
       const handle = await w.showSaveFilePicker({
         suggestedName: name,
-        types: [{ description, accept: { [mime]: [`.${format}`] } }],
+        types: [{ description, accept: { [mime]: [`.${fileExtension(format)}`] } }],
       });
       await writeTarget({ kind: "handle", handle, format, name: handle.name }, text);
       if (mode !== "save-copy") {
@@ -293,6 +327,7 @@ export async function loadDrawingFile(name: string, file: File): Promise<void> {
   } else {
     const text = await file.text();
     openIntoSession(name, () => importDxfText(text));
+    bindDxfVersion(text);
   }
 }
 

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { parseSvgText } from "@sketchor/core";
 import { getSessions, importDxfText, importSvgText, openIntoSession, useApp } from "../state/store";
-import { bindSaveHandle, bindSavePath, openModelBytes } from "../io/drawingFile";
+import { bindDxfVersion, bindSaveHandle, bindSavePath, openModelBytes } from "../io/drawingFile";
 import { isModelFile } from "../model3d/stepImport";
 import { fileToSvg, isDrawingFile, queueThumbnail } from "./thumbnail";
 
@@ -107,6 +107,7 @@ async function openEntry(entry: Entry, text: string): Promise<void> {
     openIntoSession(entry.name, () => importSvgText(text));
   } else {
     openIntoSession(entry.name, () => importDxfText(text));
+    bindDxfVersion(text);
   }
   // Bind the new tab to the file it came from, so Ctrl+S writes back here
   // instead of asking where to put it. Desktop entries carry a native path,
