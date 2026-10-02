@@ -42,7 +42,7 @@ describe("matchesFilter", () => {
   });
 
   it("filters on construction and fill as flags, not as presence", () => {
-    expect(matchesFilter(line("a", { dashed: true }), { construction: true })).toBe(true);
+    expect(matchesFilter(line("a", { construction: true }), { construction: true })).toBe(true);
     expect(matchesFilter(line("a"), { construction: false })).toBe(true);
     expect(matchesFilter(line("a"), { construction: true })).toBe(false);
     expect(matchesFilter(circle("c", { fill: "#eee" }), { filled: true })).toBe(true);

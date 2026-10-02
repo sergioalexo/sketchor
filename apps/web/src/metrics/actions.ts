@@ -100,6 +100,8 @@ export const TRACKED_BUTTONS: Record<string, string> = {
   "toggle-glyphs": "constraints.glyphs",
   "prop-closed": "properties.closed",
   "prop-dashed": "properties.construction",
+  "prop-linetype": "properties.linetype",
+  "prop-lineweight": "properties.lineweight",
   "prop-reverse": "properties.reverse",
   "prop-vertices-toggle": "properties.vertices",
   "layer-add": "layers.add",

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { SketchDocument } from "./document";
 import type { LineEntity } from "./entities";
-import { layerList, layerRecordWith } from "./layerTable";
+import { layerList, layerRecordWith, resolveLinetype, resolveLineweight } from "./layerTable";
 
 /**
  * The layer list the UI shows is a projection of the document (Z-02). What
@@ -64,5 +64,30 @@ describe("layerRecordWith", () => {
     const doc = new SketchDocument();
     doc._putRecord("layers", { name: "x", visible: false, color: "#f00" });
     expect(layerRecordWith(doc, "x", { locked: true })).toEqual({ name: "x", visible: false, color: "#f00", locked: true });
+  });
+});
+
+describe("Z-04: resolveLinetype / resolveLineweight (BYLAYER)", () => {
+  it("prefers the entity's own linetype over the layer's default", () => {
+    const doc = new SketchDocument();
+    doc._putRecord("layers", { name: "walls", visible: true, linetype: "CENTER" });
+    const e = line("a", "walls");
+    expect(resolveLinetype(doc, { ...e, linetype: "HIDDEN" })).toBe("HIDDEN");
+  });
+
+  it("falls back to the layer's default linetype (BYLAYER), then CONTINUOUS", () => {
+    const doc = new SketchDocument();
+    doc._putRecord("layers", { name: "walls", visible: true, linetype: "CENTER" });
+    expect(resolveLinetype(doc, line("a", "walls"))).toBe("CENTER");
+    expect(resolveLinetype(doc, line("b", "undecorated"))).toBe("CONTINUOUS");
+    expect(resolveLinetype(doc, line("c"))).toBe("CONTINUOUS"); // default layer "0", no record
+  });
+
+  it("resolves lineweight the same way, with no CONTINUOUS-style fallback value", () => {
+    const doc = new SketchDocument();
+    doc._putRecord("layers", { name: "walls", visible: true, lineweight: 0.5 });
+    expect(resolveLineweight(doc, { ...line("a", "walls"), lineweight: 0.18 })).toBe(0.18);
+    expect(resolveLineweight(doc, line("b", "walls"))).toBe(0.5);
+    expect(resolveLineweight(doc, line("c"))).toBeUndefined();
   });
 });

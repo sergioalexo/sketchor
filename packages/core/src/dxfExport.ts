@@ -4,6 +4,7 @@ import { dist } from "./geometry";
 import { boundsOf } from "./dxf";
 import { kindTessellate } from "./kinds/registry";
 import { nearestAci } from "./aci";
+import { CONTINUOUS, builtinLinetype } from "./linetypes";
 
 const ORIGIN = { x: 0, y: 0 };
 
@@ -33,6 +34,28 @@ function layerTable(layers: string[]): string {
 }
 
 /**
+ * Z-04: an R12 `LTYPE` table entry. `72`/`73`/`40` are the alignment code
+ * (always `65` = "A"), dash-element count and total pattern length; `49` is
+ * repeated once per element (the DXF group-49 convention this module's own
+ * `pattern` arrays already follow — positive dash, negative gap).
+ */
+function ltypeEntry(name: string): string {
+  const def = builtinLinetype(name);
+  const total = def.pattern.reduce((a, b) => a + Math.abs(b), 0);
+  const elements = def.pattern.map((v) => `49\n${n(v)}\n`).join("");
+  return (
+    `0\nLTYPE\n2\n${def.name}\n70\n0\n3\n${def.description}\n72\n65\n` +
+    `73\n${def.pattern.length}\n40\n${n(total)}\n${elements}`
+  );
+}
+
+function ltypeTable(linetypes: readonly string[]): string {
+  const names = [CONTINUOUS, ...linetypes.filter((l) => l !== CONTINUOUS)];
+  const rows = names.map(ltypeEntry).join("");
+  return `0\nTABLE\n2\nLTYPE\n70\n${names.length}\n${rows}0\nENDTAB\n`;
+}
+
+/**
  * X-04: color 62 (ACI) when the entity has an explicit colour, nothing
  * otherwise (BYLAYER — every layer here is written as ACI 7, see
  * `layerTable`). R12 predates true colour (group 420, AC1018+), so an
@@ -44,11 +67,26 @@ function colorGroup(e: Entity): string {
   return e.color ? `62\n${nearestAci(e.color)}\n` : "";
 }
 
+/**
+ * Z-04: linetype (group 6, by name — BYLAYER when the entity has none of
+ * its own, same omit-means-inherit convention as colour) and lineweight
+ * (group 370, hundredths of a millimetre — DXF's own unit for it; BYLAYER
+ * the same way). Neither resolves BYLAYER against a layer's own default
+ * here — this function only ever sees a flat `Entity[]`, not a document, the
+ * same limitation `colorGroup` already has (see `layerTable`'s ACI-7 note).
+ */
+function linetypeGroups(e: Entity): string {
+  const lt = e.linetype ? `6\n${e.linetype}\n` : "";
+  const lw = e.lineweight !== undefined ? `370\n${Math.round(e.lineweight * 100)}\n` : "";
+  return lt + lw;
+}
+
 function lineEntity(e: LineEntity): string {
   return (
     `0\nLINE\n` +
     pair(8, layerOf(e)) +
     colorGroup(e) +
+    linetypeGroups(e) +
     pair(10, e.a.x) +
     pair(20, e.a.y) +
     pair(30, 0) +
@@ -63,6 +101,7 @@ function circleEntity(e: CircleEntity): string {
     `0\nCIRCLE\n` +
     pair(8, layerOf(e)) +
     colorGroup(e) +
+    linetypeGroups(e) +
     pair(10, e.center.x) +
     pair(20, e.center.y) +
     pair(30, 0) +
@@ -81,6 +120,7 @@ function arcEntity(e: ArcEntity): string {
     `0\nARC\n` +
     pair(8, layerOf(e)) +
     colorGroup(e) +
+    linetypeGroups(e) +
     pair(10, e.center.x) +
     pair(20, e.center.y) +
     pair(30, 0) +
@@ -91,7 +131,7 @@ function arcEntity(e: ArcEntity): string {
 }
 
 function pointEntity(e: PointEntity): string {
-  return `0\nPOINT\n` + pair(8, layerOf(e)) + colorGroup(e) + pair(10, e.p.x) + pair(20, e.p.y) + pair(30, 0);
+  return `0\nPOINT\n` + pair(8, layerOf(e)) + colorGroup(e) + linetypeGroups(e) + pair(10, e.p.x) + pair(20, e.p.y) + pair(30, 0);
 }
 
 /** As LWPOLYLINE (the inverse of dxf.ts's `lwpolylineVertices`/`emitPolylineWithBulges`). */
@@ -103,6 +143,7 @@ function polylineEntity(e: PolylineEntity): string {
     `0\nLWPOLYLINE\n` +
     pair(8, layerOf(e)) +
     colorGroup(e) +
+    linetypeGroups(e) +
     `90\n${e.points.length}\n` +
     `70\n${e.closed ? 1 : 0}\n` +
     verts
@@ -114,6 +155,7 @@ function textEntity(e: TextEntity): string {
     `0\nTEXT\n` +
     pair(8, layerOf(e)) +
     colorGroup(e) +
+    linetypeGroups(e) +
     pair(10, e.at.x) +
     pair(20, e.at.y) +
     pair(30, 0) +
@@ -169,7 +211,16 @@ function entityDxf(e: Entity): string {
         .filter((run) => run.length >= 2)
         .map((run) => {
           const closed = run.length > 2 && dist(run[0], run[run.length - 1]) < 1e-9;
-          return polylineEntity({ id: (e as Entity).id, type: "polyline", layer: (e as Entity).layer, color: (e as Entity).color, points: closed ? run.slice(0, -1) : run, closed });
+          return polylineEntity({
+            id: (e as Entity).id,
+            type: "polyline",
+            layer: (e as Entity).layer,
+            color: (e as Entity).color,
+            linetype: (e as Entity).linetype,
+            lineweight: (e as Entity).lineweight,
+            points: closed ? run.slice(0, -1) : run,
+            closed,
+          });
         })
         .join("");
   }
@@ -190,6 +241,7 @@ export function entitiesToDxf(entities: Entity[], insUnits = 0, scale = 1): stri
   const scaled = scale !== 1 ? entities.map((e) => transformed(e, ORIGIN, 0, 0, 0, scale)) : entities;
   const layers = [...new Set(scaled.map((e) => layerOf(e)))];
   if (layers.length === 0) layers.push("0");
+  const linetypes = [...new Set(scaled.map((e) => e.linetype).filter((l): l is string => !!l))];
   const bounds = boundsOf(scaled) ?? { minX: 0, minY: 0, maxX: 0, maxY: 0 };
 
   const header =
@@ -201,7 +253,7 @@ export function entitiesToDxf(entities: Entity[], insUnits = 0, scale = 1): stri
     `9\n$EXTMAX\n10\n${n(bounds.maxX)}\n20\n${n(bounds.maxY)}\n30\n0.0\n` +
     `0\nENDSEC\n`;
 
-  const tables = `0\nSECTION\n2\nTABLES\n${layerTable(layers)}0\nENDSEC\n`;
+  const tables = `0\nSECTION\n2\nTABLES\n${ltypeTable(linetypes)}${layerTable(layers)}0\nENDSEC\n`;
 
   // Infinite construction lines are drawing aids, not geometry: they stay out of the file.
   const exported = scaled.filter((e) => !(e.type === "line" && e.infinite));

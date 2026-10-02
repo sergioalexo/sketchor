@@ -1,6 +1,8 @@
 import type { SketchDocument } from "./document";
 import { DEFAULT_LAYER, layerOf } from "./entities";
+import type { Entity } from "./entities";
 import type { LayerRecord } from "./tables";
+import { CONTINUOUS } from "./linetypes";
 
 /**
  * Layers as the UI sees them, projected from the document (Z-02): the
@@ -33,4 +35,18 @@ export function layerList(doc: SketchDocument): LayerInfo[] {
 export function layerRecordWith(doc: SketchDocument, name: string, patch: Partial<Omit<LayerRecord, "name">>): LayerRecord {
   const existing = doc.getRecord("layers", name) as LayerRecord | undefined;
   return { ...(existing ?? { visible: true }), ...patch, name };
+}
+
+/** Z-04: an entity's effective linetype — its own if set, else its layer's default, else CONTINUOUS (BYLAYER all the way down). */
+export function resolveLinetype(doc: SketchDocument, entity: Entity): string {
+  if (entity.linetype) return entity.linetype;
+  const layer = doc.getRecord("layers", layerOf(entity)) as LayerRecord | undefined;
+  return layer?.linetype ?? CONTINUOUS;
+}
+
+/** Z-04: an entity's effective lineweight (mm) — its own if set, else its layer's default, else undefined (draw at the renderer's own default width). */
+export function resolveLineweight(doc: SketchDocument, entity: Entity): number | undefined {
+  if (entity.lineweight !== undefined) return entity.lineweight;
+  const layer = doc.getRecord("layers", layerOf(entity)) as LayerRecord | undefined;
+  return layer?.lineweight;
 }

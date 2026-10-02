@@ -26,12 +26,20 @@ function colorGroups(e: Entity): string {
   return `62\n${aci}\n` + (aciIsExact ? "" : `420\n${trueColorInt}\n`);
 }
 
+/** Z-04: linetype (group 6, BYLAYER when absent) and lineweight (group 370, hundredths of a millimetre, BYLAYER when absent). */
+function linetypeGroups(e: Entity): string {
+  const lt = e.linetype ? `6\n${e.linetype}\n` : "";
+  const lw = e.lineweight !== undefined ? `370\n${Math.round(e.lineweight * 100)}\n` : "";
+  return lt + lw;
+}
+
 /**
- * `5`/`330`/`100 AcDbEntity` + layer + colour — the common head every
- * AC1032 entity record opens with, before its subclass-specific groups.
+ * `5`/`330`/`100 AcDbEntity` + layer + colour + linetype/lineweight — the
+ * common head every AC1032 entity record opens with, before its
+ * subclass-specific groups.
  */
 function entityHead(handle: string, owner: string, e: Entity): string {
-  return `5\n${handle}\n330\n${owner}\n100\nAcDbEntity\n8\n${layerOf(e)}\n${colorGroups(e)}`;
+  return `5\n${handle}\n330\n${owner}\n100\nAcDbEntity\n8\n${layerOf(e)}\n${colorGroups(e)}${linetypeGroups(e)}`;
 }
 
 /**

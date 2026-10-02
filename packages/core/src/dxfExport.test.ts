@@ -285,3 +285,38 @@ describe("X-04: colour", () => {
     expect(back.color).toBeUndefined();
   });
 });
+
+describe("Z-04: linetype and lineweight", () => {
+  it("writes an LTYPE table entry and group 6 for a non-continuous linetype, and round-trips it", () => {
+    const e: LineEntity = { ...line(), linetype: "CENTER" };
+    const text = entitiesToDxf([e]);
+    expect(text).toContain("0\nLTYPE\n2\nCENTER\n");
+    const entitySection = text.slice(text.indexOf("0\nLINE"));
+    expect(entitySection).toContain("6\nCENTER\n");
+    const [back] = parseDxf(text).entities as LineEntity[];
+    expect(back.linetype).toBe("CENTER");
+  });
+
+  it("writes lineweight as hundredths of a millimetre (group 370) and round-trips it", () => {
+    const e: LineEntity = { ...line(), lineweight: 0.5 };
+    const text = entitiesToDxf([e]);
+    const entitySection = text.slice(text.indexOf("0\nLINE"));
+    expect(entitySection).toContain("370\n50\n");
+    const [back] = parseDxf(text).entities as LineEntity[];
+    expect(back.lineweight).toBeCloseTo(0.5, 9);
+  });
+
+  it("writes nothing (BYLAYER) for an entity with no explicit linetype/lineweight", () => {
+    const text = entitiesToDxf([line()]);
+    const entitySection = text.slice(text.indexOf("0\nLINE"));
+    expect(entitySection).not.toMatch(/\n6\n/);
+    expect(entitySection).not.toMatch(/\n370\n/);
+    // CONTINUOUS is still declared in the LTYPE table — every file needs it.
+    expect(text).toContain("0\nLTYPE\n2\nCONTINUOUS\n");
+  });
+
+  it("always includes CONTINUOUS in the LTYPE table even when nothing uses it", () => {
+    const text = entitiesToDxf([]);
+    expect(text).toContain("0\nLTYPE\n2\nCONTINUOUS\n");
+  });
+});

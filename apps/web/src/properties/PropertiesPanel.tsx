@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Command, Entity, PolylineEntity } from "@sketchor/core";
-import { arcPointAt, arcSweep, bulgeToArc, dist, findClosedRegions, layerOf, polylineLength } from "@sketchor/core";
+import { arcPointAt, arcSweep, bulgeToArc, BUILTIN_LINETYPES, dist, findClosedRegions, layerOf, polylineLength } from "@sketchor/core";
 import { bus, doc, useApp } from "../state/store";
 import { parseLength } from "../tools/typedInput";
 import { factorFromMm, formatArea, formatLength, type DisplayUnit } from "../units";
@@ -35,7 +35,7 @@ export function PropertiesPanel({ onClose }: { onClose: () => void }) {
     useApp.getState().syncLayersFromDoc?.();
   };
 
-  const common = (key: "layer" | "color" | "dashed") => {
+  const common = (key: "layer" | "color" | "construction" | "linetype" | "lineweight") => {
     const values = new Set(entities.map((e) => (key === "layer" ? layerOf(e) : String(e[key] ?? ""))));
     return values.size === 1 ? [...values][0] : null;
   };
@@ -89,15 +89,44 @@ export function PropertiesPanel({ onClose }: { onClose: () => void }) {
                 title="Pick a colour"
               />
             </Row>
+            <Row label="Linetype">
+              <select
+                className="propspanel-input"
+                value={common("linetype") ?? ""}
+                data-testid="prop-linetype"
+                onChange={(e) => {
+                  const linetype = e.target.value;
+                  applyAll((en) => (linetype ? { ...en, linetype } : stripKey(en, "linetype")));
+                }}
+              >
+                <option value="">BYLAYER</option>
+                {Object.values(BUILTIN_LINETYPES).map((lt) => (
+                  <option key={lt.name} value={lt.name}>
+                    {lt.name}
+                  </option>
+                ))}
+              </select>
+            </Row>
+            <Row label="Lineweight (mm)">
+              <TextField
+                value={common("lineweight") ?? ""}
+                placeholder={common("lineweight") === null ? "(varies)" : "BYLAYER"}
+                testId="prop-lineweight"
+                onCommit={(v) => {
+                  const n = v.trim() === "" ? null : Number(v);
+                  applyAll((en) => (n !== null && Number.isFinite(n) && n >= 0 ? { ...en, lineweight: n } : stripKey(en, "lineweight")));
+                }}
+              />
+            </Row>
             <Row label="Construction">
               <input
                 type="checkbox"
                 data-testid="prop-dashed"
-                checked={common("dashed") === "true"}
+                checked={common("construction") === "true"}
                 ref={(el) => {
-                  if (el) el.indeterminate = common("dashed") === null;
+                  if (el) el.indeterminate = common("construction") === null;
                 }}
-                onChange={(e) => applyAll((en) => (e.target.checked ? { ...en, dashed: true } : stripKey(en, "dashed")))}
+                onChange={(e) => applyAll((en) => (e.target.checked ? { ...en, construction: true } : stripKey(en, "construction")))}
               />
             </Row>
           </Section>
@@ -108,7 +137,7 @@ export function PropertiesPanel({ onClose }: { onClose: () => void }) {
   );
 }
 
-function stripKey(e: Entity, key: "layer" | "color" | "dashed"): Entity {
+function stripKey(e: Entity, key: "layer" | "color" | "construction" | "linetype" | "lineweight"): Entity {
   const copy = { ...e } as Record<string, unknown>;
   delete copy[key];
   return copy as unknown as Entity;

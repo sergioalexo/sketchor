@@ -81,7 +81,8 @@ function trailerOutlineCommands(trailer: TrailerProfile): { commands: Command[];
     const guide = polyline(rectPoints(wall, wall, trailer.length - 2 * wall, trailer.width - 2 * wall), true, {
       layer: LOAD_PLAN_GUIDE_LAYER,
       color: GUIDE_COLOR,
-      dashed: true,
+      linetype: "DASHED",
+      construction: true,
       name: NAME_GUIDE,
     });
     commands.push(add(guide));
@@ -260,13 +261,15 @@ function palletCommands(p: PlacedItem, itemNumber: number, opts: LayoutOptions):
         ? circle({ x: p.slotX + p.slotWidth / 2, y: p.slotY + p.slotWidth / 2 }, p.slotWidth / 2, {
             layer: LOAD_PLAN_GUIDE_LAYER,
             color: GUIDE_COLOR,
-            dashed: true,
+            linetype: "DASHED",
+            construction: true,
             name: NAME_GUIDE,
           })
         : polyline(rectPoints(p.slotX, p.slotY, p.slotLength, p.slotWidth), true, {
             layer: LOAD_PLAN_GUIDE_LAYER,
             color: GUIDE_COLOR,
-            dashed: true,
+            linetype: "DASHED",
+            construction: true,
             name: NAME_GUIDE,
           });
     push(add(guide), guide.id);

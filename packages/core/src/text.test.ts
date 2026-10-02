@@ -53,12 +53,12 @@ describe("text entity", () => {
   });
 });
 
-describe("dashed", () => {
-  it("emits stroke-dasharray in SVG", () => {
+describe("linetype", () => {
+  it("emits stroke-dasharray (the real mm pattern) in SVG for a non-continuous linetype", () => {
     const svg = entitiesToSvgDocument([
-      { id: "l", type: "line", dashed: true, a: { x: 0, y: 0 }, b: { x: 10, y: 0 } },
+      { id: "l", type: "line", linetype: "DASHED", a: { x: 0, y: 0 }, b: { x: 10, y: 0 } },
     ]);
-    expect(svg).toContain("stroke-dasharray");
+    expect(svg).toContain('stroke-dasharray="6 3"');
   });
 });
 

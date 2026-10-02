@@ -4,6 +4,7 @@ import {
   entityPoints,
   imageCorners,
   layerOf,
+  migrateDashedEntity,
   newEntityId,
   polylineLength,
   polylineSegments,
@@ -337,5 +338,36 @@ describe("newEntityId", () => {
   it("never repeats, even when called in the same millisecond", () => {
     const ids = Array.from({ length: 500 }, () => newEntityId());
     expect(new Set(ids).size).toBe(ids.length);
+  });
+});
+
+describe("migrateDashedEntity (Z-04)", () => {
+  const base: LineEntity = { id: "l", type: "line", a: { x: 0, y: 0 }, b: { x: 1, y: 0 } };
+
+  it("is a no-op for an entity that never had `dashed`", () => {
+    expect(migrateDashedEntity(base)).toEqual(base);
+  });
+
+  it("splits dashed:true into both construction:true and linetype:DASHED", () => {
+    const old = { ...base, dashed: true } as LineEntity;
+    const migrated = migrateDashedEntity(old);
+    expect(migrated).toEqual({ ...base, construction: true, linetype: "DASHED" });
+    expect("dashed" in migrated).toBe(false);
+  });
+
+  it("drops a stale dashed:false without adding construction/linetype", () => {
+    const old = { ...base, dashed: false } as LineEntity;
+    expect(migrateDashedEntity(old)).toEqual(base);
+  });
+
+  it("is idempotent — migrating twice is the same as migrating once", () => {
+    const old = { ...base, dashed: true } as LineEntity;
+    const once = migrateDashedEntity(old);
+    expect(migrateDashedEntity(once)).toEqual(once);
+  });
+
+  it("doesn't overwrite a linetype the entity somehow already has", () => {
+    const old = { ...base, dashed: true, linetype: "CENTER" } as LineEntity;
+    expect(migrateDashedEntity(old).linetype).toBe("CENTER");
   });
 });

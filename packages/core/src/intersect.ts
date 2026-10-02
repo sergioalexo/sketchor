@@ -357,11 +357,13 @@ export function joinContiguous(curves: Curve[], closed = false): Curve[] {
 /* --------------------------- entities ↔ paths ---------------------------- */
 
 /** Properties a piece inherits from the entity it was cut from. */
-function inherit(e: Entity): { layer?: string; color?: string; dashed?: boolean } {
-  const out: { layer?: string; color?: string; dashed?: boolean } = {};
+function inherit(e: Entity): { layer?: string; color?: string; linetype?: string; lineweight?: number; construction?: boolean } {
+  const out: { layer?: string; color?: string; linetype?: string; lineweight?: number; construction?: boolean } = {};
   if (e.layer !== undefined) out.layer = e.layer;
   if (e.color !== undefined) out.color = e.color;
-  if (e.dashed !== undefined) out.dashed = e.dashed;
+  if (e.linetype !== undefined) out.linetype = e.linetype;
+  if (e.lineweight !== undefined) out.lineweight = e.lineweight;
+  if (e.construction !== undefined) out.construction = e.construction;
   return out;
 }
 

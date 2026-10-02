@@ -81,7 +81,13 @@ function reversed(curves: Curve[]): Curve[] {
 }
 
 function fromSingle(e: Entity): PolylineEntity {
-  const props = { ...(e.layer !== undefined ? { layer: e.layer } : {}), ...(e.color !== undefined ? { color: e.color } : {}), ...(e.dashed !== undefined ? { dashed: e.dashed } : {}) };
+  const props = {
+    ...(e.layer !== undefined ? { layer: e.layer } : {}),
+    ...(e.color !== undefined ? { color: e.color } : {}),
+    ...(e.linetype !== undefined ? { linetype: e.linetype } : {}),
+    ...(e.lineweight !== undefined ? { lineweight: e.lineweight } : {}),
+    ...(e.construction !== undefined ? { construction: e.construction } : {}),
+  };
   if (e.type === "line") return { id: e.id, type: "polyline", ...props, points: [e.a, e.b], closed: false };
   if (e.type === "arc") {
     const a = arcPointAt(e.center, e.radius, e.startAngle);
@@ -95,7 +101,13 @@ function fromSingle(e: Entity): PolylineEntity {
 
 /** A polyline as separate lines and arcs (fresh ids), inheriting layer/colour/construction. */
 export function explodePolyline(pl: PolylineEntity): (LineEntity | ArcEntity)[] {
-  const props = { ...(pl.layer !== undefined ? { layer: pl.layer } : {}), ...(pl.color !== undefined ? { color: pl.color } : {}), ...(pl.dashed !== undefined ? { dashed: pl.dashed } : {}) };
+  const props = {
+    ...(pl.layer !== undefined ? { layer: pl.layer } : {}),
+    ...(pl.color !== undefined ? { color: pl.color } : {}),
+    ...(pl.linetype !== undefined ? { linetype: pl.linetype } : {}),
+    ...(pl.lineweight !== undefined ? { lineweight: pl.lineweight } : {}),
+    ...(pl.construction !== undefined ? { construction: pl.construction } : {}),
+  };
   const out: (LineEntity | ArcEntity)[] = [];
   for (const seg of polylineSegments(pl)) {
     if (dist(seg.a, seg.b) < 1e-12) continue;

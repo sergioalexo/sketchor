@@ -465,7 +465,16 @@ export function diffToCommands(doc: SketchDocument, parsed: ParsedEntity[]): Com
           existing.type === "polyline" ? existing.bulges : undefined,
           existing.type === "image" ? existing.dataUrl : undefined,
         );
-        // Sketch code has no word for a construction line's infinite flag; keep it.
+        // Sketch code has no word for colour, fill, linetype, lineweight,
+        // construction, or a line's infinite flag — carry all of them over
+        // from the entity being replaced, the same way layer/bulges/image
+        // data already are above (CLAUDE.md's rule for a new entity field:
+        // "the DSL can't express it, so an edit must carry it over").
+        if (existing.color !== undefined) updated.color = existing.color;
+        if ("fill" in existing && existing.fill !== undefined) updated.fill = existing.fill;
+        if (existing.linetype !== undefined) updated.linetype = existing.linetype;
+        if (existing.lineweight !== undefined) updated.lineweight = existing.lineweight;
+        if (existing.construction !== undefined) updated.construction = existing.construction;
         if (existing.type === "line" && existing.infinite && updated.type === "line") updated.infinite = true;
         commands.push({ type: "update-entity", entity: updated });
       }

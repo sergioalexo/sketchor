@@ -718,7 +718,7 @@ export class MatchTool implements Tool {
     }
     if (target.id === this.source.id) return;
     const next = { ...target } as unknown as Record<string, unknown>;
-    for (const key of ["layer", "color", "dashed"] as const) {
+    for (const key of ["layer", "color", "linetype", "lineweight", "construction"] as const) {
       const v = (this.source as unknown as Record<string, unknown>)[key];
       if (v === undefined) delete next[key];
       else next[key] = v;
@@ -733,7 +733,8 @@ export class MatchTool implements Tool {
 function describeProps(e: Entity): string {
   const parts = [`layer ${layerOf(e)}`];
   if (e.color) parts.push(`colour ${e.color}`);
-  if (e.dashed) parts.push("construction");
+  if (e.linetype) parts.push(`linetype ${e.linetype}`);
+  if (e.construction) parts.push("construction");
   return parts.join(", ");
 }
 

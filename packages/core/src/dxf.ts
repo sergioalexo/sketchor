@@ -301,6 +301,36 @@ function rawColor(raw: RawEntity): string | undefined {
   return undefined;
 }
 
+/**
+ * Z-04: an entity's own linetype name (group 6), if it declared one
+ * explicitly. `BYLAYER`/`BYBLOCK` (and absence) all mean "no explicit
+ * linetype" the same way an absent group 62 means "no explicit colour" —
+ * Sketchor has no per-layer *or* per-block linetype to resolve a block
+ * reference against at parse time, so both collapse to the same thing. A
+ * name that isn't one of the nine built-ins (linetypes.ts) is kept verbatim
+ * rather than dropped — the renderer falls back to drawing it solid
+ * (`builtinLinetype`'s unknown-name case) but the name itself still
+ * round-trips, and a future `.lin` import can give it a real pattern.
+ */
+function rawLinetype(raw: RawEntity): string | undefined {
+  const name = str(raw, 6, "");
+  return name && name !== "BYLAYER" && name !== "BYBLOCK" ? name : undefined;
+}
+
+/**
+ * Z-04: an entity's own lineweight in mm (group 370, DXF's own unit is
+ * hundredths of a millimetre). The negative sentinels -1/-2/-3 (BYLAYER/
+ * BYBLOCK/DEFAULT) all mean "no explicit lineweight", same as the group
+ * being absent — Sketchor has no per-layer lineweight to resolve BYLAYER
+ * against at parse time either (same limitation as colour and linetype).
+ */
+function rawLineweight(raw: RawEntity): number | undefined {
+  const lw = raw.pairs.find((p) => p.code === 370);
+  if (!lw) return undefined;
+  const n = parseInt(lw.value, 10);
+  return Number.isFinite(n) && n >= 0 ? n / 100 : undefined;
+}
+
 function line(a: Point, b: Point, layer?: string): Entity {
   return { id: newEntityId(), type: "line", a, b, ...(layer ? { layer } : {}) };
 }
@@ -787,15 +817,19 @@ function convertRecords(raws: RawEntity[], ctx: ConvertContext): Entity[] {
           warnings.push(`unsupported entity: ${raw.type}`);
         }
     }
-    // Restore a Sketchor-written name, and the entity's own colour, onto the
-    // one entity this record produced (ELLIPSE/SPLINE/INSERT can expand into
-    // several — neither belongs unambiguously to just one of them, so both
-    // are dropped there, same as the name).
+    // Restore a Sketchor-written name, and the entity's own colour/linetype/
+    // lineweight, onto the one entity this record produced (ELLIPSE/SPLINE/
+    // INSERT can expand into several — none of these belong unambiguously to
+    // just one of them, so all are dropped there, same as the name).
     if (entities.length === beforeCount + 1) {
       const name = sketchorXdataName(raw);
       if (name) entities[entities.length - 1].name = name;
       const color = rawColor(raw);
       if (color) entities[entities.length - 1].color = color;
+      const linetype = rawLinetype(raw);
+      if (linetype) entities[entities.length - 1].linetype = linetype;
+      const lineweight = rawLineweight(raw);
+      if (lineweight !== undefined) entities[entities.length - 1].lineweight = lineweight;
     }
   }
 

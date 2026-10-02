@@ -133,7 +133,7 @@ describe("the printed load plan", () => {
   it("leaves the white clearance guides and the on-canvas summary off the paper", () => {
     const result = nestByOrders({ ...trailer, wallMargin: 100 }, orders);
     const paper = drawn(result);
-    expect(paper.some((e) => "dashed" in e && e.dashed)).toBe(false);
+    expect(paper.some((e) => "construction" in e && e.construction)).toBe(false);
     expect(paper.some((e) => e.type === "text" && /load plan/i.test(e.text))).toBe(false);
     // …while the plan itself is still there.
     expect(paper.some((e) => e.type === "text" && e.text === "NOSE")).toBe(true);

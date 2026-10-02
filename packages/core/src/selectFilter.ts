@@ -18,7 +18,7 @@ export interface SelectFilter {
   layers?: string[];
   /** Stroke colours to accept, with `null` standing for "the theme default" (no `color` set). */
   colors?: (string | null)[];
-  /** When set, only entities whose construction (dashed) flag matches. */
+  /** When set, only entities whose construction flag matches. */
   construction?: boolean;
   /** When set, only entities that have a hatch fill (true) or don't (false). */
   filled?: boolean;
@@ -34,7 +34,7 @@ export function matchesFilter(entity: Entity, filter: SelectFilter): boolean {
   if (filter.types && filter.types.length > 0 && !filter.types.includes(entity.type)) return false;
   if (filter.layers && filter.layers.length > 0 && !filter.layers.includes(layerOf(entity))) return false;
   if (filter.colors && filter.colors.length > 0 && !filter.colors.includes(colorOf(entity))) return false;
-  if (filter.construction !== undefined && !!entity.dashed !== filter.construction) return false;
+  if (filter.construction !== undefined && !!entity.construction !== filter.construction) return false;
   if (filter.filled !== undefined && !!entity.fill !== filter.filled) return false;
   return true;
 }

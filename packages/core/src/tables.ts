@@ -41,11 +41,15 @@ export interface TableRecord {
   [field: string]: unknown;
 }
 
-/** A layer's persisted state: what the layer panel toggles. Everything else about a layer (colour, linetype, lineweight) joins here with Z-04/X-04. */
+/** A layer's persisted state: what the layer panel toggles, plus its defaults for an entity that doesn't set its own (Z-04). Layer colour (X-04) isn't modeled yet. */
 export interface LayerRecord extends TableRecord {
   visible: boolean;
   /** Visible but untouchable — cannot be picked or edited. */
   locked?: boolean;
+  /** This layer's default linetype — what an entity with no `linetype` of its own (BYLAYER) draws as. Absent = CONTINUOUS. */
+  linetype?: string;
+  /** This layer's default lineweight (mm) — what an entity with no `lineweight` of its own (BYLAYER) draws as. */
+  lineweight?: number;
 }
 
 /**
@@ -107,6 +111,18 @@ export function recordRefRewritersFor(table: string): readonly { owner: string; 
 
 // An entity's `layer` names a `layers` record (absent = the default layer "0").
 registerEntityRefRewriter("layers", (entity, from, to) => (entity.layer === from ? { ...entity, layer: to } : null));
+
+// Z-04: an entity's `linetype` names a `linetypes` record only when it's a
+// custom (imported) one — a built-in name (CONTINUOUS, DASHED, ...) can't be
+// renamed, so there's never a `linetypes` record for `from` to match in that
+// case and this rewriter is a no-op for it.
+registerEntityRefRewriter("linetypes", (entity, from, to) =>
+  entity.linetype === from ? { ...entity, linetype: to } : null,
+);
+// A layer's own default `linetype` is the same kind of reference, one level up.
+registerRecordRefRewriter("linetypes", "layers", (record, from, to) =>
+  (record as LayerRecord).linetype === from ? { ...record, linetype: to } : null,
+);
 
 /* --------------------------------- migration -------------------------------- */
 

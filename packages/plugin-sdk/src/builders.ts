@@ -30,8 +30,12 @@ export interface EntityOptions {
   color?: string;
   /** Hatch-fill colour for closed shapes; omit for no fill. */
   fill?: string;
-  /** Draw the outline dashed (construction / guide lines). */
-  dashed?: boolean;
+  /** Named linetype (CONTINUOUS, DASHED, HIDDEN, CENTER, ...); omit for BYLAYER. */
+  linetype?: string;
+  /** Plot/display line weight in mm; omit for BYLAYER. */
+  lineweight?: number;
+  /** A construction/guide entity, excluded from export weight. */
+  construction?: boolean;
 }
 
 function base(opts?: EntityOptions): {
@@ -40,7 +44,9 @@ function base(opts?: EntityOptions): {
   layer?: string;
   color?: string;
   fill?: string;
-  dashed?: boolean;
+  linetype?: string;
+  lineweight?: number;
+  construction?: boolean;
 } {
   return {
     id: newEntityId(),
@@ -48,7 +54,9 @@ function base(opts?: EntityOptions): {
     ...(opts?.layer !== undefined ? { layer: opts.layer } : {}),
     ...(opts?.color !== undefined ? { color: opts.color } : {}),
     ...(opts?.fill !== undefined ? { fill: opts.fill } : {}),
-    ...(opts?.dashed ? { dashed: true } : {}),
+    ...(opts?.linetype !== undefined ? { linetype: opts.linetype } : {}),
+    ...(opts?.lineweight !== undefined ? { lineweight: opts.lineweight } : {}),
+    ...(opts?.construction ? { construction: true } : {}),
   };
 }
 
@@ -81,7 +89,7 @@ export function text(
   str: string,
   opts?: EntityOptions & { height?: number; rotation?: number },
 ): TextEntity {
-  const { fill: _f, dashed: _d, ...b } = base(opts);
+  const { fill: _f, linetype: _lt, lineweight: _lw, construction: _c, ...b } = base(opts);
   return { ...b, type: "text", at, text: str, height: opts?.height ?? 10, rotation: opts?.rotation ?? 0 };
 }
 

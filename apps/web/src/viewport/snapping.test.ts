@@ -58,10 +58,10 @@ describe("snapMovingSelection", () => {
   it("aligns a pallet's margin guide to a neighbour's guide", () => {
     // pallet A: shape 0..1000, dashed guide -30..1030
     const aShape = rect("as", 0, 0, 1000, 1000, { fill: "#e00" });
-    const aGuide = rect("ag", -30, -30, 1060, 1060, { dashed: true });
+    const aGuide = rect("ag", -30, -30, 1060, 1060, { construction: true });
     // pallet B: shape 1700..2700, guide 1670..2730
     const bShape = rect("bs", 1700, 0, 1000, 1000, { fill: "#00e" });
-    const bGuide = rect("bg", 1670, -30, 1060, 1060, { dashed: true });
+    const bGuide = rect("bg", 1670, -30, 1060, 1060, { construction: true });
     const d = doc(aShape, aGuide, bShape, bGuide);
     // Drag B left by 697: B's guide left edge 1670 → 973, 3 past A's guide right
     // edge (1030)? no — 973 vs 1030 is 57 away. Aim so the guides meet: move

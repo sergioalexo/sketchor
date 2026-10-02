@@ -1,4 +1,5 @@
 import type { Entity, EntityId } from "./entities";
+import { migrateDashedEntity } from "./entities";
 import type { Group, GroupId } from "./groups";
 import type { Constraint, ConstraintId } from "./constraints";
 import { DOCUMENT_VERSION, sanitizeRecords, type DocSettings, type DocumentJson, type TableRecord } from "./tables";
@@ -241,7 +242,7 @@ export class SketchDocument {
    */
   static fromJSON(json: DocumentJson): SketchDocument {
     const doc = new SketchDocument();
-    for (const e of json.entities ?? []) doc._put(e);
+    for (const e of json.entities ?? []) doc._put(migrateDashedEntity(e));
     for (const g of json.groups ?? []) doc._putGroup(g);
     for (const c of json.constraints ?? []) doc._putConstraint(c);
     if (json.tables && typeof json.tables === "object") {

@@ -5,6 +5,7 @@ import { arcPointAt, arcSweep, bulgeToArc } from "./geometry";
 import { boundsOf } from "./dxf";
 import { kindTessellate } from "./kinds/registry";
 import type { PdfBuilder, PdfPoint } from "./pdf";
+import { builtinLinetype } from "./linetypes";
 
 /**
  * Draws entities onto a {@link PdfBuilder} page, scaled to fit a box — the PDF
@@ -70,7 +71,9 @@ export function drawEntitiesToPdf(
   const paintOf = (e: Entity) => {
     const closed = e.type === "circle" || (e.type === "polyline" && e.closed);
     const fill = opts.fill !== false && closed && "fill" in e ? (e.fill as string | undefined) : undefined;
-    const dash = "dashed" in e && e.dashed ? [width * 4, width * 3] : undefined;
+    // Real mm pattern, scaled from world to page units same as everything else here.
+    const linePattern = "linetype" in e && e.linetype ? builtinLinetype(e.linetype).pattern : [];
+    const dash = linePattern.length > 0 ? linePattern.map((v) => Math.max(Math.abs(v) * scale, 0.1)) : undefined;
     return { stroke: e.color ?? stroke, fill, width, dash };
   };
 

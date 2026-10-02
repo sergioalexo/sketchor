@@ -139,7 +139,8 @@ describe("buildNestLayout margins", () => {
     expect(guides).toHaveLength(1 + result.placed.length);
     for (const g of guides) {
       if (g.type === "add-entity") {
-        expect(g.entity.dashed).toBe(true);
+        expect(g.entity.linetype).toBe("DASHED");
+        expect(g.entity.construction).toBe(true);
         expect(g.entity.color).toBe("#ffffff");
         if ("fill" in g.entity) expect(g.entity.fill).toBeUndefined();
       }

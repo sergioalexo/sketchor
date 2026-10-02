@@ -88,6 +88,42 @@ are deliberately identical in both themes. `Viewport.tsx`'s and
 `ModelViewport.tsx`'s redraw effects both depend on the resolved theme so a
 switch repaints immediately.
 
+## Linetypes, lineweight and construction (Z-04)
+
+`dashed: boolean` is gone — split into `linetype?: string` (a name into
+`packages/core/src/linetypes.ts`'s nine built-ins: CONTINUOUS, DASHED,
+HIDDEN, CENTER, PHANTOM, DOT, DASHDOT, BORDER, DIVIDE, authored clean-room
+from ISO 128; a custom/imported name is kept verbatim and just renders solid
+via `builtinLinetype`'s fallback), `lineweight?: number` (mm), and
+`construction?: boolean` (excluded-from-export-weight, independent of
+linetype now). Absent `linetype`/`lineweight` means BYLAYER:
+`layerTable.ts`'s `resolveLinetype`/`resolveLineweight` walk entity → the
+`LayerRecord`'s own default → CONTINUOUS. `entities.ts`'s
+`migrateDashedEntity` (called from `document.ts`'s `fromJSON` and
+`clipboard.ts`'s paste) turns an old document's `dashed: true` into both
+`construction: true` and `linetype: "DASHED"`, since the one old field meant
+both at once.
+
+The renderer (`viewport/renderer.ts`) turns a resolved linetype into real
+screen dashes via `linetypes.ts`'s `screenDashPattern` (world mm × `$LTSCALE`
+× zoom, with an LOD fallback to solid once the pattern would be sub-pixel
+noise) — `drawEntity`'s BYLAYER resolution only happens in the main render
+loop, which has a document to resolve against; transient previews (tool
+preview, grip drag, measure) just use the entity's own `linetype`. SVG/PDF
+export (`svg.ts`, `entitiesPdf.ts`) use the same real mm pattern, scaled to
+each format's own units. Both DXF writers (`dxfExport.ts`, `dxfw/`) write a
+real `LTYPE` table (CONTINUOUS + every linetype actually used) and groups 6
+(name, BYLAYER when absent)/370 (lineweight, hundredths of a mm); `dxf.ts`
+reads both back (`rawLinetype`/`rawLineweight`), preferring neither over a
+layer default it has no way to resolve at parse time. Layer *colour* is
+still unmodeled (X-04 is entity colour only).
+
+A new entity field that sketch code can't express (this trio, plus colour/
+fill) must be carried through `sketchtext.ts`'s `diffToCommands` by hand when
+it reconstructs an entity from a parsed code edit — it doesn't happen for
+free, and a gap here silently strips the field on the next code-panel edit
+(a real bug this way, found and fixed while building Z-04).
+
 ## Build & run
 
 ```bash

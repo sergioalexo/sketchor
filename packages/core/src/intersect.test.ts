@@ -131,9 +131,9 @@ describe("trimAt", () => {
   });
 
   it("keeps the inherited layer/colour/construction on the pieces", () => {
-    const target: LineEntity = { ...line("t", 0, 0, 10, 0), layer: "cut", color: "#f00", dashed: true };
+    const target: LineEntity = { ...line("t", 0, 0, 10, 0), layer: "cut", color: "#f00", construction: true };
     const r = trimAt(target, [line("c", 4, -1, 4, 1)], { x: 8, y: 0 })!;
-    expect(r.pieces[0]).toMatchObject({ layer: "cut", color: "#f00", dashed: true });
+    expect(r.pieces[0]).toMatchObject({ layer: "cut", color: "#f00", construction: true });
   });
 
   it("trims a circle to an arc: the piece between two cuts goes, the rest is ONE arc", () => {

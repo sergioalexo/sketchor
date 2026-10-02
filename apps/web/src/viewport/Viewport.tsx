@@ -187,11 +187,11 @@ function noSnap(e: { ctrlKey: boolean; metaKey: boolean; altKey: boolean; shiftK
 }
 
 /**
- * Flips the current selection between construction (dashed) and normal
- * (solid) lines — reusing the existing `dashed` entity flag, the same one
- * the load-planner guides and other construction geometry already draw with.
- * Text has no `dashed` concept and is skipped. If every eligible entity is
- * already dashed, this turns them all solid; otherwise it dashes them all.
+ * Flips the current selection's `construction` flag (Z-04 — independent of
+ * `linetype` now; before Z-04 this toggled the single `dashed` field that
+ * conflated the two). Text has no construction concept and is skipped. If
+ * every eligible entity is already construction, this clears them all;
+ * otherwise it sets them all.
  */
 function toggleConstruction(): void {
   const { selection } = useApp.getState();
@@ -199,11 +199,11 @@ function toggleConstruction(): void {
     .map((id) => doc.get(id))
     .filter((e): e is Exclude<Entity, TextEntity> => !!e && e.type !== "text");
   if (targets.length === 0) return;
-  const allDashed = targets.every((e) => e.dashed === true);
+  const allConstruction = targets.every((e) => e.construction === true);
   const commands: Command[] = targets.map((e) => {
     const entity = { ...e };
-    if (allDashed) delete entity.dashed;
-    else entity.dashed = true;
+    if (allConstruction) delete entity.construction;
+    else entity.construction = true;
     return { type: "update-entity", entity };
   });
   bus.execute(commands.length === 1 ? commands[0] : { type: "batch", commands });

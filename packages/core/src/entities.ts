@@ -19,8 +19,19 @@ export interface LineEntity {
    * by plugins (e.g. the load planner colours pallets by order).
    */
   fill?: string;
-  /** Draw the outline dashed rather than solid (construction / guide lines). */
-  dashed?: boolean;
+  /** Named linetype from the `linetypes` table (CONTINUOUS, DASHED, HIDDEN, CENTER, PHANTOM, DOT, DASHDOT, BORDER, DIVIDE, or a custom imported one — see linetypes.ts). Absent = BYLAYER: inherit the entity's layer's linetype, or CONTINUOUS if the layer has none either. */
+  linetype?: string;
+  /** Plot/display line weight in mm (the DXF standard set: 0, 0.05, 0.09, ... up to 2.11). Absent = BYLAYER, same inheritance as {@link linetype}. */
+  lineweight?: number;
+  /**
+   * A construction/guide entity: visible but excluded from export weight —
+   * BOM/measure/nest and similar tools treat it as a reference, not real
+   * geometry. Independent of {@link linetype} (before Z-04 this one boolean,
+   * `dashed`, meant both "draw dashed" and "is construction" at once; an old
+   * document's `dashed: true` migrates to `construction: true` +
+   * `linetype: "DASHED"`, see `tables.ts`'s v3→v4 migration).
+   */
+  construction?: boolean;
   a: Point;
   b: Point;
   /**
@@ -46,8 +57,19 @@ export interface CircleEntity {
    * by plugins (e.g. the load planner colours pallets by order).
    */
   fill?: string;
-  /** Draw the outline dashed rather than solid (construction / guide lines). */
-  dashed?: boolean;
+  /** Named linetype from the `linetypes` table (CONTINUOUS, DASHED, HIDDEN, CENTER, PHANTOM, DOT, DASHDOT, BORDER, DIVIDE, or a custom imported one — see linetypes.ts). Absent = BYLAYER: inherit the entity's layer's linetype, or CONTINUOUS if the layer has none either. */
+  linetype?: string;
+  /** Plot/display line weight in mm (the DXF standard set: 0, 0.05, 0.09, ... up to 2.11). Absent = BYLAYER, same inheritance as {@link linetype}. */
+  lineweight?: number;
+  /**
+   * A construction/guide entity: visible but excluded from export weight —
+   * BOM/measure/nest and similar tools treat it as a reference, not real
+   * geometry. Independent of {@link linetype} (before Z-04 this one boolean,
+   * `dashed`, meant both "draw dashed" and "is construction" at once; an old
+   * document's `dashed: true` migrates to `construction: true` +
+   * `linetype: "DASHED"`, see `tables.ts`'s v3→v4 migration).
+   */
+  construction?: boolean;
   center: Point;
   radius: number;
 }
@@ -67,8 +89,19 @@ export interface ArcEntity {
    * by plugins (e.g. the load planner colours pallets by order).
    */
   fill?: string;
-  /** Draw the outline dashed rather than solid (construction / guide lines). */
-  dashed?: boolean;
+  /** Named linetype from the `linetypes` table (CONTINUOUS, DASHED, HIDDEN, CENTER, PHANTOM, DOT, DASHDOT, BORDER, DIVIDE, or a custom imported one — see linetypes.ts). Absent = BYLAYER: inherit the entity's layer's linetype, or CONTINUOUS if the layer has none either. */
+  linetype?: string;
+  /** Plot/display line weight in mm (the DXF standard set: 0, 0.05, 0.09, ... up to 2.11). Absent = BYLAYER, same inheritance as {@link linetype}. */
+  lineweight?: number;
+  /**
+   * A construction/guide entity: visible but excluded from export weight —
+   * BOM/measure/nest and similar tools treat it as a reference, not real
+   * geometry. Independent of {@link linetype} (before Z-04 this one boolean,
+   * `dashed`, meant both "draw dashed" and "is construction" at once; an old
+   * document's `dashed: true` migrates to `construction: true` +
+   * `linetype: "DASHED"`, see `tables.ts`'s v3→v4 migration).
+   */
+  construction?: boolean;
   center: Point;
   radius: number;
   /** Radians. The arc runs from startAngle to endAngle; both map to real points via {@link arcPointAt}. */
@@ -93,8 +126,19 @@ export interface PointEntity {
    * by plugins (e.g. the load planner colours pallets by order).
    */
   fill?: string;
-  /** Draw the outline dashed rather than solid (construction / guide lines). */
-  dashed?: boolean;
+  /** Named linetype from the `linetypes` table (CONTINUOUS, DASHED, HIDDEN, CENTER, PHANTOM, DOT, DASHDOT, BORDER, DIVIDE, or a custom imported one — see linetypes.ts). Absent = BYLAYER: inherit the entity's layer's linetype, or CONTINUOUS if the layer has none either. */
+  linetype?: string;
+  /** Plot/display line weight in mm (the DXF standard set: 0, 0.05, 0.09, ... up to 2.11). Absent = BYLAYER, same inheritance as {@link linetype}. */
+  lineweight?: number;
+  /**
+   * A construction/guide entity: visible but excluded from export weight —
+   * BOM/measure/nest and similar tools treat it as a reference, not real
+   * geometry. Independent of {@link linetype} (before Z-04 this one boolean,
+   * `dashed`, meant both "draw dashed" and "is construction" at once; an old
+   * document's `dashed: true` migrates to `construction: true` +
+   * `linetype: "DASHED"`, see `tables.ts`'s v3→v4 migration).
+   */
+  construction?: boolean;
   p: Point;
 }
 
@@ -113,8 +157,19 @@ export interface PolylineEntity {
    * by plugins (e.g. the load planner colours pallets by order).
    */
   fill?: string;
-  /** Draw the outline dashed rather than solid (construction / guide lines). */
-  dashed?: boolean;
+  /** Named linetype from the `linetypes` table (CONTINUOUS, DASHED, HIDDEN, CENTER, PHANTOM, DOT, DASHDOT, BORDER, DIVIDE, or a custom imported one — see linetypes.ts). Absent = BYLAYER: inherit the entity's layer's linetype, or CONTINUOUS if the layer has none either. */
+  linetype?: string;
+  /** Plot/display line weight in mm (the DXF standard set: 0, 0.05, 0.09, ... up to 2.11). Absent = BYLAYER, same inheritance as {@link linetype}. */
+  lineweight?: number;
+  /**
+   * A construction/guide entity: visible but excluded from export weight —
+   * BOM/measure/nest and similar tools treat it as a reference, not real
+   * geometry. Independent of {@link linetype} (before Z-04 this one boolean,
+   * `dashed`, meant both "draw dashed" and "is construction" at once; an old
+   * document's `dashed: true` migrates to `construction: true` +
+   * `linetype: "DASHED"`, see `tables.ts`'s v3→v4 migration).
+   */
+  construction?: boolean;
   /** Ordered vertices. Does not repeat the first point when `closed`. */
   points: Point[];
   /**
@@ -145,7 +200,11 @@ export interface TextEntity {
   /** Ignored for text — present only so every entity shares one shape. */
   fill?: string;
   /** Ignored for text — present only so every entity shares one shape. */
-  dashed?: boolean;
+  linetype?: string;
+  /** Ignored for text — present only so every entity shares one shape. */
+  lineweight?: number;
+  /** Ignored for text — present only so every entity shares one shape. */
+  construction?: boolean;
   at: Point;
   text: string;
   height: number;
@@ -173,13 +232,35 @@ export interface ImageEntity {
   /** Ignored for image — present only so every entity shares one shape. */
   fill?: string;
   /** Ignored for image — present only so every entity shares one shape. */
-  dashed?: boolean;
+  linetype?: string;
+  /** Ignored for image — present only so every entity shares one shape. */
+  lineweight?: number;
+  /** Ignored for image — present only so every entity shares one shape. */
+  construction?: boolean;
   insert: Point;
   width: number;
   height: number;
   rotation: number;
   /** The image itself, as a `data:image/...;base64,...` URI. */
   dataUrl: string;
+}
+
+/**
+ * Z-04 migration: before this, one boolean (`dashed`) meant both "draw
+ * dashed" and "is a construction/guide entity" at once. An older document's
+ * `dashed: true` becomes both `construction: true` and `linetype: "DASHED"`
+ * (unless the entity already somehow has a `linetype`, which no old file
+ * could), so neither its look nor its export-exclusion changes; `dashed:
+ * false`/absent just has the dead field dropped. Idempotent — safe to run on
+ * an entity that never had `dashed` at all. Called once per entity in
+ * `document.ts`'s `fromJSON`.
+ */
+export function migrateDashedEntity<T extends Entity>(entity: T): T {
+  const raw = entity as unknown as Record<string, unknown>;
+  if (raw.dashed === undefined) return entity;
+  const { dashed, ...rest } = raw;
+  if (!dashed) return rest as unknown as T;
+  return { ...rest, construction: true, linetype: rest.linetype ?? "DASHED" } as unknown as T;
 }
 
 /** The layer an entity is drawn on, defaulting to "0" (DXF convention). */

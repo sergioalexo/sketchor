@@ -173,3 +173,32 @@ describe("X-04: colour", () => {
     expect(entitySection).not.toMatch(/\n420\n/);
   });
 });
+
+describe("X-04: linetype and lineweight", () => {
+  it("writes a handled LTYPE table entry and group 6 for a non-continuous linetype, and round-trips it", () => {
+    const e: LineEntity = { ...line(), linetype: "HIDDEN" };
+    const text = entitiesToDxf2018([e]);
+    expect(text).toMatch(/0\nLTYPE\n5\n[0-9A-F]+\n330\n[0-9A-F]+\n100\nAcDbSymbolTableRecord\n100\nAcDbLinetypeTableRecord\n2\nHIDDEN\n/);
+    const entitySection = text.slice(text.indexOf("0\nLINE"));
+    expect(entitySection).toContain("6\nHIDDEN\n");
+    const [back] = parseDxf(text).entities as LineEntity[];
+    expect(back.linetype).toBe("HIDDEN");
+  });
+
+  it("writes lineweight as hundredths of a millimetre (group 370) and round-trips it", () => {
+    const e: LineEntity = { ...line(), lineweight: 0.25 };
+    const text = entitiesToDxf2018([e]);
+    const entitySection = text.slice(text.indexOf("0\nLINE"));
+    expect(entitySection).toContain("370\n25\n");
+    const [back] = parseDxf(text).entities as LineEntity[];
+    expect(back.lineweight).toBeCloseTo(0.25, 9);
+  });
+
+  it("writes nothing (BYLAYER) for an entity with no explicit linetype/lineweight, but still declares CONTINUOUS", () => {
+    const text = entitiesToDxf2018([line()]);
+    const entitySection = text.slice(text.indexOf("0\nLINE"));
+    expect(entitySection).not.toMatch(/\n6\n/);
+    expect(entitySection).not.toMatch(/\n370\n/);
+    expect(text).toContain("2\nCONTINUOUS\n");
+  });
+});

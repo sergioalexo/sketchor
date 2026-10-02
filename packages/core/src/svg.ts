@@ -3,6 +3,7 @@ import { layerOf, newEntityId, polylineSegments } from "./entities";
 import type { Point } from "./geometry";
 import { arcPointAt, arcSweep, bulgeToArc, dist } from "./geometry";
 import { boundsOf } from "./dxf";
+import { builtinLinetype } from "./linetypes";
 import { kindTessellate } from "./kinds/registry";
 
 /**
@@ -117,7 +118,14 @@ export function entitiesToSvgDocument(entities: Entity[], opts: SvgExportOptions
     let out = "";
     if (e.color) out += ` stroke="${escapeXml(e.color)}"`;
     if (closed && "fill" in e && e.fill) out += ` fill="${escapeXml(e.fill)}" fill-opacity="${fmt(fillOpacity)}"`;
-    if ("dashed" in e && e.dashed) out += ` stroke-dasharray="${fmt(strokeWidth * 4)} ${fmt(strokeWidth * 3)}"`;
+    // Real mm dash lengths (Z-04): SVG coordinates are already in world (mm)
+    // units here, so the linetype's own pattern is the dasharray directly —
+    // no LTSCALE (this function has no document/settings to read one from,
+    // same limitation BYLAYER colour already has at this level).
+    if ("linetype" in e && e.linetype) {
+      const pattern = builtinLinetype(e.linetype).pattern;
+      if (pattern.length > 0) out += ` stroke-dasharray="${pattern.map((v) => fmt(Math.max(Math.abs(v), 0.1))).join(" ")}"`;
+    }
     return out;
   };
 

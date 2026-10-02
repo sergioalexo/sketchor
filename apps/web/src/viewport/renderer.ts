@@ -2,6 +2,7 @@ import type { Bounds, BoxSelectMode, CanvasTokens, ClosedRegion, Entity, EntityI
 import {
   arcPointAt,
   arcSweep,
+  builtinLinetype,
   bulgeToArc,
   DEFAULT_DARK,
   dist,
@@ -10,6 +11,8 @@ import {
   kindTessellate,
   layerOf,
   polylineSegments,
+  resolveLinetype,
+  screenDashPattern,
   transformed,
   translated,
 } from "@sketchor/core";
@@ -123,6 +126,7 @@ export function render(
 
   if (ui.closedRegions.length > 0) drawClosedRegions(ctx, view, ui.closedRegions);
 
+  const ltscale = doc.settings.ltscale ?? 1;
   for (const entity of doc.all()) {
     if (ui.hiddenLayers.has(layerOf(entity))) continue;
     const locked = ui.lockedLayers.has(layerOf(entity));
@@ -146,7 +150,7 @@ export function render(
     // A locked layer is background, not geometry you are working on.
     if (locked) ctx.globalAlpha = 0.45;
     if (shown.fill) drawHatch(ctx, view, shown, shown.fill);
-    drawEntity(ctx, view, shown, color, selected || isReference || isHovered ? 2 : 1.5);
+    drawEntity(ctx, view, shown, color, selected || isReference || isHovered ? 2 : 1.5, resolveLinetype(doc, entity), ltscale);
     if (selected) drawHandles(ctx, view, shown);
     ctx.globalAlpha = 1;
   }
@@ -685,6 +689,13 @@ function drawEntity(
   entity: Entity,
   color: string,
   lineWidth: number,
+  // Z-04: BYLAYER-resolved by the caller when it has a document to resolve
+  // against (the main loop); other callers (tool previews, grip previews,
+  // the measure overlay) draw transient, document-less entities and just
+  // fall back to the entity's own linetype — BYLAYER there would have
+  // nothing to resolve against anyway.
+  linetypeName: string | undefined = entity.linetype,
+  ltscale = 1,
 ): void {
   ctx.strokeStyle = color;
   ctx.lineWidth = lineWidth;
@@ -724,7 +735,10 @@ function drawEntity(
     return;
   }
 
-  ctx.setLineDash(entity.dashed || (entity.type === "line" && entity.infinite) ? [6, 4] : []);
+  // Infinite construction lines always draw dashed, regardless of linetype — they're a drawing aid, not real geometry.
+  ctx.setLineDash(
+    entity.type === "line" && entity.infinite ? [6, 4] : screenDashPattern(builtinLinetype(linetypeName).pattern, ltscale, view.scale),
+  );
   ctx.beginPath();
   if (entity.type === "line") {
     let a = worldToScreen(view, entity.a);

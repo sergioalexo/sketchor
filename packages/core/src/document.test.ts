@@ -55,6 +55,12 @@ describe("SketchDocument serialization", () => {
     expect(restored.groups()).toEqual([]);
     expect(restored.constraints()).toEqual([]);
   });
+
+  it("migrates a pre-Z-04 entity's dashed:true into construction:true + linetype:DASHED on load", () => {
+    const old = { ...line("e1"), dashed: true } as LineEntity;
+    const restored = SketchDocument.fromJSON({ entities: [old] });
+    expect(restored.get("e1")).toEqual({ ...line("e1"), construction: true, linetype: "DASHED" });
+  });
 });
 
 describe("SketchDocument.revision", () => {

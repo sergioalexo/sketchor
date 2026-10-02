@@ -1,6 +1,7 @@
 import type { Entity } from "../entities";
 import { layerOf, transformed } from "../entities";
 import { boundsOf } from "../dxf";
+import { CONTINUOUS, builtinLinetype } from "../linetypes";
 import { HandleAllocator } from "./handles";
 import { entityDxf2018 } from "./entities";
 import { n, pair } from "./write";
@@ -38,7 +39,6 @@ const STANDARD_HANDLES = [
   "appidTable",
   "dimstyleTable",
   "blockRecordTable",
-  "continuousLtype",
   "standardStyle",
   "acadAppid",
   "sketchorAppid",
@@ -61,14 +61,17 @@ interface Plan {
   alloc: HandleAllocator;
   h: Record<HandleKey, string>;
   layerHandles: Map<string, string>;
+  linetypeHandles: Map<string, string>;
 }
 
-function buildPlan(layers: string[]): Plan {
+function buildPlan(layers: string[], linetypes: readonly string[]): Plan {
   const alloc = new HandleAllocator();
   const h = {} as Record<HandleKey, string>;
   for (const key of STANDARD_HANDLES) h[key] = alloc.alloc();
   const layerHandles = new Map(layers.map((name) => [name, alloc.alloc()] as const));
-  return { alloc, h, layerHandles };
+  const ltypeNames = [CONTINUOUS, ...linetypes.filter((l) => l !== CONTINUOUS)];
+  const linetypeHandles = new Map(ltypeNames.map((name) => [name, alloc.alloc()] as const));
+  return { alloc, h, layerHandles, linetypeHandles };
 }
 
 function table(name: string, handle: string, entries: string[], extraHeader = ""): string {
@@ -83,10 +86,14 @@ function symbolRecordHead(type: string, handle: string, owner: string, subclass:
   return `0\n${type}\n5\n${handle}\n330\n${owner}\n100\nAcDbSymbolTableRecord\n100\n${subclass}\n`;
 }
 
-function ltypeEntry(h: string, owner: string): string {
+/** Z-04: an AC1032 `LTYPE` table entry for `name` — the same pattern data as R12's `ltypeEntry` (dxfExport.ts), just with a handle/owner/subclass marker instead of R12's bare groups. */
+function ltypeEntry(h: string, owner: string, name: string): string {
+  const def = builtinLinetype(name);
+  const total = def.pattern.reduce((a, b) => a + Math.abs(b), 0);
+  const elements = def.pattern.map((v) => pair(49, v)).join("");
   return (
     symbolRecordHead("LTYPE", h, owner, "AcDbLinetypeTableRecord") +
-    `2\nCONTINUOUS\n70\n0\n3\nSolid line\n72\n65\n73\n0\n40\n0.0\n`
+    `2\n${def.name}\n70\n0\n3\n${def.description}\n72\n65\n73\n${def.pattern.length}\n40\n${n(total)}\n${elements}`
   );
 }
 
@@ -152,12 +159,13 @@ function header(insUnits: number, bounds: { minX: number; minY: number; maxX: nu
 }
 
 function tablesSection(plan: Plan, layers: string[]): string {
-  const { h, layerHandles } = plan;
+  const { h, layerHandles, linetypeHandles } = plan;
   const layerEntries = layers.map((name) => layerEntry(layerHandles.get(name)!, h.layerTable, name));
+  const ltypeEntries = [...linetypeHandles].map(([name, handle]) => ltypeEntry(handle, h.ltypeTable, name));
   return (
     `0\nSECTION\n2\nTABLES\n` +
     table("VPORT", h.vportTable, []) +
-    table("LTYPE", h.ltypeTable, [ltypeEntry(h.continuousLtype, h.ltypeTable)]) +
+    table("LTYPE", h.ltypeTable, ltypeEntries) +
     table("LAYER", h.layerTable, layerEntries) +
     table("STYLE", h.styleTable, [styleEntry(h.standardStyle, h.styleTable)]) +
     table("VIEW", h.viewTable, []) +
@@ -239,9 +247,10 @@ export function entitiesToDxf2018(entities: Entity[], options: DxfWriteOptions20
   const scaled = scale !== 1 ? entities.map((e) => transformed(e, ORIGIN, 0, 0, 0, scale)) : entities;
   const layers = [...new Set(scaled.map((e) => layerOf(e)))];
   if (layers.length === 0) layers.push("0");
+  const linetypes = [...new Set(scaled.map((e) => e.linetype).filter((l): l is string => !!l))];
   const bounds = boundsOf(scaled) ?? { minX: 0, minY: 0, maxX: 0, maxY: 0 };
 
-  const plan = buildPlan(layers);
+  const plan = buildPlan(layers, linetypes);
 
   // Infinite construction lines are drawing aids, not geometry: they stay out of the file (same rule as R12).
   const exported = scaled.filter((e) => !(e.type === "line" && e.infinite));

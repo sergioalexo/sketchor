@@ -1,7 +1,7 @@
 import type { Command } from "./commands";
 import { SketchDocument } from "./document";
 import { boundsOf } from "./dxf";
-import { newEntityId, translated, type Entity, type EntityId } from "./entities";
+import { migrateDashedEntity, newEntityId, translated, type Entity, type EntityId } from "./entities";
 import type { Point } from "./geometry";
 import { newGroupId, type Group, type GroupId } from "./groups";
 import { parseCode, toCode, toEntity } from "./sketchtext";
@@ -58,7 +58,11 @@ export function parseClipboard(text: string): ClipboardPayload | null {
     try {
       const raw = JSON.parse(line.slice(MARK.length)) as Partial<ClipboardPayload>;
       if (Array.isArray(raw.entities)) {
-        return { entities: raw.entities.filter(isEntityLike), groups: Array.isArray(raw.groups) ? raw.groups.filter(isGroupLike) : [] };
+        // A clipboard payload copied before Z-04 may still carry the old `dashed` field.
+        return {
+          entities: raw.entities.filter(isEntityLike).map(migrateDashedEntity),
+          groups: Array.isArray(raw.groups) ? raw.groups.filter(isGroupLike) : [],
+        };
       }
     } catch {
       /* fall through to the code parser */
