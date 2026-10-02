@@ -3,6 +3,7 @@ import { imageCorners, newEntityId, polylineSegments, textCorners, transformed }
 import type { Point } from "./geometry";
 import { kindBounds, kindTessellate } from "./kinds/registry";
 import { arcExtentPoints, arcPointAt, arcSweep, bulgeToArc, dist } from "./geometry";
+import { aciToHex } from "./aci";
 
 /** Minimal XML text-content escape for the thumbnail SVG. */
 function escapeXml(s: string): string {
@@ -274,6 +275,30 @@ function sketchorXdataName(raw: RawEntity): string | undefined {
   if (i === -1) return undefined;
   const nameTag = raw.pairs.slice(i + 1).find((p) => p.code === 1000 || p.code === 1001);
   return nameTag?.code === 1000 ? nameTag.value : undefined;
+}
+
+/**
+ * X-04: an entity's own colour, if it declared one explicitly — true colour
+ * (group 420, a packed 0xRRGGBB int, AC1018+) over the indexed one (group
+ * 62) when both are present, since 420 is exact and 62 is only ever the
+ * writer's nearest-palette guess for readers that don't understand 420 (see
+ * `dxfw/entities.ts`). ACI 0 ("ByBlock") and 256 ("ByLayer", sometimes
+ * written negative for "layer off") aren't real colours — Sketchor has no
+ * per-layer colour to inherit from, so both read as "no explicit colour",
+ * same as the group being absent.
+ */
+function rawColor(raw: RawEntity): string | undefined {
+  const trueColor = raw.pairs.find((p) => p.code === 420);
+  if (trueColor) {
+    const n = parseInt(trueColor.value, 10);
+    if (Number.isFinite(n) && n >= 0) return `#${(n & 0xffffff).toString(16).padStart(6, "0")}`;
+  }
+  const aci = raw.pairs.find((p) => p.code === 62);
+  if (aci) {
+    const n = parseInt(aci.value, 10);
+    if (n >= 1 && n <= 255) return aciToHex(n);
+  }
+  return undefined;
 }
 
 function line(a: Point, b: Point, layer?: string): Entity {
@@ -762,12 +787,15 @@ function convertRecords(raws: RawEntity[], ctx: ConvertContext): Entity[] {
           warnings.push(`unsupported entity: ${raw.type}`);
         }
     }
-    // Restore a Sketchor-written name onto the one entity this record
-    // produced (ELLIPSE/SPLINE/INSERT can expand into several — a name
-    // wouldn't unambiguously belong to just one of them, so it's dropped there).
+    // Restore a Sketchor-written name, and the entity's own colour, onto the
+    // one entity this record produced (ELLIPSE/SPLINE/INSERT can expand into
+    // several — neither belongs unambiguously to just one of them, so both
+    // are dropped there, same as the name).
     if (entities.length === beforeCount + 1) {
       const name = sketchorXdataName(raw);
       if (name) entities[entities.length - 1].name = name;
+      const color = rawColor(raw);
+      if (color) entities[entities.length - 1].color = color;
     }
   }
 

@@ -650,3 +650,29 @@ describe("thumbnail SVG", () => {
     expect(svg).toContain("<circle ");
   });
 });
+
+describe("X-04: entity colour", () => {
+  it("reads an ACI colour (group 62) as its palette hex", () => {
+    const [e] = entitiesOf(entitiesOnly(rec("LINE", [[10, 0], [20, 0], [11, 1], [21, 1], [62, 1]]))) as LineEntity[];
+    expect(e.color).toBe("#ff0000"); // ACI 1 = red
+  });
+
+  it("prefers true colour (group 420) over the ACI fallback when both are present", () => {
+    const [e] = entitiesOf(
+      entitiesOnly(rec("LINE", [[10, 0], [20, 0], [11, 1], [21, 1], [62, 1], [420, 0x5b96ff]])),
+    ) as LineEntity[];
+    expect(e.color).toBe("#5b96ff");
+  });
+
+  it("leaves colour unset for BYLAYER (62) or BYBLOCK (0)", () => {
+    const [a] = entitiesOf(entitiesOnly(rec("LINE", [[10, 0], [20, 0], [11, 1], [21, 1], [62, 256]]))) as LineEntity[];
+    const [b] = entitiesOf(entitiesOnly(rec("LINE", [[10, 0], [20, 0], [11, 1], [21, 1], [62, 0]]))) as LineEntity[];
+    expect(a.color).toBeUndefined();
+    expect(b.color).toBeUndefined();
+  });
+
+  it("leaves colour unset when neither group is present", () => {
+    const [e] = entitiesOf(entitiesOnly(rec("LINE", [[10, 0], [20, 0], [11, 1], [21, 1]]))) as LineEntity[];
+    expect(e.color).toBeUndefined();
+  });
+});

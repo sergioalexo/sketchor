@@ -144,3 +144,32 @@ describe("round-trip through parseDxf", () => {
     expect(entitiesToDxf2018([], { insUnits: 0 })).not.toContain("$MEASUREMENT");
   });
 });
+
+describe("X-04: colour", () => {
+  it("writes only the ACI fallback (no redundant true colour) for an exact palette match", () => {
+    const e: LineEntity = { ...line(), color: "#ff0000" }; // ACI 1, exact
+    const text = entitiesToDxf2018([e]);
+    expect(text).toContain("\n62\n1\n");
+    expect(text).not.toContain("\n420\n");
+    const [back] = parseDxf(text).entities as LineEntity[];
+    expect(back.color).toBe("#ff0000");
+  });
+
+  it("writes both the ACI fallback and an exact true colour (420) for an arbitrary colour", () => {
+    const e: CircleEntity = { ...circle(), color: "#5b96ff" };
+    const text = entitiesToDxf2018([e]);
+    expect(text).toMatch(/\n62\n\d+\n/);
+    const trueColorInt = (0x5b << 16) | (0x96 << 8) | 0xff;
+    expect(text).toContain(`\n420\n${trueColorInt}\n`);
+    // Unlike R12, the AC1032 round trip is lossless: the parser prefers 420 over 62.
+    const [back] = parseDxf(text).entities as CircleEntity[];
+    expect(back.color).toBe("#5b96ff");
+  });
+
+  it("writes nothing (BYLAYER) for an entity with no explicit colour", () => {
+    const text = entitiesToDxf2018([line()]);
+    const entitySection = text.slice(text.indexOf("0\nLINE"));
+    expect(entitySection).not.toMatch(/\n62\n/);
+    expect(entitySection).not.toMatch(/\n420\n/);
+  });
+});

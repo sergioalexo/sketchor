@@ -2,16 +2,36 @@ import type { ArcEntity, CircleEntity, Entity, ImageEntity, LineEntity, PointEnt
 import { imageCorners, layerOf } from "../entities";
 import { dist } from "../geometry";
 import { kindTessellate } from "../kinds/registry";
+import { aciToHex, hexToRgb, nearestAci } from "../aci";
 import { n, pair } from "./write";
 
 const RAD_TO_DEG = 180 / Math.PI;
 
 /**
- * `5`/`330`/`100 AcDbEntity` + layer — the common head every AC1032 entity
- * record opens with, before its subclass-specific groups.
+ * X-04: color 62 (ACI, the nearest palette match — always written, so a
+ * reader that ignores true colour still gets *a* colour) plus true colour
+ * 420 (exact 0xRRGGBB) when the nearest ACI isn't already an exact match,
+ * so the common case (a CSS colour that happens to be one of the 256
+ * palette entries) doesn't carry a redundant group. R12 can't do this — no
+ * 420 — so its writer (`dxfExport.ts`) only ever has the ACI fallback.
  */
-function entityHead(handle: string, owner: string, layer: string): string {
-  return `5\n${handle}\n330\n${owner}\n100\nAcDbEntity\n8\n${layer}\n`;
+function colorGroups(e: Entity): string {
+  if (!e.color) return "";
+  const rgb = hexToRgb(e.color);
+  if (!rgb) return ""; // a named CSS colour or similar — ACI/true-colour have no representation for it
+  const aci = nearestAci(e.color);
+  const trueColorInt = (rgb[0] << 16) | (rgb[1] << 8) | rgb[2];
+  const aciIsExact = aciToHex(aci) === `#${trueColorInt.toString(16).padStart(6, "0")}`;
+  // 62 and 420 are integer groups — unlike pair()'s coordinates/radii, they must NOT get n()'s ".0" suffix.
+  return `62\n${aci}\n` + (aciIsExact ? "" : `420\n${trueColorInt}\n`);
+}
+
+/**
+ * `5`/`330`/`100 AcDbEntity` + layer + colour — the common head every
+ * AC1032 entity record opens with, before its subclass-specific groups.
+ */
+function entityHead(handle: string, owner: string, e: Entity): string {
+  return `5\n${handle}\n330\n${owner}\n100\nAcDbEntity\n8\n${layerOf(e)}\n${colorGroups(e)}`;
 }
 
 /**
@@ -28,7 +48,7 @@ function nameXdata(name: string | undefined): string {
 export function lineEntity2018(e: LineEntity, handle: string, owner: string): string {
   return (
     `0\nLINE\n` +
-    entityHead(handle, owner, layerOf(e)) +
+    entityHead(handle, owner, e) +
     `100\nAcDbLine\n` +
     pair(10, e.a.x) + pair(20, e.a.y) + pair(30, 0) +
     pair(11, e.b.x) + pair(21, e.b.y) + pair(31, 0) +
@@ -39,7 +59,7 @@ export function lineEntity2018(e: LineEntity, handle: string, owner: string): st
 export function circleEntity2018(e: CircleEntity, handle: string, owner: string): string {
   return (
     `0\nCIRCLE\n` +
-    entityHead(handle, owner, layerOf(e)) +
+    entityHead(handle, owner, e) +
     `100\nAcDbCircle\n` +
     pair(10, e.center.x) + pair(20, e.center.y) + pair(30, 0) +
     pair(40, e.radius) +
@@ -54,7 +74,7 @@ export function arcEntity2018(e: ArcEntity, handle: string, owner: string): stri
   const endDeg = (e.ccw ? e.endAngle : e.startAngle) * RAD_TO_DEG;
   return (
     `0\nARC\n` +
-    entityHead(handle, owner, layerOf(e)) +
+    entityHead(handle, owner, e) +
     `100\nAcDbCircle\n` +
     pair(10, e.center.x) + pair(20, e.center.y) + pair(30, 0) +
     pair(40, e.radius) +
@@ -67,7 +87,7 @@ export function arcEntity2018(e: ArcEntity, handle: string, owner: string): stri
 export function pointEntity2018(e: PointEntity, handle: string, owner: string): string {
   return (
     `0\nPOINT\n` +
-    entityHead(handle, owner, layerOf(e)) +
+    entityHead(handle, owner, e) +
     `100\nAcDbPoint\n` +
     pair(10, e.p.x) + pair(20, e.p.y) + pair(30, 0) +
     nameXdata(e.name)
@@ -81,7 +101,7 @@ export function polylineEntity2018(e: PolylineEntity, handle: string, owner: str
     .join("");
   return (
     `0\nLWPOLYLINE\n` +
-    entityHead(handle, owner, layerOf(e)) +
+    entityHead(handle, owner, e) +
     `100\nAcDbPolyline\n` +
     `90\n${e.points.length}\n` +
     `70\n${e.closed ? 1 : 0}\n` +
@@ -93,7 +113,7 @@ export function polylineEntity2018(e: PolylineEntity, handle: string, owner: str
 export function textEntity2018(e: TextEntity, handle: string, owner: string): string {
   return (
     `0\nTEXT\n` +
-    entityHead(handle, owner, layerOf(e)) +
+    entityHead(handle, owner, e) +
     `100\nAcDbText\n` +
     pair(10, e.at.x) + pair(20, e.at.y) + pair(30, 0) +
     pair(40, e.height) +
@@ -119,14 +139,14 @@ export function imageEntity2018(e: ImageEntity, handle: string, owner: string, n
   const verts = corners.map((p) => pair(10, p.x) + pair(20, p.y) + pair(42, 0)).join("");
   const box =
     `0\nLWPOLYLINE\n` +
-    entityHead(handle, owner, layerOf(e)) +
+    entityHead(handle, owner, e) +
     `100\nAcDbPolyline\n` +
     `90\n${corners.length}\n70\n1\n` +
     verts;
   const labelHeight = Math.min(e.width, e.height) * 0.08 || 1;
   const label =
     `0\nTEXT\n` +
-    entityHead(nextHandle(), owner, layerOf(e)) +
+    entityHead(nextHandle(), owner, e) +
     `100\nAcDbText\n` +
     pair(10, e.insert.x) + pair(20, e.insert.y) + pair(30, 0) +
     pair(40, labelHeight) +

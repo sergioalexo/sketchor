@@ -258,3 +258,30 @@ describe("insUnits and scale", () => {
     expect(back.bulges).toEqual([0.5, 0, -0.25]);
   });
 });
+
+describe("X-04: colour", () => {
+  it("writes an explicit colour as its nearest ACI (group 62) and round-trips it", () => {
+    const e: LineEntity = { ...line(), color: "#ff0000" }; // an exact ACI 1 match
+    const text = entitiesToDxf([e]);
+    expect(text).toContain("\n62\n1\n");
+    const [back] = parseDxf(text).entities as LineEntity[];
+    expect(back.color).toBe("#ff0000");
+  });
+
+  it("approximates an arbitrary colour to its nearest ACI (R12 has no true colour)", () => {
+    const e: CircleEntity = { ...circle(), color: "#5b96ff" };
+    const [back] = parseDxf(entitiesToDxf([e])).entities as CircleEntity[];
+    expect(back.color).toBeDefined();
+    expect(back.color).not.toBe("#5b96ff"); // lossy on purpose — R12 can't carry an exact true colour
+  });
+
+  it("writes nothing (BYLAYER) for an entity with no explicit colour", () => {
+    const text = entitiesToDxf([line()]);
+    // The LAYER table entry legitimately carries its own "62\n7\n" (every
+    // layer here is written as ACI 7) — scope the check to the entity body.
+    const entitySection = text.slice(text.indexOf("0\nLINE"));
+    expect(entitySection).not.toMatch(/\n62\n/);
+    const [back] = parseDxf(text).entities as LineEntity[];
+    expect(back.color).toBeUndefined();
+  });
+});

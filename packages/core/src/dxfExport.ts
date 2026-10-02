@@ -3,6 +3,7 @@ import { imageCorners, layerOf, transformed } from "./entities";
 import { dist } from "./geometry";
 import { boundsOf } from "./dxf";
 import { kindTessellate } from "./kinds/registry";
+import { nearestAci } from "./aci";
 
 const ORIGIN = { x: 0, y: 0 };
 
@@ -31,10 +32,23 @@ function layerTable(layers: string[]): string {
   return `0\nTABLE\n2\nLAYER\n70\n${layers.length}\n${rows}0\nENDTAB\n`;
 }
 
+/**
+ * X-04: color 62 (ACI) when the entity has an explicit colour, nothing
+ * otherwise (BYLAYER — every layer here is written as ACI 7, see
+ * `layerTable`). R12 predates true colour (group 420, AC1018+), so an
+ * arbitrary CSS colour can only travel as its nearest indexed match — see
+ * `dxfw/entities.ts`'s AC1032 writer for the lossless path.
+ */
+function colorGroup(e: Entity): string {
+  // Group 62 is an integer group — unlike pair()'s coordinates/radii it must NOT get n()'s ".0" suffix.
+  return e.color ? `62\n${nearestAci(e.color)}\n` : "";
+}
+
 function lineEntity(e: LineEntity): string {
   return (
     `0\nLINE\n` +
     pair(8, layerOf(e)) +
+    colorGroup(e) +
     pair(10, e.a.x) +
     pair(20, e.a.y) +
     pair(30, 0) +
@@ -48,6 +62,7 @@ function circleEntity(e: CircleEntity): string {
   return (
     `0\nCIRCLE\n` +
     pair(8, layerOf(e)) +
+    colorGroup(e) +
     pair(10, e.center.x) +
     pair(20, e.center.y) +
     pair(30, 0) +
@@ -65,6 +80,7 @@ function arcEntity(e: ArcEntity): string {
   return (
     `0\nARC\n` +
     pair(8, layerOf(e)) +
+    colorGroup(e) +
     pair(10, e.center.x) +
     pair(20, e.center.y) +
     pair(30, 0) +
@@ -75,7 +91,7 @@ function arcEntity(e: ArcEntity): string {
 }
 
 function pointEntity(e: PointEntity): string {
-  return `0\nPOINT\n` + pair(8, layerOf(e)) + pair(10, e.p.x) + pair(20, e.p.y) + pair(30, 0);
+  return `0\nPOINT\n` + pair(8, layerOf(e)) + colorGroup(e) + pair(10, e.p.x) + pair(20, e.p.y) + pair(30, 0);
 }
 
 /** As LWPOLYLINE (the inverse of dxf.ts's `lwpolylineVertices`/`emitPolylineWithBulges`). */
@@ -86,6 +102,7 @@ function polylineEntity(e: PolylineEntity): string {
   return (
     `0\nLWPOLYLINE\n` +
     pair(8, layerOf(e)) +
+    colorGroup(e) +
     `90\n${e.points.length}\n` +
     `70\n${e.closed ? 1 : 0}\n` +
     verts
@@ -96,6 +113,7 @@ function textEntity(e: TextEntity): string {
   return (
     `0\nTEXT\n` +
     pair(8, layerOf(e)) +
+    colorGroup(e) +
     pair(10, e.at.x) +
     pair(20, e.at.y) +
     pair(30, 0) +
