@@ -3,7 +3,8 @@ import { describe, expect, it } from "vitest";
 import "./kinds/builtin";
 import { entitiesToSvgDocument, parseSvgText } from "./svg";
 import { boundsOf } from "./dxf";
-import type { ArcEntity, CircleEntity, EllipseEntity, Entity, LineEntity, PointEntity, PolylineEntity } from "./entities";
+import type { ArcEntity, CircleEntity, EllipseEntity, Entity, LineEntity, PointEntity, PolylineEntity, SplineEntity } from "./entities";
+import { nurbsDomain, nurbsPointAt } from "./nurbs";
 import type { Point } from "./geometry";
 
 /**
@@ -276,44 +277,67 @@ describe("parseSvgText: paths", () => {
     expect(path("M0 0 L10 0 L10 10 L0 10").entities).toHaveLength(1);
   });
 
-  it("flattens a cubic Bézier onto the true curve instead of dropping it", () => {
-    // Quarter circle of radius 10 about (10, 0) as a cubic (k = 0.5523).
+  const spline = (d: string) => path(d).entities[0] as SplineEntity;
+
+  it("imports a cubic Bézier as one exact cubic spline instead of flattening it", () => {
     const result = path("M0 0 C0 5.5228 4.4772 10 10 10");
-    const e = result.entities[0] as PolylineEntity;
-    expect(e.points.length).toBeGreaterThan(8);
-    closeTo(e.points[0], 0, 0);
-    closeTo(e.points[e.points.length - 1], 10, -10);
-    for (const p of e.points) expect(Math.hypot(p.x - 10, p.y - 0)).toBeCloseTo(10, 1);
+    expect(result.entities).toHaveLength(1);
+    const e = result.entities[0] as SplineEntity;
+    expect(e.type).toBe("spline");
+    expect(e.degree).toBe(3);
+    expect(e.controlPoints).toHaveLength(4);
+    closeTo(e.controlPoints[0], 0, 0);
+    closeTo(e.controlPoints[3], 10, -10);
+    // Quarter circle of radius 10 about (10, 0): the true curve stays on it.
+    const [lo, hi] = nurbsDomain(e);
+    for (let i = 0; i <= 20; i++) {
+      const p = nurbsPointAt(e, lo + ((hi - lo) * i) / 20);
+      expect(Math.hypot(p.x - 10, p.y - 0)).toBeCloseTo(10, 1);
+    }
     expect(result.warnings).toEqual([]);
   });
 
   it("elevates a quadratic exactly", () => {
-    const q = first("M0 0 Q5 10 10 0");
+    const q = spline("M0 0 Q5 10 10 0");
+    expect(q.degree).toBe(3);
+    const [lo, hi] = nurbsDomain(q);
     // The parabola's apex is at t=.5: y = 5 in SVG, -5 in world.
-    expect(q.points.reduce((m, p) => Math.min(m, p.y), 0)).toBeCloseTo(-5, 2);
-    closeTo(q.points[q.points.length - 1], 10, 0);
+    closeTo(nurbsPointAt(q, (lo + hi) / 2), 5, -5);
+    closeTo(q.controlPoints[3], 10, 0);
+  });
+
+  it("chains curve segments into one spline with triple interior knots", () => {
+    const e = spline("M0 0 C0 5 5 10 10 10 C15 10 20 5 20 0");
+    expect(e.controlPoints).toHaveLength(7);
+    expect(e.knots).toEqual([0, 0, 0, 0, 1, 1, 1, 2, 2, 2, 2]);
   });
 
   it("reflects the previous control point for S after C and for T after Q", () => {
-    expect(first("M0 0 C0 10 10 10 10 0 S20 -10 20 0").points).toEqual(first("M0 0 C0 10 10 10 10 0 C10 -10 20 -10 20 0").points);
-    expect(first("M0 0 Q5 10 10 0 T20 0").points).toEqual(first("M0 0 Q5 10 10 0 Q15 -10 20 0").points);
+    expect(spline("M0 0 C0 10 10 10 10 0 S20 -10 20 0").controlPoints).toEqual(spline("M0 0 C0 10 10 10 10 0 C10 -10 20 -10 20 0").controlPoints);
+    expect(spline("M0 0 Q5 10 10 0 T20 0").controlPoints).toEqual(spline("M0 0 Q5 10 10 0 Q15 -10 20 0").controlPoints);
   });
 
   it("S with no preceding cubic uses the current point as its first control point", () => {
-    expect(first("M0 0 S10 10 20 0").points).toEqual(first("M0 0 C0 0 10 10 20 0").points);
+    expect(spline("M0 0 S10 10 20 0").controlPoints).toEqual(spline("M0 0 C0 0 10 10 20 0").controlPoints);
   });
 
   it("reads relative curve commands and implicitly repeated curve arguments", () => {
-    const abs = first("M0 0 C0 5 5 10 10 10 C15 10 20 5 20 0").points;
-    expect(first("M0 0 c0 5 5 10 10 10 c5 0 10 -5 10 -10").points).toEqual(abs);
-    expect(first("M0 0 C0 5 5 10 10 10 15 10 20 5 20 0").points).toEqual(abs);
+    const abs = spline("M0 0 C0 5 5 10 10 10 C15 10 20 5 20 0").controlPoints;
+    expect(spline("M0 0 c0 5 5 10 10 10 c5 0 10 -5 10 -10").controlPoints).toEqual(abs);
+    expect(spline("M0 0 C0 5 5 10 10 10 15 10 20 5 20 0").controlPoints).toEqual(abs);
   });
 
-  it("flattens to a tolerance in world units, so a scaled-up curve gets more points", () => {
-    const d = "M0 0 C0 10 10 10 10 0";
-    const small = parseSvgText(svgOf(`<path d="${d}"/>`)).entities[0] as PolylineEntity;
-    const big = parseSvgText(svgOf(`<g transform="scale(100)"><path d="${d}"/></g>`)).entities[0] as PolylineEntity;
-    expect(big.points.length).toBeGreaterThan(small.points.length);
+  it("applies an element transform to the control points, so scaling needs no re-flattening", () => {
+    const big = parseSvgText(svgOf(`<g transform="scale(100)"><path d="M0 0 C0 10 10 10 10 0"/></g>`)).entities[0] as SplineEntity;
+    expect(big.type).toBe("spline");
+    expect(big.controlPoints).toHaveLength(4);
+    expect(Math.abs(big.controlPoints[3].x - big.controlPoints[0].x)).toBeGreaterThan(100);
+  });
+
+  it("a subpath mixing lines and curves is emitted as exact runs, in order", () => {
+    const { entities } = path("M0 0 L10 0 C15 0 20 5 20 10 L20 20");
+    expect(entities.map((e) => e.type)).toEqual(["polyline", "spline", "polyline"]);
+    closeTo((entities[1] as SplineEntity).controlPoints[0], 10, 0);
   });
 
   it("parses compact number forms: 1.5.5 is two numbers, -.5e-3 is one", () => {
@@ -327,7 +351,10 @@ describe("parseSvgText: paths", () => {
   });
 
   it("closes a curved shape with Z", () => {
-    expect(first("M0 0 C0 10 10 10 10 0 Z").closed).toBe(true);
+    const e = spline("M0 0 C0 10 10 10 10 0 Z");
+    expect(e.closed).toBe(true);
+    const [, hi] = nurbsDomain(e);
+    closeTo(nurbsPointAt(e, hi), 0, 0);
   });
 
   it("tessellates an elliptical arc, honouring the sweep flag", () => {

@@ -344,9 +344,6 @@ function arcEndpointToCenter(
   return { cx, cy, rx, ry, theta1, dtheta, phi };
 }
 
-/** Flatness (world units, mm) Béziers are flattened to — tighter than any drawing tolerance in use. */
-const CURVE_TOLERANCE = 0.01;
-
 /**
  * Reads a path's `d` string one token at a time. A regex split can't do this
  * right: `1.5.5` is two numbers, `-.5e-3` is one, and an arc's two flags are
@@ -404,8 +401,8 @@ const PATH_ARGS: Record<string, number> = { M: 2, L: 2, H: 1, V: 1, Z: 0, C: 6, 
 /**
  * Parses an SVG path `d` attribute. M/L/H/V/Z and elliptical arcs (A) are
  * exact (arcs tessellated); C/S/Q/T Béziers, with S/T reflecting the previous
- * control point, are flattened to `CURVE_TOLERANCE` so no geometry is lost
- * (they become splines once C-02 lands). A malformed or unknown command adds
+ * control point, become real cubic splines — a quadratic is degree-elevated,
+ * which is exact. A malformed or unknown command adds
  * a warning and skips only that command, never the rest of the path.
  */
 function parsePathD(d: string, m: Mat, layer: string | undefined, out: Entity[], warn: (msg: string) => void): void {
@@ -419,35 +416,55 @@ function parsePathD(d: string, m: Mat, layer: string | undefined, out: Entity[],
   let lastQuad: Point | null = null;
 
   // Each subpath (a run between M commands, or split by Z) becomes ONE
-  // polyline entity — not one line entity per segment — so the whole shape
-  // stays selectable as a single thing.
-  let subpath: Point[] = [];
+  // entity when it can: a polyline for lines/arcs, a spline (cubic Béziers
+  // chained with triple knots — exact, no flattening) when it is all curves.
+  // A subpath mixing both is emitted as its runs, in order, each exact.
+  type Piece = { kind: "poly"; points: Point[] } | { kind: "bez"; points: Point[] };
+  let pieces: Piece[] = [];
   let subpathClosed = false;
   const toWorld = (p: Point): Point => fromSvgPoint(applyMat(m, p.x, p.y));
+  /** The piece of `kind` being built, started at the current point when the kind changes. */
+  const piece = (kind: Piece["kind"]): Piece => {
+    const last = pieces[pieces.length - 1];
+    if (last && last.kind === kind) return last;
+    const fresh: Piece = { kind, points: [toWorld(cur)] };
+    pieces.push(fresh);
+    return fresh;
+  };
   const flush = () => {
-    if (subpath.length >= 2) {
-      const closed = subpathClosed && dist(subpath[0], subpath[subpath.length - 1]) < 1e-9;
-      // A Z repeats the start point, and most exporters (ours included) also
-      // write an explicit line back to it first — so drop *every* trailing
-      // duplicate, not just one, or the shape keeps a zero-length segment.
-      const points = subpath.slice();
-      while (closed && points.length > 1 && dist(points[0], points[points.length - 1]) < 1e-9) points.pop();
-      if (points.length >= 2) {
-        out.push({ id: newEntityId(), type: "polyline", ...(layer ? { layer } : {}), points, closed });
+    const done = pieces;
+    pieces = [];
+    const wasClosed = subpathClosed;
+    subpathClosed = false;
+    for (const pc of done) {
+      if (pc.kind === "poly") {
+        if (pc.points.length < 2) continue;
+        const points = pc.points.slice();
+        const closed = done.length === 1 && wasClosed && dist(points[0], points[points.length - 1]) < 1e-9;
+        // A Z repeats the start point, and most exporters (ours included) also
+        // write an explicit line back to it first — so drop *every* trailing
+        // duplicate, not just one, or the shape keeps a zero-length segment.
+        while (closed && points.length > 1 && dist(points[0], points[points.length - 1]) < 1e-9) points.pop();
+        if (points.length >= 2) out.push({ id: newEntityId(), type: "polyline", ...(layer ? { layer } : {}), points, closed });
+      } else {
+        const n = (pc.points.length - 1) / 3;
+        const degenerate = pc.points.every((p) => dist(p, pc.points[0]) < 1e-9);
+        if (n < 1 || degenerate) continue;
+        const knots = [0, 0, 0, 0];
+        for (let k = 1; k < n; k++) knots.push(k, k, k);
+        knots.push(n, n, n, n);
+        const closed = done.length === 1 && wasClosed && dist(pc.points[0], pc.points[pc.points.length - 1]) < 1e-9;
+        out.push({ id: newEntityId(), type: "spline", ...(layer ? { layer } : {}), degree: 3, controlPoints: pc.points, knots, closed });
       }
     }
-    subpath = [];
-    subpathClosed = false;
   };
   const line = (to: Point) => {
-    if (subpath.length === 0) subpath.push(toWorld(cur));
-    subpath.push(toWorld(to));
+    piece("poly").points.push(toWorld(to));
     cur = to;
   };
-  /** Flattens a cubic (quadratics are elevated to one) in world space and appends the points. */
+  /** Appends one cubic segment (quadratics are elevated to one) to the running spline. */
   const cubic = (p1: Point, p2: Point, p3: Point) => {
-    if (subpath.length === 0) subpath.push(toWorld(cur));
-    flattenCubic(toWorld(cur), toWorld(p1), toWorld(p2), toWorld(p3), CURVE_TOLERANCE, subpath);
+    piece("bez").points.push(toWorld(p1), toWorld(p2), toWorld(p3));
     cur = p3;
   };
 
@@ -505,10 +522,16 @@ function parsePathD(d: string, m: Mat, layer: string | undefined, out: Entity[],
       case "V":
         line({ x: cur.x, y: oy + args[0] });
         break;
-      case "Z":
+      case "Z": {
         subpathClosed = true;
-        line(start);
+        const last = pieces[pieces.length - 1];
+        if (last?.kind === "bez" && dist(cur, start) > 1e-9) {
+          // Close a curve run with its own straight cubic, so a closed curve stays one spline.
+          const third = (a: Point, b: Point, t: number): Point => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+          cubic(third(cur, start, 1 / 3), third(cur, start, 2 / 3), start);
+        } else line(start);
         break;
+      }
       case "C": {
         const p2 = { x: ox + args[2], y: oy + args[3] };
         cubic({ x: ox + args[0], y: oy + args[1] }, p2, { x: ox + args[4], y: oy + args[5] });
@@ -561,31 +584,6 @@ function parsePathD(d: string, m: Mat, layer: string | undefined, out: Entity[],
     }
   }
   flush();
-}
-
-/**
- * Appends the flattened cubic (excluding its start point, which the caller
- * already has) to `pts`. Recursive de Casteljau subdivision until both
- * control points lie within `tol` of the chord; depth-capped so a NaN or
- * enormous curve can't recurse forever.
- */
-function flattenCubic(p0: Point, p1: Point, p2: Point, p3: Point, tol: number, pts: Point[], depth = 0): void {
-  const chord = dist(p0, p3);
-  const off = (p: Point): number =>
-    chord < 1e-12 ? dist(p, p0) : Math.abs((p3.x - p0.x) * (p0.y - p.y) - (p0.x - p.x) * (p3.y - p0.y)) / chord;
-  if (depth >= 16 || (off(p1) <= tol && off(p2) <= tol)) {
-    pts.push(p3);
-    return;
-  }
-  const mid = (a: Point, b: Point): Point => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
-  const p01 = mid(p0, p1);
-  const p12 = mid(p1, p2);
-  const p23 = mid(p2, p3);
-  const p012 = mid(p01, p12);
-  const p123 = mid(p12, p23);
-  const m = mid(p012, p123);
-  flattenCubic(p0, p01, p012, m, tol, pts, depth + 1);
-  flattenCubic(m, p123, p23, p3, tol, pts, depth + 1);
 }
 
 /** mm in one CSS pixel — what an SVG user unit is when the file gives no physical size. */
@@ -684,7 +682,7 @@ export interface SvgImportResult {
 
 /**
  * Parses SVG into entities: line/circle/ellipse/rect/polyline/polygon
- * exactly, paths incl. Béziers (arcs and curves flattened).
+ * exactly, paths incl. Béziers (as splines; arcs flattened).
  * Coordinates come back in mm: the root `width`/`height`/`viewBox` give the
  * real size when they name one, else 96 dpi is assumed (see {@link SvgUnits}).
  * Uses the browser's DOMParser (this module's one browser-API dependency).
