@@ -127,6 +127,8 @@ interface ThemeState {
   setPair: (pair: Partial<SystemPair>) => void;
   /** Shows `setting` live without choosing it; `null` snaps back to the chosen theme. */
   preview: (setting: ThemeSetting | null) => void;
+  /** Shows an unsaved token set live (the theme editor); `null` snaps back to the chosen theme. */
+  previewTokens: (tokens: ThemeTokens | null) => void;
 }
 
 function computeAndApply(setting: ThemeSetting, pair: SystemPair): { resolved: ThemeMode; tokens: ThemeTokens } {
@@ -159,6 +161,15 @@ export const useTheme = create<ThemeState>((set, get) => ({
   preview: (setting) => {
     const { setting: chosen, pair } = get();
     set({ previewing: setting, ...computeAndApply(setting ?? chosen, pair) });
+  },
+  previewTokens: (tokens) => {
+    if (!tokens) {
+      const { setting, pair } = get();
+      set({ previewing: null, ...computeAndApply(setting, pair) });
+      return;
+    }
+    applyTheme(tokens);
+    set({ tokens });
   },
 }));
 

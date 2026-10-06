@@ -54,3 +54,5 @@ export * from "./ellipse";
 export * from "./nurbs";
 export * from "./spline";
 export * from "./filletCurves";
+export * from "./contrast";
+export * from "./themeAuthoring";

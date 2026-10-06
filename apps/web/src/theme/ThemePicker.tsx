@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { BUILTIN_THEMES, DEFAULT_DARK, DEFAULT_LIGHT, resolveTheme, type ThemeTokens } from "@sketchor/core";
 import { listInstalledThemes, onThemesChange } from "./installedThemes";
+import { ThemeEditor } from "./ThemeEditor";
 import { useTheme, type ThemeSetting } from "./themeStore";
 
 /**
@@ -81,6 +82,7 @@ export function ThemePicker({ onClose }: { onClose: () => void }) {
   const setSetting = useTheme((s) => s.setSetting);
   const setPair = useTheme((s) => s.setPair);
   const preview = useTheme((s) => s.preview);
+  const [editing, setEditing] = useState(false);
 
   // However the picker closes, a hover preview must not stay applied.
   useEffect(() => () => useTheme.getState().preview(null), []);
@@ -89,6 +91,8 @@ export function ThemePicker({ onClose }: { onClose: () => void }) {
     setSetting(next);
     onClose();
   };
+
+  if (editing) return <ThemeEditor onClose={onClose} />;
 
   return (
     <div className="theme-picker" data-testid="theme-menu" onMouseLeave={() => preview(null)}>
@@ -127,6 +131,9 @@ export function ThemePicker({ onClose }: { onClose: () => void }) {
           <span className="theme-card-title">Follow system</span>
         </button>
       </div>
+      <button className="btn ghost theme-customize" data-testid="theme-customize" onClick={() => setEditing(true)}>
+        Customize current theme…
+      </button>
       <div className="theme-pair" data-testid="theme-pair">
         {(["dark", "light"] as const).map((mode) => (
           <label key={mode}>
