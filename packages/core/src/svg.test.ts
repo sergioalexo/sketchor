@@ -33,6 +33,7 @@ const pointsOf = (e: Entity): Point[] => {
   if (e.type === "circle") return [e.center];
   if (e.type === "text") return [e.at];
   if (e.type === "image") return [e.insert];
+  if (e.type === "spline") return e.controlPoints;
   return [e.center];
 };
 

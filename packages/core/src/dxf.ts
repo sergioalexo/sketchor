@@ -1,10 +1,11 @@
-import type { Entity } from "./entities";
+import type { Entity, SplineEntity } from "./entities";
 import { imageCorners, newEntityId, polylineSegments, textCorners, transformed } from "./entities";
 import type { Point } from "./geometry";
 import { kindBounds, kindTessellate } from "./kinds/registry";
 import { arcExtentPoints, arcPointAt, arcSweep, bulgeToArc, dist } from "./geometry";
 import { aciToHex } from "./aci";
 import { transformEllipse } from "./ellipse";
+import { clampedUniformKnots as clampedKnots, interpolateNurbs, isValidNurbs, type NurbsData } from "./nurbs";
 import { unescapeDxfText } from "./dxfText";
 
 /** Minimal XML text-content escape for the thumbnail SVG. */
@@ -481,6 +482,37 @@ function deBoorPoint(degree: number, knots: number[], weighted: HomogeneousPoint
   return res.w !== 0 ? { x: res.x / res.w, y: res.y / res.w } : { x: res.x, y: res.y };
 }
 
+/** A DXF SPLINE as a spline entity's data: control points when they are valid, else its fit points interpolated. */
+function splineFromRaw(raw: RawEntity): Omit<SplineEntity, "id" | "type" | "layer"> | null {
+  const flags = Math.round(num(raw, 70, 0));
+  const xs = allNums(raw, 10);
+  const ys = allNums(raw, 20);
+  const count = Math.min(xs.length, ys.length);
+  const fx = allNums(raw, 11);
+  const fy = allNums(raw, 21);
+  const fit = Array.from({ length: Math.min(fx.length, fy.length) }, (_, i) => ({ x: fx[i], y: fy[i] }));
+  const closed = (flags & 3) !== 0;
+  // Degree 3 with two control points is impossible; it degrades to what the points support (a line).
+  const degree = Math.max(1, Math.min(11, count - 1, Math.round(num(raw, 71, 3))));
+  const controlPoints = Array.from({ length: count }, (_, i) => ({ x: xs[i], y: ys[i] }));
+  const knots = allNums(raw, 40);
+  const weights = allNums(raw, 41);
+  const candidate: NurbsData = {
+    degree,
+    controlPoints,
+    knots: knots.length === count + degree + 1 ? knots : clampedKnots(count, degree),
+    ...(weights.length === count ? { weights } : {}),
+  };
+  if (count >= degree + 1 && isValidNurbs(candidate)) {
+    return { ...candidate, ...(fit.length >= 2 ? { fitPoints: fit } : {}), closed };
+  }
+  if (fit.length >= 2) {
+    const fitted = interpolateNurbs(fit, degree);
+    if (fitted) return { ...fitted, fitPoints: fit, closed };
+  }
+  return null;
+}
+
 /** Tessellates a DXF SPLINE (control points, degree, knots, optional weights) to a polyline. */
 function splinePoints(raw: RawEntity): Point[] {
   const xs = allNums(raw, 10);
@@ -624,6 +656,13 @@ function placeEntity(
       const g = transformEllipse(entity, [a, b, c, d, insertion.x - (a * base.x + c * base.y), insertion.y - (b * base.x + d * base.y)]);
       return g ? { ...entity, ...g, id } : { ...entity, id };
     }
+    case "spline":
+      return {
+        ...entity,
+        id,
+        controlPoints: entity.controlPoints.map(map),
+        ...(entity.fitPoints ? { fitPoints: entity.fitPoints.map(map) } : {}),
+      };
     case "text":
       return { ...entity, id, at: map(entity.at), height: entity.height * radiusScale, rotation: entity.rotation + rotation };
     case "image":
@@ -732,7 +771,10 @@ function convertRecords(raws: RawEntity[], ctx: ConvertContext): Entity[] {
         break;
       }
       case "SPLINE": {
-        polyline(splinePoints(raw), entities, layer);
+        // A real spline (C-03); only a curve with no usable control or fit data falls back to the old polyline.
+        const spline = splineFromRaw(raw);
+        if (spline) entities.push({ id: newEntityId(), type: "spline", layer, ...spline });
+        else polyline(splinePoints(raw), entities, layer);
         break;
       }
       case "TEXT":

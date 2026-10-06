@@ -1,10 +1,11 @@
-import type { ArcEntity, CircleEntity, EllipseEntity, Entity, ImageEntity, LineEntity, PolylineEntity } from "./entities";
+import type { ArcEntity, CircleEntity, EllipseEntity, Entity, SplineEntity, ImageEntity, LineEntity, PolylineEntity } from "./entities";
 import { layerOf, newEntityId, polylineSegments } from "./entities";
 import type { Point } from "./geometry";
 import { arcPointAt, arcSweep, bulgeToArc, dist } from "./geometry";
 import { boundsOf } from "./dxf";
 import { builtinLinetype } from "./linetypes";
 import { kindTessellate } from "./kinds/registry";
+import { bezierPieces, tessellateNurbs } from "./nurbs";
 import { ellipsePointAt, ellipseSweep, isFullEllipse, transformEllipse } from "./ellipse";
 
 /**
@@ -57,6 +58,22 @@ function arcPathD(e: ArcEntity, toSvg: (p: Point) => Point): string {
     pts.push(`${i === 0 ? "M" : "L"}${fmt(p.x)} ${fmt(p.y)}`);
   }
   return pts.join(" ");
+}
+
+/** A spline as exact Béziers (`C` for cubic, `Q` quadratic, `L` linear) when it is clamped and not rational, else its tessellation. */
+function splinePathD(e: SplineEntity, toSvg: (p: Point) => Point): string {
+  const pieces = !e.weights || e.weights.every((w) => w === 1) ? bezierPieces(e) : null;
+  const f = (p: Point): string => {
+    const q = toSvg(p);
+    return `${fmt(q.x)} ${fmt(q.y)}`;
+  };
+  if (pieces && e.degree <= 3) {
+    const cmd = e.degree === 3 ? "C" : e.degree === 2 ? "Q" : "L";
+    const d = [`M${f(pieces[0].points[0])}`];
+    for (const pc of pieces) d.push(`${cmd}${pc.points.slice(1).map(f).join(" ")}`);
+    return d.join(" ");
+  }
+  return tessellateNurbs(e, 0.01).map((p, i) => `${i === 0 ? "M" : "L"}${f(p)}`).join(" ");
 }
 
 /** A full ellipse as `<ellipse>` (rotated about its centre), an elliptical arc as a path with an `A` command — both exact. */
@@ -133,7 +150,7 @@ export function entitiesToSvgDocument(entities: Entity[], opts: SvgExportOptions
   // stroke, and `fill` (closed shapes only) a low-opacity fill so the geometry
   // still reads through it.
   const paint = (e: Entity): string => {
-    const closed = e.type === "circle" || (e.type === "ellipse" && isFullEllipse(e)) || (e.type === "polyline" && e.closed);
+    const closed = e.type === "circle" || (e.type === "spline" && e.closed) || (e.type === "ellipse" && isFullEllipse(e)) || (e.type === "polyline" && e.closed);
     let out = "";
     if (e.color) out += ` stroke="${escapeXml(e.color)}"`;
     if (closed && "fill" in e && e.fill) out += ` fill="${escapeXml(e.fill)}" fill-opacity="${fmt(fillOpacity)}"`;
@@ -186,6 +203,8 @@ export function entitiesToSvgDocument(entities: Entity[], opts: SvgExportOptions
         );
       } else if (e.type === "ellipse") {
         body.push(ellipseSvg(e, toSvg, paint(e)));
+      } else if (e.type === "spline") {
+        body.push(`<path d="${splinePathD(e, toSvg)}${e.closed ? " Z" : ""}"${paint(e)}/>`);
       } else if (e.type === "polyline") {
         body.push(`<path d="${polylinePathD(e, toSvg)}"${paint(e)}/>`);
       } else {

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Command, Entity, PolylineEntity } from "@sketchor/core";
-import { arcPointAt, arcSweep, bulgeToArc, BUILTIN_LINETYPES, dist, ellipseSweep, findClosedRegions, isFullEllipse, layerOf, polylineLength } from "@sketchor/core";
+import { arcPointAt, arcSweep, bulgeToArc, BUILTIN_LINETYPES, dist, ellipseSweep, nurbsDomain, nurbsPointAt, findClosedRegions, isFullEllipse, layerOf, polylineLength } from "@sketchor/core";
 import { bus, doc, useApp } from "../state/store";
 import { parseLength } from "../tools/typedInput";
 import { factorFromMm, formatArea, formatLength, type DisplayUnit } from "../units";
@@ -238,6 +238,23 @@ function Geometry({ entity, unit }: { entity: Entity; unit: DisplayUnit }) {
               <ReadRow label="Sweep" value={`${round(deg(ellipseSweep(entity)))}°`} />
             </>
           )}
+        </Section>
+      );
+    }
+    case "spline": {
+      const [lo, hi] = nurbsDomain(entity);
+      const rational = entity.weights?.some((w) => w !== 1) ?? false;
+      return (
+        <Section title="Spline">
+          <ReadRow label="Degree" value={String(entity.degree)} />
+          <ReadRow label="Control points" value={String(entity.controlPoints.length)} />
+          <ReadRow label="Fit points" value={entity.fitPoints ? String(entity.fitPoints.length) : "none (edited by control points)"} />
+          <ReadRow label="Kind" value={rational ? "rational (NURBS)" : "non-rational"} />
+          <ReadRow label="Start point" value={fmtPoint(nurbsPointAt(entity, lo), unit)} />
+          <ReadRow label="End point" value={fmtPoint(nurbsPointAt(entity, hi), unit)} />
+          <Row label="Closed">
+            <input type="checkbox" checked={entity.closed} data-testid="prop-closed" onChange={(e) => update({ ...entity, closed: e.target.checked })} />
+          </Row>
         </Section>
       );
     }

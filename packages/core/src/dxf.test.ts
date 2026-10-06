@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import "./kinds/builtin";
 import { boundsOf, dxfToSvg, entitiesToSvg, parseDxf, type DxfParseOptions } from "./dxf";
 import { ellipsePointAt, isFullEllipse } from "./ellipse";
-import type { ArcEntity, CircleEntity, EllipseEntity, Entity, LineEntity, PointEntity, PolylineEntity, TextEntity } from "./entities";
+import { distToNurbs, nurbsDomain, nurbsPointAt } from "./nurbs";
+import type { ArcEntity, CircleEntity, EllipseEntity, Entity, SplineEntity, LineEntity, PointEntity, PolylineEntity, TextEntity } from "./entities";
 
 /**
  * The DXF importer — the widest surface in the codebase and the one fed by
@@ -203,12 +204,20 @@ describe("ELLIPSE", () => {
 describe("SPLINE", () => {
   const ctrl = (pts: [number, number][]): Pair[] => pts.flatMap(([x, y]) => [[10, x], [20, y]] as Pair[]);
 
-  it("interpolates the first and last control points of a clamped curve", () => {
-    const text = entitiesOnly(rec("SPLINE", [[71, 3], ...ctrl([[0, 0], [10, 20], [30, 20], [40, 0]])]));
-    const [e] = entitiesOf(text) as PolylineEntity[];
-    expect(e.type).toBe("polyline");
-    closeTo(e.points[0], 0, 0, 6);
-    closeTo(e.points[e.points.length - 1], 40, 0, 6);
+  const asSpline = (text: string) => entitiesOf(text)[0] as SplineEntity;
+  const pts = (e: SplineEntity, n = 200) => {
+    const [lo, hi] = nurbsDomain(e);
+    return Array.from({ length: n + 1 }, (_, i) => nurbsPointAt(e, lo + ((hi - lo) * i) / n));
+  };
+
+  it("imports as one real spline that starts and ends on the end control points", () => {
+    const e = asSpline(entitiesOnly(rec("SPLINE", [[71, 3], ...ctrl([[0, 0], [10, 20], [30, 20], [40, 0]])])));
+    expect(e.type).toBe("spline");
+    expect(e.degree).toBe(3);
+    expect(e.controlPoints).toHaveLength(4);
+    const p = pts(e);
+    closeTo(p[0], 0, 0, 6);
+    closeTo(p[p.length - 1], 40, 0, 6);
     // A cubic stays inside its control polygon's convex hull.
     const b = boundsOf([e])!;
     expect(b.maxY).toBeGreaterThan(0);
@@ -217,19 +226,18 @@ describe("SPLINE", () => {
 
   it("uses supplied knots when they are the right length and falls back when they aren't", () => {
     const points = ctrl([[0, 0], [5, 10], [10, 0]]);
-    const good = entitiesOf(entitiesOnly(rec("SPLINE", [[71, 2], ...points, [40, 0], [40, 0], [40, 0], [40, 1], [40, 1], [40, 1]])));
-    const malformed = entitiesOf(entitiesOnly(rec("SPLINE", [[71, 2], ...points, [40, 0], [40, 1]])));
-    expect((malformed[0] as PolylineEntity).points).toEqual((good[0] as PolylineEntity).points);
+    const good = asSpline(entitiesOnly(rec("SPLINE", [[71, 2], ...points, [40, 0], [40, 0], [40, 0], [40, 1], [40, 1], [40, 1]])));
+    const malformed = asSpline(entitiesOnly(rec("SPLINE", [[71, 2], ...points, [40, 0], [40, 1]])));
+    expect(malformed.knots).toEqual(good.knots);
+    expect(malformed.controlPoints).toEqual(good.controlPoints);
   });
 
-  it("pulls the curve toward a control point with a higher weight", () => {
+  it("keeps weights: a heavier control point pulls the curve toward it", () => {
     const points = ctrl([[0, 0], [5, 10], [10, 0]]);
-    const plain = entitiesOf(entitiesOnly(rec("SPLINE", [[71, 2], ...points])))[0] as PolylineEntity;
-    const weighted = entitiesOf(
-      entitiesOnly(rec("SPLINE", [[71, 2], ...points, [41, 1], [41, 10], [41, 1]])),
-    )[0] as PolylineEntity;
-
-    const apex = (e: PolylineEntity) => Math.max(...e.points.map((p) => p.y));
+    const plain = asSpline(entitiesOnly(rec("SPLINE", [[71, 2], ...points])));
+    const weighted = asSpline(entitiesOnly(rec("SPLINE", [[71, 2], ...points, [41, 1], [41, 10], [41, 1]])));
+    expect(weighted.weights).toEqual([1, 10, 1]);
+    const apex = (e: SplineEntity) => Math.max(...pts(e).map((p) => p.y));
     expect(apex(plain)).toBeCloseTo(5, 6); // quadratic Bezier midpoint
     expect(apex(weighted)).toBeGreaterThan(apex(plain));
     expect(apex(weighted)).toBeLessThan(10);
@@ -237,9 +245,25 @@ describe("SPLINE", () => {
 
   it("clamps the degree to what the control points support", () => {
     // Degree 3 with only two control points is impossible; it degrades to a line.
-    const [e] = entitiesOf(entitiesOnly(rec("SPLINE", [[71, 3], ...ctrl([[0, 0], [10, 0]])]))) as PolylineEntity[];
-    closeTo(e.points[0], 0, 0, 6);
-    closeTo(e.points[e.points.length - 1], 10, 0, 6);
+    const e = asSpline(entitiesOnly(rec("SPLINE", [[71, 3], ...ctrl([[0, 0], [10, 0]])])));
+    expect(e.degree).toBe(1);
+    const p = pts(e);
+    closeTo(p[0], 0, 0, 6);
+    closeTo(p[p.length - 1], 10, 0, 6);
+  });
+
+  it("a spline with only fit points is interpolated through them", () => {
+    const fit = [[0, 0], [10, 8], [25, 3], [40, -6]] as [number, number][];
+    const e = asSpline(entitiesOnly(rec("SPLINE", [[71, 3], [74, 4], ...fit.flatMap(([x, y]) => [[11, x], [21, y]] as Pair[])])));
+    expect(e.type).toBe("spline");
+    expect(e.fitPoints).toHaveLength(4);
+    for (const [x, y] of fit) expect(distToNurbs(e, { x, y })).toBeLessThan(1e-6);
+  });
+
+  it("keeps the closed flag and any fit points that came with the control points", () => {
+    const e = asSpline(entitiesOnly(rec("SPLINE", [[70, 1], [71, 2], ...ctrl([[0, 0], [5, 10], [10, 0]]), [11, 0], [21, 0], [11, 10], [21, 0]])));
+    expect(e.closed).toBe(true);
+    expect(e.fitPoints).toHaveLength(2);
   });
 
   it("ignores a spline with fewer than two control points", () => {

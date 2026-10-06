@@ -188,6 +188,52 @@ export interface EllipseEntity {
 }
 
 
+export interface SplineEntity {
+  id: EntityId;
+  type: "spline";
+  /** Human-readable handle used in the sketch code view (e.g. "S1"). */
+  name?: string;
+  /** Layer this entity belongs to; absent means the default layer "0". */
+  layer?: string;
+  /** Stroke colour (any CSS colour). Absent = the theme's default entity colour. */
+  color?: string;
+  /**
+   * Hatch-fill colour for closed shapes (a `closed` polyline or a circle);
+   * ignored for open shapes. Absent = no fill. Set by the Fill/Hatch tool and
+   * by plugins (e.g. the load planner colours pallets by order).
+   */
+  fill?: string;
+  /** Named linetype from the `linetypes` table (CONTINUOUS, DASHED, HIDDEN, CENTER, PHANTOM, DOT, DASHDOT, BORDER, DIVIDE, or a custom imported one — see linetypes.ts). Absent = BYLAYER: inherit the entity's layer's linetype, or CONTINUOUS if the layer has none either. */
+  linetype?: string;
+  /** Plot/display line weight in mm (the DXF standard set: 0, 0.05, 0.09, ... up to 2.11). Absent = BYLAYER, same inheritance as {@link linetype}. */
+  lineweight?: number;
+  /**
+   * A construction/guide entity: visible but excluded from export weight —
+   * BOM/measure/nest and similar tools treat it as a reference, not real
+   * geometry. Independent of {@link linetype} (before Z-04 this one boolean,
+   * `dashed`, meant both "draw dashed" and "is construction" at once; an old
+   * document's `dashed: true` migrates to `construction: true` +
+   * `linetype: "DASHED"`, see `tables.ts`'s v3→v4 migration).
+   */
+  construction?: boolean;
+  /** Polynomial degree, 1..11 (cubic is the CAD default). */
+  degree: number;
+  /** NURBS control points; with `knots` and `weights` they define the curve. */
+  controlPoints: Point[];
+  /** `controlPoints.length + degree + 1` non-decreasing values. */
+  knots: number[];
+  /** One positive weight per control point; absent = non-rational (all 1). */
+  weights?: number[];
+  /**
+   * Points the curve was drawn through, when it was drawn that way (DXF keeps
+   * both). While present, editing a fit point re-solves the control points;
+   * editing a control point drops them, as AutoCAD does.
+   */
+  fitPoints?: Point[];
+  /** The ends meet (or the data is periodic): the curve closes on itself. */
+  closed: boolean;
+}
+
 export interface PolylineEntity {
   id: EntityId;
   type: "polyline";
@@ -322,6 +368,7 @@ export type Entity =
   | ArcEntity
   | PointEntity
   | EllipseEntity
+  | SplineEntity
   | PolylineEntity
   | TextEntity
   | ImageEntity;

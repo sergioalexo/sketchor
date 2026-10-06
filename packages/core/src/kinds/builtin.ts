@@ -8,6 +8,7 @@ import type {
   LineEntity,
   PointEntity,
   PolylineEntity,
+  SplineEntity,
   TextEntity,
 } from "../entities";
 import {
@@ -23,6 +24,8 @@ import {
   tessellateEllipse,
   transformEllipse,
 } from "../ellipse";
+import { applySplineGrip, splineGrips, splineSnaps, splineTransform } from "../spline";
+import { distToNurbs, nurbsBounds, tessellateNurbs } from "../nurbs";
 import { imageCorners, polylineSegments, textCorners } from "../entities";
 import type { Point } from "../geometry";
 import { arcPointAt, arcSweep, bulgeToArc, dist, distToArc, distToSegment, mid } from "../geometry";
@@ -242,6 +245,18 @@ const ellipseKind: EntityKind<EllipseEntity> = {
   hitDistance: (e, p) => (e.fill && isFullEllipse(e) && pointInEllipse(e, p) ? 0 : distToEllipse(e, p)),
 };
 
+const splineKind: EntityKind<SplineEntity> = {
+  type: "spline",
+  tessellate: (e, tol) => [tessellateNurbs(e, tol)],
+  bounds: (e) => nurbsBounds(e),
+  transform: (e, m) => splineTransform(e, m),
+  // No exact NURBS curve in intersect.ts yet (C-08): edits see the tessellated chain.
+  snaps: (e): KindSnap[] => splineSnaps(e),
+  grips: (e) => splineGrips(e),
+  applyGrip: (e, g, to) => applySplineGrip(e, g, to),
+  hitDistance: (e, p) => distToNurbs(e, p),
+};
+
 const polylineKind: EntityKind<PolylineEntity> = {
   type: "polyline",
   tessellate: (e, tol) => {
@@ -335,6 +350,6 @@ const imageKind: EntityKind<ImageEntity> = {
   hitDistance: (e, p) => (pointInPolygon(p, imageCorners(e)) ? 0 : Infinity),
 };
 
-for (const kind of [lineKind, circleKind, arcKind, pointKind, ellipseKind, polylineKind, textKind, imageKind] as EntityKind<never>[]) {
+for (const kind of [lineKind, circleKind, arcKind, pointKind, ellipseKind, splineKind, polylineKind, textKind, imageKind] as EntityKind<never>[]) {
   registerKind(kind as unknown as EntityKind<Entity>);
 }

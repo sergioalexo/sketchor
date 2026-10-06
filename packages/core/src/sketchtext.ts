@@ -1,6 +1,7 @@
-import type { Entity, EntityId } from "./entities";
+import type { Entity, EntityId, SplineEntity } from "./entities";
 import { newEntityId } from "./entities";
 import { isFullEllipse } from "./ellipse";
+import { clampedUniformKnots, interpolateNurbs, isValidNurbs } from "./nurbs";
 import type { SketchDocument } from "./document";
 import type { Command } from "./commands";
 
@@ -46,6 +47,8 @@ const POINT_RE = new RegExp(
 const ELLIPSE_RE = new RegExp(
   String.raw`^ellipse\s+([A-Za-z_]\w*)\s+at\s*\(\s*(${NUM})\s*,\s*(${NUM})\s*\)\s*major\s*\(\s*(${NUM})\s*,\s*(${NUM})\s*\)\s*ratio\s+(${NUM})(?:\s+from\s+(${NUM})\s+to\s+(${NUM}))?$`,
 );
+// spline NAME degree N fit|cv (x, y) ... [knots k ...] [weights w ...] [closed] — parsed by hand (see parseSpline).
+const SPLINE_HEAD_RE = /^spline\s+([A-Za-z_]\w*)\s+degree\s+(\d+)\s+(fit|cv)\s+(.*)$/;
 const POINT_PAIR = String.raw`\(\s*${NUM}\s*,\s*${NUM}\s*\)`;
 const POLYLINE_RE = new RegExp(
   String.raw`^polyline\s+(?<name>[A-Za-z_]\w*)\s+pts\s+(?<pts>(?:${POINT_PAIR}\s*)+)(?<closed>closed)?$`,
@@ -80,7 +83,7 @@ export function assignNames(doc: SketchDocument): Map<EntityId, string> {
       used.add(e.name);
     }
   }
-  const counters: Record<Entity["type"], number> = { line: 1, circle: 1, arc: 1, point: 1, ellipse: 1, polyline: 1, text: 1, image: 1 };
+  const counters: Record<Entity["type"], number> = { line: 1, circle: 1, arc: 1, point: 1, ellipse: 1, spline: 1, polyline: 1, text: 1, image: 1 };
   for (const e of doc.all()) {
     if (names.has(e.id)) continue;
     const prefix = NAME_PREFIX[e.type];
@@ -93,7 +96,7 @@ export function assignNames(doc: SketchDocument): Map<EntityId, string> {
   return names;
 }
 
-const NAME_PREFIX: Record<Entity["type"], string> = { line: "L", circle: "C", arc: "A", point: "P", ellipse: "E", polyline: "PL", text: "T", image: "IMG" };
+const NAME_PREFIX: Record<Entity["type"], string> = { line: "L", circle: "C", arc: "A", point: "P", ellipse: "E", spline: "S", polyline: "PL", text: "T", image: "IMG" };
 
 /** Next free name for a newly drawn entity (used by the tools). */
 export function nextEntityName(doc: SketchDocument, type: Entity["type"]): string {
@@ -105,6 +108,65 @@ export function nextEntityName(doc: SketchDocument, type: Entity["type"]): strin
 }
 
 const toDeg = (rad: number) => (rad * 180) / Math.PI;
+
+/** Knots and weights keep six decimals — they are not lengths, and rounding them harder bends the curve. */
+const fmt6 = (n: number): string => String(Math.round(n * 1e6) / 1e6);
+
+function splineLine(name: string, e: SplineEntity): string {
+  const pts = (list: { x: number; y: number }[]) => list.map((p) => `(${fmt(p.x)}, ${fmt(p.y)})`).join(" ");
+  if (e.fitPoints) return `spline ${name} degree ${e.degree} fit ${pts(e.fitPoints)}${e.closed ? " closed" : ""}`;
+  const uniform = clampedUniformKnots(e.controlPoints.length, e.degree);
+  const stdKnots = e.knots.length === uniform.length && e.knots.every((k, i) => Math.abs(k - uniform[i]) < 1e-9);
+  return (
+    `spline ${name} degree ${e.degree} cv ${pts(e.controlPoints)}` +
+    (stdKnots ? "" : ` knots ${e.knots.map(fmt6).join(" ")}`) +
+    (e.weights && e.weights.some((w) => w !== 1) ? ` weights ${e.weights.map(fmt6).join(" ")}` : "") +
+    (e.closed ? " closed" : "")
+  );
+}
+
+/** Builds a spline from a `spline …` line's tail, or returns the reason it can't. */
+function parseSpline(name: string, degree: number, mode: string, rest: string): ParsedEntity | string {
+  const keyAt = (word: string): number => {
+    const m = new RegExp(String.raw`(?:^|\s)${word}(?=\s|$)`).exec(rest);
+    return m ? m.index : -1;
+  };
+  const cuts = ["knots", "weights", "closed"].map((w) => [w, keyAt(w)] as const).filter(([, i]) => i >= 0).sort((a, b) => a[1] - b[1]);
+  const section = (word: string): string | null => {
+    const i = cuts.findIndex(([w]) => w === word);
+    if (i < 0) return null;
+    const from = cuts[i][1] + word.length + 1;
+    return rest.slice(from, i + 1 < cuts.length ? cuts[i + 1][1] : rest.length).trim();
+  };
+  const pointsText = rest.slice(0, cuts.length > 0 ? cuts[0][1] : rest.length);
+  const points: { x: number; y: number }[] = [];
+  POINT_PAIR_CAPTURE.lastIndex = 0;
+  let pm: RegExpExecArray | null;
+  while ((pm = POINT_PAIR_CAPTURE.exec(pointsText))) points.push({ x: Number(pm[1]), y: Number(pm[2]) });
+  const leftover = pointsText.replace(POINT_PAIR_CAPTURE, "").trim();
+  if (leftover !== "") return `unexpected '${leftover}' in the spline's points`;
+  const numbers = (text: string | null): number[] | null => (text === null ? null : text === "" ? [] : text.split(/\s+/).map(Number));
+  const knots = numbers(section("knots"));
+  const weights = numbers(section("weights"));
+  if ((knots && knots.some(Number.isNaN)) || (weights && weights.some(Number.isNaN))) return "knots and weights must be numbers";
+  const closed = keyAt("closed") >= 0;
+  if (degree < 1 || degree > 11) return "spline degree must be between 1 and 11";
+  if (mode === "fit") {
+    if (knots || weights) return "a fit spline takes no knots or weights (they are derived)";
+    const fitted = interpolateNurbs(points, degree);
+    if (!fitted) return "a fit spline needs at least two distinct points";
+    return { type: "spline", name, data: { ...fitted, fitPoints: points, closed } };
+  }
+  if (points.length < degree + 1) return `a degree ${degree} spline needs at least ${degree + 1} control points`;
+  const data = {
+    degree,
+    controlPoints: points,
+    knots: knots ?? clampedUniformKnots(points.length, degree),
+    ...(weights ? { weights } : {}),
+  };
+  if (!isValidNurbs(data)) return "the spline's knots/weights are not valid (need control points + degree + 1 non-decreasing knots, one positive weight per point)";
+  return { type: "spline", name, data: { ...data, closed } };
+}
 
 export function toCode(doc: SketchDocument): string {
   const names = assignNames(doc);
@@ -132,6 +194,8 @@ export function toCode(doc: SketchDocument): string {
         `ellipse ${name} at (${fmt(e.center.x)}, ${fmt(e.center.y)}) major (${fmt(e.majorAxis.x)}, ${fmt(e.majorAxis.y)}) ratio ${fmt(e.ratio)}` +
           (full ? "" : ` from ${fmt(toDeg(e.start))} to ${fmt(toDeg(e.end))}`),
       );
+    } else if (e.type === "spline") {
+      out.push(splineLine(name, e));
     } else if (e.type === "text") {
       out.push(
         `text ${name} at (${fmt(e.at.x)}, ${fmt(e.at.y)}) ${JSON.stringify(e.text)} h ${fmt(e.height)}` +
@@ -173,6 +237,7 @@ export type ParsedEntity =
       start: number;
       end: number;
     }
+  | { type: "spline"; name: string; data: Omit<SplineEntity, "id" | "type" | "name" | "layer"> }
   | { type: "polyline"; name: string; points: { x: number; y: number }[]; closed: boolean }
   | { type: "text"; name: string; at: { x: number; y: number }; text: string; height: number; rotation: number }
   | { type: "image"; name: string; insert: { x: number; y: number }; width: number; height: number; rotation: number };
@@ -258,6 +323,13 @@ export function parseCode(text: string): { entities: ParsedEntity[]; errors: Par
         start: match[7] === undefined ? 0 : (Number(match[7]) * Math.PI) / 180,
         end: match[8] === undefined ? Math.PI * 2 : (Number(match[8]) * Math.PI) / 180,
       };
+    } else if ((match = row.match(SPLINE_HEAD_RE))) {
+      const built = parseSpline(match[1], Number(match[2]), match[3], match[4]);
+      if (typeof built === "string") {
+        errors.push({ line: lineNo, message: built });
+        continue;
+      }
+      parsed = built;
     } else if ((match = row.match(POINT_RE))) {
       parsed = { type: "point", name: match[1], p: { x: Number(match[2]), y: Number(match[3]) } };
     } else if ((match = row.match(TEXT_RE))) {
@@ -311,7 +383,7 @@ export function parseCode(text: string): { entities: ParsedEntity[]; errors: Par
     }
 
     if (!parsed) {
-      const known = ["line", "circle", "arc", "point", "ellipse", "polyline", "text", "image"];
+      const known = ["line", "circle", "arc", "point", "ellipse", "spline", "polyline", "text", "image"];
       errors.push({
         line: lineNo,
         message: known.includes(keyword)
@@ -324,6 +396,8 @@ export function parseCode(text: string): { entities: ParsedEntity[]; errors: Par
                   ? "arc NAME at (x, y) r RADIUS from DEG to DEG [cw]"
                   : keyword === "point"
                     ? "point NAME at (x, y)"
+                    : keyword === "spline"
+                      ? "spline NAME degree N fit (x, y) ... | cv (x, y) ... [knots k ...] [weights w ...] [closed]"
                     : keyword === "ellipse"
                       ? "ellipse NAME at (x, y) major (dx, dy) ratio R [from DEG to DEG]"
                     : keyword === "text"
@@ -373,6 +447,22 @@ function sameGeometry(existing: Entity, parsed: ParsedEntity): boolean {
       Math.abs(existing.startAngle - parsed.startAngle) < EPS &&
       Math.abs(existing.endAngle - parsed.endAngle) < EPS &&
       existing.ccw === parsed.ccw
+    );
+  }
+  if (existing.type === "spline" && parsed.type === "spline") {
+    // Code carries 4 decimals, so compare to that, not to 1e-9.
+    const near = (a: number, b: number) => Math.abs(a - b) < 1e-4;
+    const d = parsed.data;
+    const ptsSame = (a: { x: number; y: number }[] | undefined, b: { x: number; y: number }[] | undefined) =>
+      (a === undefined) === (b === undefined) && (!a || (a.length === b!.length && a.every((p, i) => near(p.x, b![i].x) && near(p.y, b![i].y))));
+    return (
+      existing.degree === d.degree &&
+      existing.closed === d.closed &&
+      ptsSame(existing.fitPoints, d.fitPoints) &&
+      (existing.fitPoints !== undefined || ptsSame(existing.controlPoints, d.controlPoints)) &&
+      existing.knots.length === d.knots.length &&
+      (existing.fitPoints !== undefined || existing.knots.every((k, i) => Math.abs(k - d.knots[i]) < 1e-6)) &&
+      (existing.fitPoints !== undefined || (existing.weights ?? []).every((w, i) => Math.abs(w - (d.weights?.[i] ?? 1)) < 1e-6))
     );
   }
   if (existing.type === "ellipse" && parsed.type === "ellipse") {
@@ -455,6 +545,8 @@ export function toEntity(parsed: ParsedEntity, id: EntityId, layer?: string, bul
       };
     case "point":
       return { id, type: "point", name: parsed.name, ...layerProp, p: parsed.p };
+    case "spline":
+      return { id, type: "spline", name: parsed.name, ...layerProp, ...parsed.data };
     case "ellipse":
       return {
         id,

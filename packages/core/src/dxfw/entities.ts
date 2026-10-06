@@ -1,4 +1,4 @@
-import type { ArcEntity, CircleEntity, EllipseEntity, Entity, ImageEntity, LineEntity, PointEntity, PolylineEntity, TextEntity } from "../entities";
+import type { ArcEntity, CircleEntity, EllipseEntity, Entity, SplineEntity, ImageEntity, LineEntity, PointEntity, PolylineEntity, TextEntity } from "../entities";
 import { imageCorners, layerOf } from "../entities";
 import { dist } from "../geometry";
 import { ellipseSweep, isFullEllipse } from "../ellipse";
@@ -117,6 +117,25 @@ AcDbEllipse
   );
 }
 
+export function splineEntity2018(e: SplineEntity, handle: string, owner: string): string {
+  const rational = e.weights !== undefined && e.weights.some((x) => x !== 1);
+  const flags = 8 + (e.closed ? 1 : 0) + (rational ? 4 : 0);
+  const fit = e.fitPoints ?? [];
+  return (
+    `0\nSPLINE\n` +
+    entityHead(handle, owner, e) +
+    `100\nAcDbSpline\n` +
+    pair(210, 0) + pair(220, 0) + pair(230, 1) +
+    `70\n${flags}\n71\n${e.degree}\n72\n${e.knots.length}\n73\n${e.controlPoints.length}\n74\n${fit.length}\n` +
+    hi(42, 1e-7) + hi(43, 1e-7) + (fit.length > 0 ? hi(44, 1e-10) : "") +
+    e.knots.map((k) => hi(40, k)).join("") +
+    (rational ? e.weights!.map((x) => hi(41, x)).join("") : "") +
+    e.controlPoints.map((c) => hi(10, c.x) + hi(20, c.y) + hi(30, 0)).join("") +
+    fit.map((c) => hi(11, c.x) + hi(21, c.y) + hi(31, 0)).join("") +
+    nameXdata(e.name)
+  );
+}
+
 export function pointEntity2018(e: PointEntity, handle: string, owner: string): string {
   return (
     `0\nPOINT\n` +
@@ -207,6 +226,8 @@ export function entityDxf2018(e: Entity, handle: string, owner: string, nextHand
       return pointEntity2018(e, handle, owner);
     case "ellipse":
       return ellipseEntity2018(e, handle, owner);
+    case "spline":
+      return splineEntity2018(e, handle, owner);
     case "polyline":
       return polylineEntity2018(e, handle, owner);
     case "text":
