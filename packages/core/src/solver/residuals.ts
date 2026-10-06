@@ -12,6 +12,7 @@ import {
   mul,
   scale,
   sub,
+  variable,
   vsub,
   type Num,
   type Vec,
@@ -51,6 +52,27 @@ function cosBetween(u: Vec, v: Vec): Num {
 function pointToLine(p: Vec, a: Vec, d: Vec): Num {
   const len = length(d);
   return div(cross(d, vsub(p, a)), len.v < 1e-12 ? konst(1e-12) : len);
+}
+
+/**
+ * `(q − 1)·L/2` with `q = (x'/L)² + (y'/(rL))²` in the ellipse's own frame
+ * (L = semi-major length, r = ratio): zero on the curve, ≈ the distance in mm
+ * near it, and smooth through the centre where `sqrt(q)` would not be.
+ */
+function ellipseResidual(model: SketchModel, p: Vec, id: string): Num | null {
+  const center = centerOf(model, id);
+  const u = directionOf(model, id);
+  const mp = model.byEntity.get(id);
+  if (!center || !u || !mp) return null;
+  const ratio = model.frozen.has(mp.start + 4) ? konst(model.values[mp.start + 4]) : variable(mp.start + 4, model.values[mp.start + 4]);
+  const L = length(u);
+  const Ls = L.v < 1e-12 ? konst(1e-12) : L;
+  const d = vsub(p, center);
+  const xl = div(dot(d, u), Ls);
+  const yl = div(cross(u, d), Ls);
+  const a = div(xl, Ls);
+  const b = div(yl, mul(ratio, Ls));
+  return scale(mul(sub(add(mul(a, a), mul(b, b)), konst(1)), Ls), 0.5);
 }
 
 /**
@@ -181,6 +203,10 @@ export function rowsFor(model: SketchModel, c: Constraint): Row[] {
     case "point-on-curve": {
       const p = pointOf(model, c.point);
       if (!p) return [];
+      if (model.entities.get(c.entityId)?.type === "ellipse") {
+        const ellipse = ellipseResidual(model, p, c.entityId);
+        return ellipse ? [row(ellipse)] : [];
+      }
       const center = centerOf(model, c.entityId);
       const radius = radiusOf(model, c.entityId);
       if (center && radius) return [row(sub(distanceNum(p, center), radius))];

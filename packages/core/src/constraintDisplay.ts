@@ -1,4 +1,5 @@
 import type { Constraint, PointRef } from "./constraints";
+import { ellipsePointAt } from "./ellipse";
 import type { Entity, EntityId } from "./entities";
 import { arcPointAt, mid, type Point } from "./geometry";
 
@@ -32,6 +33,11 @@ export function entityAnchor(entity: Entity): Point | null {
     }
     case "point":
       return entity.p;
+    case "ellipse":
+      // The minor-axis end, clear of the centre and major-axis marks.
+      return ellipsePointAt(entity, Math.PI / 2);
+    case "spline":
+      return entity.controlPoints.length === 0 ? null : entity.controlPoints[Math.floor((entity.controlPoints.length - 1) / 2)];
     case "polyline": {
       if (entity.points.length === 0) return null;
       const i = Math.floor((entity.points.length - 1) / 2);
@@ -58,6 +64,14 @@ export function pointRefAt(lookup: EntityLookup, ref: PointRef): Point | null {
       return arcPointAt(e.center, e.radius, ref.point === "a" ? e.startAngle : e.endAngle);
     case "point":
       return e.p;
+    case "ellipse": {
+      if (ref.point === "center") return e.center;
+      return ellipsePointAt(e, ref.point === "b" ? e.end : e.start);
+    }
+    case "spline": {
+      const n = e.controlPoints.length;
+      return n === 0 ? null : e.controlPoints[ref.point === "b" ? n - 1 : ref.point === "vertex" ? (ref.index ?? 0) : 0] ?? null;
+    }
     case "polyline": {
       if (e.points.length === 0) return null;
       if (ref.point === "vertex") return e.points[ref.index ?? 0] ?? null;

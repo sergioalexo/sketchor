@@ -46,6 +46,10 @@ export function paramCount(entity: Entity): number {
       return 2; // x y
     case "polyline":
       return entity.points.length * 2;
+    case "ellipse":
+      return 5; // cx cy majorX majorY ratio — start/end stay as drawn
+    case "spline":
+      return entity.controlPoints.length * 2; // knots and weights stay as drawn
     case "text":
     case "image":
     default:
@@ -70,6 +74,12 @@ function pushValues(entity: Entity, out: number[]): void {
     case "polyline":
       for (const p of entity.points) out.push(p.x, p.y);
       return;
+    case "ellipse":
+      out.push(entity.center.x, entity.center.y, entity.majorAxis.x, entity.majorAxis.y, entity.ratio);
+      return;
+    case "spline":
+      for (const p of entity.controlPoints) out.push(p.x, p.y);
+      return;
     case "text":
     case "image":
     default:
@@ -91,7 +101,7 @@ export function buildModel(entities: readonly Entity[]): SketchModel {
       start: values.length,
       count,
       kind: entity.type,
-      vertices: entity.type === "polyline" ? entity.points.length : 0,
+      vertices: entity.type === "polyline" ? entity.points.length : entity.type === "spline" ? entity.controlPoints.length : 0,
     });
     pushValues(entity, values);
   }
@@ -135,6 +145,8 @@ export function directionOf(model: SketchModel, id: EntityId): Vec | null {
   if (e.type === "line") {
     return { x: sub(got.at(2), got.at(0)), y: sub(got.at(3), got.at(1)) };
   }
+  // An ellipse's direction is its major axis, so horizontal/vertical/parallel/perpendicular turn it.
+  if (e.type === "ellipse") return { x: got.at(2), y: got.at(3) };
   if (e.type === "polyline" && e.points.length >= 2) {
     // A polyline's direction is its first leg — enough for parallel and
     // perpendicular against a single-segment polyline, which is what DXF
@@ -149,7 +161,7 @@ export function centerOf(model: SketchModel, id: EntityId): Vec | null {
   const e = model.entities.get(id);
   const got = paramsOf(model, id);
   if (!e || !got) return null;
-  if (e.type === "circle" || e.type === "arc") return { x: got.at(0), y: got.at(1) };
+  if (e.type === "circle" || e.type === "arc" || e.type === "ellipse") return { x: got.at(0), y: got.at(1) };
   return null;
 }
 
@@ -207,6 +219,26 @@ export function pointOf(model: SketchModel, ref: PointRef): Vec | null {
       const base = ref.point === "b" ? (e.points.length - 1) * 2 : 0;
       return { x: at(base), y: at(base + 1) };
     }
+    case "ellipse": {
+      if (ref.point === "center") return { x: at(0), y: at(1) };
+      // `a`/`b`: the arc's start/end points (the major-axis end for a full ellipse).
+      const t = ref.point === "b" ? e.end : e.start;
+      const mx = at(2);
+      const my = at(3);
+      const r = at(4);
+      const c = konst(Math.cos(t));
+      const sn = konst(Math.sin(t));
+      return {
+        x: add(at(0), sub(mul(mx, c), mul(mul(my, r), sn))),
+        y: add(at(1), add(mul(my, c), mul(mul(mx, r), sn))),
+      };
+    }
+    case "spline": {
+      const n = e.controlPoints.length;
+      const i = ref.point === "vertex" ? (ref.index ?? 0) : ref.point === "b" ? n - 1 : 0;
+      if (i < 0 || i >= n) return null;
+      return { x: at(i * 2), y: at(i * 2 + 1) };
+    }
     case "text":
     case "image":
     default:
@@ -251,6 +283,13 @@ function withValues(entity: Entity, v: readonly number[], at: number): Entity {
       return { ...entity, p: { x: v[at], y: v[at + 1] } };
     case "polyline":
       return { ...entity, points: entity.points.map((_, i) => ({ x: v[at + i * 2], y: v[at + i * 2 + 1] })) };
+    case "ellipse":
+      return { ...entity, center: { x: v[at], y: v[at + 1] }, majorAxis: { x: v[at + 2], y: v[at + 3] }, ratio: Math.abs(v[at + 4]) };
+    case "spline": {
+      // Fit points describe where the curve was meant to pass; once a solve moves the control points they would lie.
+      const { fitPoints: _dropped, ...rest } = entity;
+      return { ...rest, controlPoints: entity.controlPoints.map((_, i) => ({ x: v[at + i * 2], y: v[at + i * 2 + 1] })) };
+    }
     case "text":
     case "image":
     default:

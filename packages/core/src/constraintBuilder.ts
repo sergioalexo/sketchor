@@ -1,4 +1,5 @@
 import type { Constraint, ConstraintId, PointRef } from "./constraints";
+import { ellipsePointAt, isFullEllipse } from "./ellipse";
 import type { Entity, EntityId } from "./entities";
 import { dist, type Point } from "./geometry";
 
@@ -60,7 +61,7 @@ export const CONSTRAINT_HINTS: Record<ConstraintKind, string> = {
   equal: "Two or more lines (length), or circles and arcs (radius)",
   midpoint: "A point and a line",
   symmetric: "Two points and a line to mirror them about",
-  "point-on-curve": "A point and a line, circle or arc",
+  "point-on-curve": "A point and a line, circle, arc or ellipse",
   radius: "A circle or arc — locks its current radius",
   distance: "Two entities — locks the current distance between their nearest ends",
   angle: "Two lines — locks the current angle between them",
@@ -69,6 +70,10 @@ export const CONSTRAINT_HINTS: Record<ConstraintKind, string> = {
 
 const isLine = (e: Entity) => e.type === "line";
 const isCurve = (e: Entity) => e.type === "circle" || e.type === "arc";
+/** Horizontal/vertical read an ellipse's major axis. */
+const hasAxis = (e: Entity) => e.type === "line" || e.type === "ellipse";
+/** Something a point can lie on, or that has a centre another curve can share. */
+const isOval = (e: Entity) => isCurve(e) || e.type === "ellipse";
 const linelike = (e: Entity) => e.type === "line" || e.type === "polyline";
 
 /** The points of an entity a constraint can attach to, nearest-pair matching included. */
@@ -98,6 +103,23 @@ export function attachPoints(entity: Entity): { ref: PointRef; at: Point }[] {
     }
     case "circle":
       return [{ ref: ref("center"), at: entity.center }];
+    case "ellipse": {
+      const g = { center: entity.center, majorAxis: entity.majorAxis, ratio: entity.ratio, start: entity.start, end: entity.end };
+      const out = [
+        { ref: ref("center"), at: entity.center },
+        { ref: ref("a"), at: ellipsePointAt(g, entity.start) },
+      ];
+      if (!isFullEllipse(g)) out.push({ ref: ref("b"), at: ellipsePointAt(g, entity.end) });
+      return out;
+    }
+    case "spline":
+      // A clamped spline starts and ends on its first and last control vertex.
+      return entity.controlPoints.length < 2
+        ? []
+        : [
+            { ref: ref("a"), at: entity.controlPoints[0] },
+            { ref: ref("b"), at: entity.controlPoints[entity.controlPoints.length - 1] },
+          ];
     case "point":
       return [{ ref: ref("a"), at: entity.p }];
     case "text":
@@ -156,9 +178,10 @@ export function buildConstraints(kind: ConstraintKind, selection: readonly Entit
   switch (kind) {
     case "horizontal":
     case "vertical": {
-      const bad = need(lines.length > 0 && lines.length === sel.length);
+      const axes = sel.filter(hasAxis);
+      const bad = need(axes.length > 0 && axes.length === sel.length);
       if (bad) return bad;
-      return { constraints: lines.map((l) => ({ id: ctx.newId(), type: kind, entityId: l.id })) };
+      return { constraints: axes.map((l) => ({ id: ctx.newId(), type: kind, entityId: l.id })) };
     }
     case "parallel": {
       const usable = sel.filter(linelike);
@@ -179,9 +202,10 @@ export function buildConstraints(kind: ConstraintKind, selection: readonly Entit
       return { constraints: chain(usable, ctx, (a, b, id) => ({ id, type: "collinear", a, b })) };
     }
     case "concentric": {
-      const bad = need(curves.length >= 2 && curves.length === sel.length);
+      const ovals = sel.filter(isOval);
+      const bad = need(ovals.length >= 2 && ovals.length === sel.length);
       if (bad) return bad;
-      return { constraints: chain(curves, ctx, (a, b, id) => ({ id, type: "concentric", a, b })) };
+      return { constraints: chain(ovals, ctx, (a, b, id) => ({ id, type: "concentric", a, b })) };
     }
     case "tangent": {
       const bad = need(sel.length === 2 && curves.length >= 1 && sel.every((e) => isCurve(e) || linelike(e)));
@@ -224,7 +248,7 @@ export function buildConstraints(kind: ConstraintKind, selection: readonly Entit
       return { constraints: [{ id: ctx.newId(), type: "symmetric", a, b, axis: axis!.id }] };
     }
     case "point-on-curve": {
-      const curve = sel.find((e) => isCurve(e) || linelike(e));
+      const curve = sel.find((e) => isOval(e) || linelike(e));
       const other = sel.find((e) => e !== curve);
       const bad = need(sel.length === 2 && !!curve && !!other && attachPoints(other!).length > 0);
       if (bad) return bad;
