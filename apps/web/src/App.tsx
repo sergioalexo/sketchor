@@ -37,7 +37,7 @@ import { UpdateBanner, UpdateButton } from "./update/UpdatePanel";
 import { MetricsNotice } from "./metrics/MetricsNotice";
 import { openExternal } from "./update/updateService";
 import { useTheme } from "./theme/themeStore";
-import { listInstalledThemes, onThemesChange } from "./theme/installedThemes";
+import { ThemePicker } from "./theme/ThemePicker";
 
 /**
  * The project's home page, opened by the logo in the toolbar. Must stay
@@ -538,9 +538,6 @@ export function App() {
   const [showShortcuts, setShowShortcuts] = useState(false);
   const [showThemeMenu, setShowThemeMenu] = useState(false);
   const themeSetting = useTheme((s) => s.setting);
-  const setThemeSetting = useTheme((s) => s.setSetting);
-  const [installedThemes, setInstalledThemes] = useState(() => listInstalledThemes());
-  useEffect(() => onThemesChange(() => setInstalledThemes(listInstalledThemes())), []);
   const touchMode = useTouchMode((s) => s.enabled);
   const toggleTouchMode = useTouchMode((s) => s.toggle);
   const prompt = useApp((s) => s.prompt);
@@ -1235,36 +1232,7 @@ export function App() {
                 <circle cx="12" cy="7" r="1" fill="currentColor" />
               </svg>
             </button>
-            {showThemeMenu && (
-              <div className="action-menu" data-testid="theme-menu">
-                {(["dark", "light", "system"] as const).map((setting) => (
-                  <button
-                    key={setting}
-                    className={themeSetting === setting ? "action-menu-default" : undefined}
-                    data-testid={`theme-${setting}`}
-                    onClick={() => {
-                      setThemeSetting(setting);
-                      setShowThemeMenu(false);
-                    }}
-                  >
-                    {setting === "dark" ? "Dark" : setting === "light" ? "Light" : "System"}
-                  </button>
-                ))}
-                {installedThemes.map((t) => (
-                  <button
-                    key={t.key}
-                    className={themeSetting === `custom:${t.key}` ? "action-menu-default" : undefined}
-                    data-testid={`theme-custom-${t.key}`}
-                    onClick={() => {
-                      setThemeSetting(`custom:${t.key}`);
-                      setShowThemeMenu(false);
-                    }}
-                  >
-                    {t.title}
-                  </button>
-                ))}
-              </div>
-            )}
+            {showThemeMenu && <ThemePicker onClose={() => setShowThemeMenu(false)} />}
           </div>
         </div>
         <div className="hint">{TOOL_HINTS[tool]}</div>

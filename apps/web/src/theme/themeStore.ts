@@ -68,36 +68,90 @@ function applyTheme(tokens: ThemeTokens): void {
   if (tokens.fonts?.mono) root.style.setProperty("--mono", tokens.fonts.mono);
 }
 
+/** What "Follow system" switches between: one theme for each OS appearance (TH-03). Never itself "system". */
+export interface SystemPair {
+  dark: Exclude<ThemeSetting, "system">;
+  light: Exclude<ThemeSetting, "system">;
+}
+
+const PAIR_KEY = "sketchor.theme.pair.v1";
+const DEFAULT_PAIR: SystemPair = { dark: "dark", light: "light" };
+
+const isPairSetting = (v: unknown): v is SystemPair["dark"] => v === "dark" || v === "light" || (typeof v === "string" && v.startsWith("custom:"));
+
+function loadPair(): SystemPair {
+  try {
+    const raw = JSON.parse(localStorage.getItem(PAIR_KEY) ?? "null") as Partial<SystemPair> | null;
+    return { dark: isPairSetting(raw?.dark) ? raw.dark : DEFAULT_PAIR.dark, light: isPairSetting(raw?.light) ? raw.light : DEFAULT_PAIR.light };
+  } catch {
+    return DEFAULT_PAIR;
+  }
+}
+
+function savePair(pair: SystemPair): void {
+  try {
+    localStorage.setItem(PAIR_KEY, JSON.stringify(pair));
+  } catch {
+    /* storage unavailable — the pairing just won't survive a reload */
+  }
+}
+
+/** Pure: "system" becomes the paired theme for the current OS appearance; anything else is itself. */
+export function effectiveSetting(setting: ThemeSetting, pair: SystemPair, systemPrefersDark: boolean): Exclude<ThemeSetting, "system"> {
+  return setting === "system" ? (systemPrefersDark ? pair.dark : pair.light) : setting;
+}
+
 interface ThemeState {
   setting: ThemeSetting;
+  /** Dark/light themes "system" switches between. */
+  pair: SystemPair;
+  /** A theme being previewed on hover — applied to the app but never saved. */
+  previewing: ThemeSetting | null;
   resolved: ThemeMode;
   tokens: ThemeTokens;
   setSetting: (setting: ThemeSetting) => void;
+  setPair: (pair: Partial<SystemPair>) => void;
+  /** Shows `setting` live without choosing it; `null` snaps back to the chosen theme. */
+  preview: (setting: ThemeSetting | null) => void;
 }
 
-function computeAndApply(setting: ThemeSetting): { resolved: ThemeMode; tokens: ThemeTokens } {
-  const resolved = resolveMode(setting, systemPrefersDark());
+function computeAndApply(setting: ThemeSetting, pair: SystemPair): { resolved: ThemeMode; tokens: ThemeTokens } {
+  const effective = effectiveSetting(setting, pair, systemPrefersDark());
+  const resolved = resolveMode(effective, systemPrefersDark());
   // An uninstalled custom theme falls back to its base mode's defaults.
-  const tokens = (setting.startsWith("custom:") ? getInstalledTheme(setting.slice(7))?.tokens : undefined) ?? defaultTheme(resolved);
+  const tokens = (effective.startsWith("custom:") ? getInstalledTheme(effective.slice(7))?.tokens : undefined) ?? defaultTheme(resolved);
   applyTheme(tokens);
   return { resolved, tokens };
 }
 
 const initialSetting = loadSetting();
+const initialPair = loadPair();
 
-export const useTheme = create<ThemeState>((set) => ({
+export const useTheme = create<ThemeState>((set, get) => ({
   setting: initialSetting,
-  ...computeAndApply(initialSetting),
+  pair: initialPair,
+  previewing: null,
+  ...computeAndApply(initialSetting, initialPair),
   setSetting: (setting) => {
     saveSetting(setting);
-    set({ setting, ...computeAndApply(setting) });
+    set({ setting, previewing: null, ...computeAndApply(setting, get().pair) });
+  },
+  setPair: (partial) => {
+    const pair = { ...get().pair, ...partial };
+    savePair(pair);
+    const { setting } = get();
+    set({ pair, previewing: null, ...computeAndApply(setting, pair) });
+  },
+  preview: (setting) => {
+    const { setting: chosen, pair } = get();
+    set({ previewing: setting, ...computeAndApply(setting ?? chosen, pair) });
   },
 }));
 
 // Live-follow the OS theme while "system" is selected (matches `prefers-color-scheme` switching, e.g. sunset/sunrise OS schedules), without a page reload.
 if (typeof window !== "undefined" && typeof window.matchMedia === "function") {
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
-    const { setting } = useTheme.getState();
-    if (setting === "system") useTheme.setState(computeAndApply(setting));
+    const { setting, pair, previewing } = useTheme.getState();
+    if (setting === "system" && previewing === null) useTheme.setState(computeAndApply(setting, pair));
   });
 }
