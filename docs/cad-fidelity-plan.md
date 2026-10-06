@@ -32,7 +32,7 @@ Written 2026-09-28 against `main` @ `8bafb82` (v0.28.0). Intended to be executed
 | 2026-10-06 | C-03 (SVG path curves) | `parsePathD` in `svg.ts` no longer flattens: a subpath is built from *pieces* — line/arc runs → polyline (as before), C/S/Q/T runs → ONE degree-3 spline (cubics chained C0 with triple interior knots; quadratics degree-elevated, S/T reflection unchanged). A pure-curve subpath is one spline; `Z` after a curve run closes it with a straight cubic so a closed curve stays one closed spline; a subpath mixing lines and curves is emitted as its exact runs in order (polyline, spline, polyline…) — they are separate entities (no join for splines yet). Element transforms map control points (affine-exact, so scaling no longer needs re-flattening; the 0.01 mm flattener is gone). SVG `A` with rx≠ry is still tessellated to a polyline (not yet an ellipse arc). No `importOptions.curves` switch yet. Tests rewritten for splines (+3), 1233 total. Not verified live in the browser pane. |
 | — | — | nothing else started |
 
-### Open items checklist (status 2026-10-06: SV-01, SV-02, Z-01, Z-02, X-01, X-02, Z-03, X-04 (partial), Z-04, X-06, X-07, F-09, TH-01, TH-02, TH-03, TH-06, C-01, C-02, C-05, C-03, C-06, C-07 (partial) done — the rest open; next: C-08 exact curves in intersect.ts, or TH-08/TH-04)
+### Open items checklist (status 2026-10-06: SV-01, SV-02, Z-01, Z-02, X-01, X-02, Z-03, X-04 (partial), Z-04, X-06, X-07, F-09, TH-01, TH-02, TH-03, TH-06, C-01, C-02, C-03, C-04, C-05, C-06 done; C-07 partial — the rest open; next: C-08 exact curves in intersect.ts, or TH-08/TH-04)
 
 Tick `[x]` and add a progress-log row as items land. Order = recommended execution order.
 
@@ -64,11 +64,11 @@ Tick `[x]` and add a progress-log row as items land. Order = recommended executi
 - [x] C-01 EllipseEntity (exact `Curve` in intersect.ts + solver params deferred to C-08/C-09 — see progress log)
 - [x] C-02 SplineEntity (NURBS) + `nurbs.ts` (intersect.ts curve, offset, solver params deferred to C-08/C-09)
 - [x] C-03 Import DXF/SVG curves as real entities — SVG `A` with rx≠ry stays tessellated; no polyline-import option
-- [ ] C-04 Export curves (DXF 2018, SVG, PDF, sketch code)
+- [x] C-04 Export curves (DXF 2018, SVG, PDF, sketch code) — PDF/R12 tessellate (no `PdfBuilder.curveTo` yet)
 - [x] C-05 Ellipse tool (isometric-circle mode still open)
 - [x] C-06 Spline tools (fit points / CVs) — typed tolerance + end tangents deferred
-- [~] C-07 Spline/ellipse editing (grips, SPLINEDIT actions, convert)
-- [ ] C-08 Every tool handles curves (fillet, offset, join, explode, measure, nest, G-code)
+- [~] C-07 Spline/ellipse editing (grips, SPLINEDIT actions, convert) — done: fit/CV grips, properties-panel actions, polyline↔spline; open: end-tangent handles, canvas click add/remove point, Show-CVs toggle, command-line aliases
+- [ ] C-08 Every tool handles curves (exact `ellipse`/`nurbs` kinds in `intersect.ts`; today trim/offset/fillet/snap-intersection see 0.05 mm segment chains) (fillet, offset, join, explode, measure, nest, G-code)
 - [ ] C-09 Constraints on curves
 
 **4 · SVG + EPS complete**
