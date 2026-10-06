@@ -60,6 +60,8 @@ export const TOOL_ALIASES: Record<string, ToolId> = {
   arc: "arc",
   el: "ellipse",
   ellipse: "ellipse",
+  spl: "spline",
+  spline: "spline",
   pol: "polygon",
   polygon: "polygon",
   slot: "slot",

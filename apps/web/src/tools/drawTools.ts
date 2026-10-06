@@ -12,6 +12,8 @@ import {
   dist,
   ellipseFromAxes,
   ellipseParamOfPoint,
+  clampedUniformKnots,
+  interpolateNurbs,
   newEntityId,
   nextEntityName,
   rectFrom3Points,
@@ -994,4 +996,112 @@ function nearestOpenEnd(ctx: ToolContext, at: Point): { point: Point; tangent: P
     }
   }
   return best;
+}
+
+/* --------------------------------- spline --------------------------------- */
+
+type SplineMode = "fit" | "cv";
+
+/**
+ * Builds the spline for a run of clicked points. Fit mode draws *through* the
+ * points (the curve is solved from them, and they stay editable as fit
+ * points); control-vertex mode uses them as the control polygon. Closing
+ * repeats the first point at the end — `closed` is only a flag on the
+ * entity, the geometry has to actually meet.
+ */
+export function splineFromPicks(
+  points: Point[],
+  mode: SplineMode,
+  closed: boolean,
+): { degree: number; controlPoints: Point[]; knots: number[]; fitPoints?: Point[]; closed: boolean } | null {
+  const pts = points.filter((p, i) => i === 0 || dist(p, points[i - 1]) > 0);
+  const useClosed = closed && pts.length >= 3;
+  const run = useClosed ? [...pts, pts[0]] : pts;
+  if (run.length < 2) return null;
+  if (mode === "fit") {
+    const fitted = interpolateNurbs(run, 3);
+    return fitted ? { degree: fitted.degree, controlPoints: fitted.controlPoints, knots: fitted.knots, fitPoints: run, closed: useClosed } : null;
+  }
+  const degree = Math.min(3, run.length - 1);
+  return { degree, controlPoints: run, knots: clampedUniformKnots(run.length, degree), closed: useClosed };
+}
+
+/**
+ * Spline tool (SPL). Click points; Enter or a double-click finishes, C closes,
+ * Backspace drops the last point, Tab switches between fit points (the curve
+ * passes through them) and control vertices (they pull the curve).
+ */
+export class SplineTool implements Tool {
+  readonly id = "spline" as const;
+  private points: Point[] = [];
+  private mode: SplineMode = "fit";
+
+  prompt(): string {
+    const what = this.mode === "fit" ? "fit point" : "control vertex";
+    const modes = "Tab: fit points / control vertices";
+    if (this.points.length === 0) return `Specify first ${what} (${modes})`;
+    return `Specify next ${what} (Enter finishes, C closes, Backspace undoes, ${modes})`;
+  }
+  busy(): boolean {
+    return this.points.length > 0;
+  }
+  anchor(): Point | null {
+    return this.points[this.points.length - 1] ?? null;
+  }
+  cancel(): void {
+    this.points = [];
+  }
+  pick(_ctx: ToolContext, p: Pick): void {
+    const last = this.anchor();
+    if (last && dist(last, p.point) === 0) return; // repeat click on the point just placed (double-click finishes)
+    this.points.push(p.point);
+  }
+  doubleClick(ctx: ToolContext): boolean {
+    this.finish(ctx, false);
+    return true;
+  }
+  key(ctx: ToolContext, e: KeyboardEvent): boolean {
+    if (e.ctrlKey || e.metaKey || e.altKey) return false;
+    if (e.key === "Tab") {
+      this.mode = this.mode === "fit" ? "cv" : "fit"; // the clicks stay: the same points read as the other kind
+      ctx.redraw();
+      return true;
+    }
+    if (this.points.length === 0) return false;
+    if (e.key === "Enter") {
+      this.finish(ctx, false);
+      return true;
+    }
+    if (e.key.toLowerCase() === "c" && !e.shiftKey) {
+      this.finish(ctx, true);
+      return true;
+    }
+    if (e.key === "Backspace") {
+      this.points.pop();
+      ctx.redraw();
+      return true;
+    }
+    return false;
+  }
+  preview(_ctx: ToolContext, cursor: Point | null): Entity[] {
+    const pts = [...this.points];
+    if (cursor && (pts.length === 0 || dist(pts[pts.length - 1], cursor) > 0)) pts.push(cursor);
+    const data = splineFromPicks(pts, this.mode, false);
+    if (!data) return [];
+    const out: Entity[] = [{ id: PREVIEW, type: "spline", ...data }];
+    if (this.mode === "cv" && pts.length >= 2) out.push({ id: PREVIEW + "-hull", type: "polyline", points: pts, closed: false, construction: true });
+    return out;
+  }
+
+  private finish(ctx: ToolContext, closed: boolean): void {
+    const data = splineFromPicks(this.points, this.mode, closed);
+    if (data) {
+      ctx.execute({
+        type: "add-entity",
+        entity: { id: newEntityId(), type: "spline", name: nextEntityName(ctx.doc, "spline"), ...layerProp(ctx.activeLayer()), ...data },
+      });
+    }
+    this.cancel();
+    ctx.redraw();
+  }
 }

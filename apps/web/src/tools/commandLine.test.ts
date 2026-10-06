@@ -57,7 +57,7 @@ describe("parseCommand", () => {
 describe("the alias tables", () => {
   it("map only to tools the app has", () => {
     const known = new Set([
-      "select", "line", "polyline", "rectangle", "circle", "arc", "ellipse", "polygon", "slot", "point", "image",
+      "select", "line", "polyline", "rectangle", "circle", "arc", "ellipse", "spline", "polygon", "slot", "point", "image",
       "measure", "straighten", "fill", "text", "dim", "pan", "move", "copy", "rotate", "scale", "mirror",
       "trim", "split", "fillet", "chamfer", "offset", "zoom", "divide", "align", "lengthen", "match", "stretch",
     ]);
