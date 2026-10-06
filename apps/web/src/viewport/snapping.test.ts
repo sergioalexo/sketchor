@@ -131,6 +131,19 @@ describe("findSnap object snaps", () => {
     expect(t.point.y).toBeCloseTo(40, 9);
   });
 
+  it("finds the exact intersection of a line with an ellipse and with a spline (C-08), not a chord point", () => {
+    const ellipse: Entity = { id: "e", type: "ellipse", center: { x: 0, y: 0 }, majorAxis: { x: 80, y: 0 }, ratio: 0.5, start: 0, end: Math.PI * 2 };
+    const s = findSnap(doc(line("l", -100, 20, 100, 20), ellipse), view, { x: 66, y: 22 });
+    expect(s.kind).toBe("intersection");
+    // y = 20 on x²/80² + y²/40² = 1  →  x = 80·√(1 − 0.25)
+    expect(s.point.x).toBeCloseTo(80 * Math.sqrt(0.75), 8);
+    expect(s.point.y).toBeCloseTo(20, 8);
+    const spline: Entity = { id: "s", type: "spline", degree: 3, closed: false, controlPoints: [{ x: 0, y: 0 }, { x: 30, y: 60 }, { x: 60, y: -60 }, { x: 90, y: 0 }], knots: [0, 0, 0, 0, 1, 1, 1, 1] };
+    const hit = findSnap(doc(line("v", 45, -100, 45, 100), spline), view, { x: 46, y: 2 });
+    expect(hit.kind).toBe("intersection");
+    expect(hit.point.x).toBeCloseTo(45, 8);
+  });
+
   it("snaps to the nearest point on a circle when nothing better is close", () => {
     const s = findSnap(doc(circle("c", 0, 0, 50)), view, { x: 33, y: 33 });
     expect(s.kind).toBe("on-line");

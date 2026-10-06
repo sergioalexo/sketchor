@@ -7,6 +7,7 @@ import {
   closestPointOnSegment,
   dist,
   entityPoints,
+  exactPathOf,
   imageCorners,
   intersectCurves,
   kindPath,
@@ -15,6 +16,7 @@ import {
   pathOf,
   polylineSegments,
   type Curve,
+  type XCurve,
 } from "@sketchor/core";
 import { gridStep, type View } from "./view";
 
@@ -139,10 +141,11 @@ export function findSnap(doc: SketchDocument, view: View, cursor: Point, options
   // the nearest point on arcs and circles, perpendicular/tangent from the
   // anchor, and line extensions. Only curves whose bounding box is near the
   // cursor take part, so this stays cheap on a large drawing.
-  const nearby: Curve[] = [];
+  // Ellipses and splines take part as ONE exact curve (C-08), not a chain of chords.
+  const nearby: XCurve[] = [];
   const lines: { a: Point; b: Point }[] = [];
   for (const e of entities) {
-    const path = pathOf(e);
+    const path = e.type === "ellipse" || e.type === "spline" ? exactPathOf(e) : pathOf(e);
     if (!path) continue;
     for (const c of path.curves) {
       if (curveNear(c, cursor, tol)) nearby.push(c);
@@ -155,11 +158,12 @@ export function findSnap(doc: SketchDocument, view: View, cursor: Point, options
     }
   }
   for (const c of nearby) {
-    if (c.kind === "arc") onCurve.push({ point: closestParam(c, cursor).point, kind: "on-line" });
+    if (c.kind !== "segment") onCurve.push({ point: closestParam(c, cursor).point, kind: "on-line" });
   }
   const anchor = opts.anchor ?? null;
   if (anchor) {
     for (const c of nearby) {
+      if (c.kind !== "segment" && c.kind !== "arc") continue;
       for (const p of perpendicularFeet(c, anchor)) featurePoints.push({ point: p, kind: "perpendicular" });
       for (const p of tangentPoints(c, anchor)) featurePoints.push({ point: p, kind: "tangent" });
     }
@@ -195,7 +199,8 @@ export function findSnap(doc: SketchDocument, view: View, cursor: Point, options
 }
 
 /** Cheap bounding-box test: is any part of the curve within `tol` of the cursor? */
-function curveNear(c: Curve, cursor: Point, tol: number): boolean {
+function curveNear(c: XCurve, cursor: Point, tol: number): boolean {
+  if (c.kind === "ellipse" || c.kind === "nurbs") return closestParam(c, cursor).distance <= tol * 1.5;
   if (c.kind === "segment") {
     return (
       cursor.x >= Math.min(c.a.x, c.b.x) - tol &&

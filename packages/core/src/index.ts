@@ -53,3 +53,4 @@ export * from "./plugin";
 export * from "./ellipse";
 export * from "./nurbs";
 export * from "./spline";
+export * from "./filletCurves";

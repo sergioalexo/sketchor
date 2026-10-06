@@ -7,6 +7,7 @@ import {
   extendTo,
   lengthen,
   filletAllCorners,
+  filletCurves,
   filletLines,
   filletPolylineCorner,
   kindHitDistance,
@@ -174,7 +175,7 @@ export class SplitTool implements Tool {
 export class FilletTool implements Tool {
   readonly id = "fillet" as const;
   radius = 0;
-  private first: { entity: LineEntity; at: Point } | null = null;
+  private first: { entity: Entity; at: Point } | null = null;
   private message: string | null = null;
 
   prompt(): string {
@@ -238,8 +239,8 @@ export class FilletTool implements Tool {
       this.first = null;
       return;
     }
-    if (target.type !== "line") {
-      this.message = "Fillet works between two lines, or on a polyline corner";
+    if (target.type !== "line" && target.type !== "arc" && target.type !== "circle" && target.type !== "ellipse" && target.type !== "spline") {
+      this.message = "Fillet works between lines, arcs, circles, ellipses and splines, or on a polyline corner";
       return;
     }
     if (!this.first) {
@@ -247,6 +248,21 @@ export class FilletTool implements Tool {
       return;
     }
     if (this.first.entity.id === target.id) return;
+    if (this.first.entity.type !== "line" || target.type !== "line") {
+      const c = filletCurves(this.first.entity, target, this.radius, this.first.at, p.world);
+      if (!c) {
+        this.message = "Can't fillet these: no tangent circle of that radius touches both";
+        this.first = null;
+        return;
+      }
+      const cmds: Command[] = [];
+      if (c.first !== this.first.entity) cmds.push({ type: "update-entity", entity: c.first });
+      if (c.second !== target) cmds.push({ type: "update-entity", entity: c.second });
+      if (c.arc) cmds.push({ type: "add-entity", entity: { ...c.arc, id: newEntityId() } });
+      ctx.commit(cmds);
+      this.first = null;
+      return;
+    }
     const r = filletLines(this.first.entity, target, this.radius, this.first.at, p.world);
     if (!r) {
       this.message = "Can't fillet these: parallel lines, or the radius is too large for them";
