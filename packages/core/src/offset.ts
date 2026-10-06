@@ -1,14 +1,17 @@
 import type { Entity } from "./entities";
 import { dist, type Point } from "./geometry";
+import { interpolateNurbs } from "./nurbs";
 import {
   closestParam,
   curveEnd,
   curveLength,
   curveStart,
   entityFromPath,
+  exactPathOf,
   intersectCurves,
   joinContiguous,
   pathOf,
+  pointAt,
   subCurve,
   tangentAt,
   type Curve,
@@ -201,10 +204,50 @@ function insertRoundJoins(legs: Leg[], closed: boolean, s: number): Curve[] {
  * or the offset collapses it (a circle offset inward past its center).
  */
 export function offsetEntity(entity: Entity, distance: number, side: Point): Entity | null {
+  if (entity.type === "ellipse" || entity.type === "spline") {
+    const exact = offsetExactCurve(entity, distance, side);
+    if (exact !== undefined) return exact;
+  }
   const path = pathOf(entity);
   if (!path || distance <= 0) return null;
   const s = distance * sideSign(path, side);
   const out = offsetPath(path, s);
   if (!out) return null;
   return entityFromPath(out, entity, "");
+}
+
+const OFFSET_SAMPLES = 160;
+
+/**
+ * An ellipse's or spline's offset is neither an ellipse nor a spline of the
+ * same kind, so it is sampled exactly (`P(t) + d·n(t)` on the true curve, not
+ * on a chord chain) and refitted as one cubic spline — a clean entity with a
+ * handful of points instead of hundreds of 0.05 mm segments. Offsetting
+ * toward the centre of curvature further than the radius of curvature turns
+ * the offset inside out; that is detected (an offset point nearer the source
+ * than the distance asked) and refused, like a circle collapsing.
+ * `undefined` = not handled here (an unclamped spline), use the chain.
+ */
+function offsetExactCurve(entity: Entity, distance: number, side: Point): Entity | null | undefined {
+  const path = exactPathOf(entity);
+  if (!path || path.curves.length !== 1 || distance <= 0) return undefined;
+  const c = path.curves[0];
+  if (c.kind !== "ellipse" && c.kind !== "nurbs") return undefined;
+  const hit = closestParam(c, side);
+  const n0 = tangentAt(c, hit.t);
+  const sign = (side.x - hit.point.x) * -n0.y + (side.y - hit.point.y) * n0.x >= 0 ? 1 : -1;
+  const pts: Point[] = [];
+  const last = path.closed ? OFFSET_SAMPLES - 1 : OFFSET_SAMPLES;
+  for (let i = 0; i <= last; i++) {
+    const t = i / OFFSET_SAMPLES;
+    const p = pointAt(c, t);
+    const T = tangentAt(c, t);
+    const q = { x: p.x - T.y * sign * distance, y: p.y + T.x * sign * distance };
+    if (closestParam(c, q).distance < distance * 0.97) return null;
+    pts.push(q);
+  }
+  if (path.closed) pts.push({ ...pts[0] });
+  const s = interpolateNurbs(pts);
+  if (!s) return null;
+  return entityFromPath({ curves: [{ kind: "nurbs", s }], closed: path.closed }, entity, "");
 }

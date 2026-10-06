@@ -145,3 +145,66 @@ describe("offsetEntity", () => {
   });
 });
 
+
+describe("offsetEntity on ellipses and splines", () => {
+  const ellipse = (): import("./entities").EllipseEntity => ({ id: "e", type: "ellipse", center: { x: 0, y: 0 }, majorAxis: { x: 10, y: 0 }, ratio: 0.5, start: 0, end: Math.PI * 2 });
+
+  it("offsets an ellipse outward as ONE spline that stays at the distance everywhere", async () => {
+    const { distToEllipse } = await import("./ellipse");
+    const out = offsetEntity(ellipse(), 1, { x: 30, y: 0 }) as import("./entities").SplineEntity;
+    expect(out.type).toBe("spline");
+    expect(out.controlPoints.length).toBeLessThan(200);
+    const { tessellateNurbs } = await import("./nurbs");
+    const pts = tessellateNurbs({ degree: out.degree, controlPoints: out.controlPoints, knots: out.knots }, 0.01);
+    const e = ellipse();
+    const geom = { center: e.center, majorAxis: e.majorAxis, ratio: e.ratio, start: 0, end: Math.PI * 2 };
+    for (const p of pts) expect(Math.abs(distToEllipse(geom, p) - 1)).toBeLessThan(0.02);
+    expect(out.closed).toBe(true);
+  });
+
+  it("goes inward when the click is inside, and refuses past the radius of curvature", () => {
+    const inside = offsetEntity(ellipse(), 1, { x: 0, y: 0 }) as import("./entities").SplineEntity;
+    expect(inside.type).toBe("spline");
+    const xs = inside.controlPoints.map((p) => p.x);
+    expect(Math.max(...xs)).toBeLessThan(10);
+    // The ellipse's tightest curvature radius is b²/a = 2.5: 4 inward turns it inside out.
+    expect(offsetEntity(ellipse(), 4, { x: 0, y: 0 })).toBeNull();
+  });
+
+  it("keeps colour and layer", () => {
+    const out = offsetEntity({ ...ellipse(), color: "red", layer: "L" }, 1, { x: 30, y: 0 })!;
+    expect(out.color).toBe("red");
+    expect(out.layer).toBe("L");
+  });
+});
+
+describe("offsetEntity on an open spline", () => {
+  it("stays the asked distance from the source along its whole length, on the clicked side", async () => {
+    const { clampedUniformKnots, distToNurbs, nurbsPointAt, nurbsDomain } = await import("./nurbs");
+    const sp: import("./entities").SplineEntity = {
+      id: "s",
+      type: "spline",
+      degree: 3,
+      controlPoints: [{ x: 0, y: 0 }, { x: 10, y: 20 }, { x: 30, y: -10 }, { x: 50, y: 10 }, { x: 70, y: 0 }],
+      knots: clampedUniformKnots(5, 3),
+      closed: false,
+    };
+    const src = { degree: 3, controlPoints: sp.controlPoints, knots: sp.knots };
+    const out = offsetEntity(sp, 2, { x: 35, y: 100 }) as import("./entities").SplineEntity;
+    expect(out.type).toBe("spline");
+    const o = { degree: out.degree, controlPoints: out.controlPoints, knots: out.knots };
+    const [lo, hi] = nurbsDomain(o);
+    for (let i = 0; i <= 40; i++) {
+      const q = nurbsPointAt(o, lo + ((hi - lo) * i) / 40);
+      expect(Math.abs(distToNurbs(src, q) - 2)).toBeLessThan(0.05);
+    }
+    // Clicked above (the curve runs left to right, so "left" = up): src + 2·leftNormal lies on the offset.
+    const u = (lo + hi) / 2;
+    const { point, tangent } = (await import("./nurbs")).nurbsEval(src, u);
+    const l = Math.hypot(tangent.x, tangent.y);
+    const up = { x: point.x - (tangent.y / l) * 2, y: point.y + (tangent.x / l) * 2 };
+    const down = { x: point.x + (tangent.y / l) * 2, y: point.y - (tangent.x / l) * 2 };
+    expect(distToNurbs(o, up)).toBeLessThan(0.1);
+    expect(distToNurbs(o, down)).toBeGreaterThan(1);
+  });
+});
