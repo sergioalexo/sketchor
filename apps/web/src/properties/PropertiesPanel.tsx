@@ -84,7 +84,7 @@ export function PropertiesPanel({ onClose }: { onClose: () => void }) {
               <input
                 type="color"
                 className="propspanel-swatch"
-                value={cssToHex(common("color") ?? "") ?? "#dfe1e5"}
+                value={cssToHex(common("color") ?? "") ?? cssToHex(getComputedStyle(document.documentElement).getPropertyValue("--text").trim()) ?? "#dfe1e5"}
                 onChange={(e) => applyAll((en) => ({ ...en, color: e.target.value }))}
                 title="Pick a colour"
               />

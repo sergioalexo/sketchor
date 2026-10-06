@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useTheme } from "../theme/themeStore";
 import { decodeDxfBytes, parseSvgText } from "@sketchor/core";
 import { getSessions, importDxfText, importSvgText, openIntoSession, useApp } from "../state/store";
 import { bindDxfVersion, bindSaveHandle, bindSavePath, fileDxfText, openModelBytes } from "../io/drawingFile";
@@ -914,6 +915,7 @@ function useThumbnail(
   ref: React.RefObject<HTMLElement>,
 ): string | null {
   const [svg, setSvg] = useState<string | null>(null);
+  const canvasTheme = useTheme((s) => s.tokens.canvas);
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -956,7 +958,7 @@ function useThumbnail(
             }
             try {
               const text = await getText();
-              setSvg(fileToSvg(entry.name, text, { size, background: "#17181c", stroke: "#c7d0dc" }));
+              setSvg(fileToSvg(entry.name, text, { size, background: canvasTheme.bg, stroke: canvasTheme.entity }));
             } catch {
               setSvg(fileToSvg(entry.name, "", { size }));
             }
@@ -972,7 +974,7 @@ function useThumbnail(
       cancelQueued?.();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entry.name, size]);
+  }, [entry.name, size, canvasTheme]);
   return svg;
 }
 

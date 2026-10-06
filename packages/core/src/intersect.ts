@@ -892,3 +892,55 @@ export function extendTo(target: Entity, boundaries: Entity[], near: Point): Ent
   else curves[0] = subCurve(c, best.t, 1);
   return entityFromPath({ curves, closed: false }, target, target.id);
 }
+
+/**
+ * Points on an ellipse / NURBS curve where a line from `from` meets it at a
+ * right angle (`perpendicular`: `(P−from)·T = 0`) or just touches it
+ * (`tangent`: `(P−from)×T = 0`). Found as sign changes of those two functions
+ * over a 256-step sample, then bisected — exact for any smooth curve, no
+ * closed form needed. Ends of an open curve count only if they truly satisfy
+ * the condition.
+ */
+export function perpendicularTangentPoints(
+  c: EllipseCurve | NurbsCurve,
+  from: Point,
+): { perpendicular: Point[]; tangent: Point[] } {
+  const N = 256;
+  const f = (t: number, kind: 0 | 1): number => {
+    const p = pointAt(c, t);
+    const T = tangentAt(c, t);
+    const vx = p.x - from.x;
+    const vy = p.y - from.y;
+    return kind === 0 ? vx * T.x + vy * T.y : vx * T.y - vy * T.x;
+  };
+  const solve = (kind: 0 | 1): Point[] => {
+    const out: Point[] = [];
+    let t0 = 0;
+    let f0 = f(0, kind);
+    for (let i = 1; i <= N; i++) {
+      const t1 = i / N;
+      const f1 = f(t1, kind);
+      if (f0 === 0 || f0 * f1 < 0) {
+        let lo = t0;
+        let hi = t1;
+        let flo = f0;
+        for (let k = 0; k < 50; k++) {
+          const mid = (lo + hi) / 2;
+          const fm = f(mid, kind);
+          if (flo * fm <= 0) hi = mid;
+          else {
+            lo = mid;
+            flo = fm;
+          }
+        }
+        const p = pointAt(c, (lo + hi) / 2);
+        // The point under `from` makes both functions vanish trivially.
+        if (dist(p, from) > 1e-9 && !out.some((q) => dist(p, q) < 1e-7)) out.push(p);
+      }
+      t0 = t1;
+      f0 = f1;
+    }
+    return out;
+  };
+  return { perpendicular: solve(0), tangent: solve(1) };
+}

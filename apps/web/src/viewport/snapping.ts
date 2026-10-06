@@ -8,6 +8,7 @@ import {
   dist,
   entityPoints,
   exactPathOf,
+  perpendicularTangentPoints,
   imageCorners,
   intersectCurves,
   kindPath,
@@ -163,6 +164,12 @@ export function findSnap(doc: SketchDocument, view: View, cursor: Point, options
   const anchor = opts.anchor ?? null;
   if (anchor) {
     for (const c of nearby) {
+      if (c.kind === "ellipse" || c.kind === "nurbs") {
+        const pt = perpendicularTangentPoints(c, anchor);
+        for (const p of pt.perpendicular) featurePoints.push({ point: p, kind: "perpendicular" });
+        for (const p of pt.tangent) featurePoints.push({ point: p, kind: "tangent" });
+        continue;
+      }
       if (c.kind !== "segment" && c.kind !== "arc") continue;
       for (const p of perpendicularFeet(c, anchor)) featurePoints.push({ point: p, kind: "perpendicular" });
       for (const p of tangentPoints(c, anchor)) featurePoints.push({ point: p, kind: "tangent" });

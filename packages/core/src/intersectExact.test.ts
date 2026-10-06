@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import "./kinds/builtin";
 import type { CircleEntity, EllipseEntity, Entity, LineEntity, SplineEntity } from "./entities";
-import { exactPathOf, extendTo, intersectCurves, joinNurbs, pointAt, splitAt, trimAt } from "./intersect";
+import { exactPathOf, extendTo, intersectCurves, joinNurbs, perpendicularTangentPoints, pointAt, splitAt, trimAt } from "./intersect";
 import { distToEllipse } from "./ellipse";
 import { circleNurbs, clampedUniformKnots, distToNurbs, nurbsDomain, nurbsPointAt, splitNurbs, type NurbsData } from "./nurbs";
 
@@ -206,5 +206,40 @@ describe("regression: other entities unchanged", () => {
   it("exactPathOf of a polyline is the ordinary segment path", () => {
     const e: Entity = { id: "p", type: "polyline", points: [{ x: 0, y: 0 }, { x: 5, y: 0 }, { x: 5, y: 5 }], closed: false };
     expect(exactPathOf(e)!.curves.every((c) => c.kind === "segment")).toBe(true);
+  });
+});
+
+describe("perpendicular / tangent points on exact curves", () => {
+  it("ellipse: the perpendicular feet are normal to the curve, the tangent points graze it", () => {
+    const path = exactPathOf(ellipse())!;
+    const c = path.curves[0] as Extract<(typeof path.curves)[number], { kind: "ellipse" }>;
+    const from = { x: 20, y: 8 };
+    const { perpendicular, tangent } = perpendicularTangentPoints(c, from);
+    expect(tangent).toHaveLength(2);
+    expect(perpendicular.length).toBeGreaterThanOrEqual(2);
+    for (const p of [...perpendicular, ...tangent]) expect(distToEllipse(c.e, p)).toBeLessThan(1e-6);
+    // Tangent point: the ellipse equation's polar line passes through `from` (x·x0/a² + y·y0/b² = 1).
+    for (const p of tangent) expect(p.x * from.x / 100 + p.y * from.y / 25).toBeCloseTo(1, 5);
+    // Perpendicular: the closest point is one of the feet.
+    const closest = Math.min(...perpendicular.map((p) => Math.hypot(p.x - from.x, p.y - from.y)));
+    expect(closest).toBeLessThan(Math.hypot(from.x - 10, from.y));
+  });
+
+  it("a tangent from inside an ellipse does not exist", () => {
+    const c = exactPathOf(ellipse())!.curves[0];
+    if (c.kind !== "ellipse") throw new Error("expected an ellipse curve");
+    expect(perpendicularTangentPoints(c, { x: 1, y: 1 }).tangent).toHaveLength(0);
+  });
+
+  it("spline: perpendicular feet satisfy (P−from)·T = 0", () => {
+    const c = exactPathOf(spline())!.curves[0];
+    if (c.kind !== "nurbs") throw new Error("expected a NURBS curve");
+    const from = { x: 35, y: 40 };
+    const { perpendicular } = perpendicularTangentPoints(c, from);
+    expect(perpendicular.length).toBeGreaterThan(0);
+    for (const p of perpendicular) {
+      const d = distToNurbs(nurbsOf(spline()), p);
+      expect(d).toBeLessThan(1e-6);
+    }
   });
 });
