@@ -49,3 +49,4 @@ export * from "./palette";
 export * from "./dimension";
 export * from "./simplify";
 export * from "./plugin";
+export * from "./ellipse";

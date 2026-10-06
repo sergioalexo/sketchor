@@ -2,6 +2,7 @@ import { boundsOf } from "../dxf";
 import type {
   ArcEntity,
   CircleEntity,
+  EllipseEntity,
   Entity,
   ImageEntity,
   LineEntity,
@@ -9,10 +10,22 @@ import type {
   PolylineEntity,
   TextEntity,
 } from "../entities";
+import {
+  distToEllipse,
+  ellipseBounds,
+  ellipseHasParam,
+  ellipsePointAt,
+  ellipseSweep,
+  isFullEllipse,
+  minorAxisOf,
+  pointInEllipse,
+  tessellateEllipse,
+  transformEllipse,
+} from "../ellipse";
 import { imageCorners, polylineSegments, textCorners } from "../entities";
 import type { Point } from "../geometry";
 import { arcPointAt, arcSweep, bulgeToArc, dist, distToArc, distToSegment, mid } from "../geometry";
-import { applyGrip, gripsOf } from "../grips";
+import { applyGrip, gripsOf, type Grip } from "../grips";
 import { pathOf } from "../intersect";
 import { pointInPolygon } from "../regions";
 import { flattenPolylineToPoints } from "../simplify";
@@ -50,7 +63,7 @@ function similarity(m: Affine): { scale: number; rotation: number; mirrored: boo
 
 /** Points along an arc so no chord strays further than `tol` from the curve. */
 function sampleArc(center: Point, radius: number, start: number, end: number, ccw: boolean, tol: number, full = false): Point[] {
-  const sweep = full ? Math.PI * 2 : arcSweep(start, end, ccw);
+  const sweep = full ? TAU : arcSweep(start, end, ccw);
   const maxStep = radius > tol ? 2 * Math.acos(1 - Math.min(1, tol / radius)) : Math.PI / 2;
   const steps = Math.max(full ? 8 : 2, Math.ceil(sweep / Math.max(maxStep, 1e-3)));
   const out: Point[] = [];
@@ -60,6 +73,8 @@ function sampleArc(center: Point, radius: number, start: number, end: number, cc
   }
   return out;
 }
+
+const TAU = Math.PI * 2;
 
 const closedRun = (pts: Point[]): Point[] => [...pts, pts[0]];
 
@@ -83,7 +98,7 @@ const lineKind: EntityKind<LineEntity> = {
 
 const circleKind: EntityKind<CircleEntity> = {
   type: "circle",
-  tessellate: (e, tol) => [sampleArc(e.center, e.radius, 0, Math.PI * 2, true, tol, true)],
+  tessellate: (e, tol) => [sampleArc(e.center, e.radius, 0, TAU, true, tol, true)],
   bounds: (e) => boundsOf([e]),
   transform: (e, m) => {
     const s = similarity(m);
@@ -151,6 +166,84 @@ const pointKind: EntityKind<PointEntity> = {
   grips: gripsOf,
   applyGrip: (e, g, to) => applyGrip(e, g, to) as PointEntity,
   hitDistance: (e, p) => dist(p, e.p),
+};
+
+const ellipseKind: EntityKind<EllipseEntity> = {
+  type: "ellipse",
+  tessellate: (e, tol) => [tessellateEllipse(e, tol)],
+  bounds: (e) => ellipseBounds(e),
+  transform: (e, m) => {
+    const g = transformEllipse(e, m);
+    return g ? { ...e, ...g } : null;
+  },
+  // No exact ellipse curve in intersect.ts yet (C-08): trim/offset/etc. see it as a fine segment chain.
+  snaps: (e): KindSnap[] => {
+    const out: KindSnap[] = [{ point: e.center, kind: "center" }];
+    const n = minorAxisOf(e);
+    const axisEnds = [
+      { x: e.center.x + e.majorAxis.x, y: e.center.y + e.majorAxis.y },
+      { x: e.center.x + n.x, y: e.center.y + n.y },
+      { x: e.center.x - e.majorAxis.x, y: e.center.y - e.majorAxis.y },
+      { x: e.center.x - n.x, y: e.center.y - n.y },
+    ];
+    axisEnds.forEach((p, i) => {
+      if (ellipseHasParam(e, (i * Math.PI) / 2)) out.push({ point: p, kind: "quadrant" });
+    });
+    if (!isFullEllipse(e)) {
+      out.push({ point: ellipsePointAt(e, e.start), kind: "endpoint" });
+      out.push({ point: ellipsePointAt(e, e.start + ellipseSweep(e)), kind: "endpoint" });
+      out.push({ point: ellipsePointAt(e, e.start + ellipseSweep(e) / 2), kind: "midpoint" });
+    }
+    return out;
+  },
+  grips: (e): Grip[] => {
+    const n = minorAxisOf(e);
+    const c = e.center;
+    const grips: Grip[] = [
+      { point: c, kind: "center", index: 0 },
+      { point: { x: c.x + e.majorAxis.x, y: c.y + e.majorAxis.y }, kind: "quadrant", index: 0 },
+      { point: { x: c.x + n.x, y: c.y + n.y }, kind: "quadrant", index: 1 },
+      { point: { x: c.x - e.majorAxis.x, y: c.y - e.majorAxis.y }, kind: "quadrant", index: 2 },
+      { point: { x: c.x - n.x, y: c.y - n.y }, kind: "quadrant", index: 3 },
+    ];
+    if (!isFullEllipse(e)) {
+      grips.push({ point: ellipsePointAt(e, e.start), kind: "end", index: 0 });
+      grips.push({ point: ellipsePointAt(e, e.start + ellipseSweep(e)), kind: "end", index: 1 });
+    }
+    return grips;
+  },
+  applyGrip: (e, g, to) => {
+    const c = e.center;
+    if (g.kind === "center") return { ...e, center: to };
+    if (g.kind === "quadrant") {
+      const a = Math.hypot(e.majorAxis.x, e.majorAxis.y);
+      if (g.index === 0 || g.index === 2) {
+        // Stretch the major radius, keeping the ratio and the centre.
+        const v = g.index === 0 ? { x: to.x - c.x, y: to.y - c.y } : { x: c.x - to.x, y: c.y - to.y };
+        return Math.hypot(v.x, v.y) < 1e-9 ? e : { ...e, majorAxis: v };
+      }
+      // Minor-axis grips: the ratio follows the cursor's distance along the minor direction.
+      const mu = { x: -e.majorAxis.y / a, y: e.majorAxis.x / a };
+      const along = Math.abs((to.x - c.x) * mu.x + (to.y - c.y) * mu.y);
+      return { ...e, ratio: Math.min(1, Math.max(1e-4, along / a)) };
+    }
+    // Arc end grips: the parameter is the polar angle in the ellipse's own (unit-circle) frame.
+    const n = minorAxisOf(e);
+    const a2 = e.majorAxis.x ** 2 + e.majorAxis.y ** 2;
+    const b2 = n.x ** 2 + n.y ** 2;
+    const dx = to.x - c.x;
+    const dy = to.y - c.y;
+    const t = Math.atan2((dx * n.x + dy * n.y) / b2, (dx * e.majorAxis.x + dy * e.majorAxis.y) / a2);
+    const sweep = ellipseSweep(e);
+    if (g.index === 0) {
+      const end = e.start + sweep;
+      const span = (((end - t) % TAU) + TAU) % TAU;
+      return { ...e, start: t, end: t + (span < 1e-9 ? TAU : span) };
+    }
+    const rel = (((t - e.start) % TAU) + TAU) % TAU;
+    return { ...e, end: e.start + (rel < 1e-9 ? TAU : rel) };
+  },
+  hitDistance: (e, p) => (e.fill && isFullEllipse(e) && pointInEllipse(e, p) ? 0 : distToEllipse(e, p)),
 };
 
 const polylineKind: EntityKind<PolylineEntity> = {
@@ -246,6 +339,6 @@ const imageKind: EntityKind<ImageEntity> = {
   hitDistance: (e, p) => (pointInPolygon(p, imageCorners(e)) ? 0 : Infinity),
 };
 
-for (const kind of [lineKind, circleKind, arcKind, pointKind, polylineKind, textKind, imageKind] as EntityKind<never>[]) {
+for (const kind of [lineKind, circleKind, arcKind, pointKind, ellipseKind, polylineKind, textKind, imageKind] as EntityKind<never>[]) {
   registerKind(kind as unknown as EntityKind<Entity>);
 }

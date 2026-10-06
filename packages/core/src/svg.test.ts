@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
+import "./kinds/builtin";
 import { entitiesToSvgDocument, parseSvgText } from "./svg";
-import type { ArcEntity, CircleEntity, Entity, LineEntity, PointEntity, PolylineEntity } from "./entities";
+import { boundsOf } from "./dxf";
+import type { ArcEntity, CircleEntity, EllipseEntity, Entity, LineEntity, PointEntity, PolylineEntity } from "./entities";
 import type { Point } from "./geometry";
 
 /**
@@ -138,10 +140,33 @@ describe("parseSvgText: shapes", () => {
     expect(parseSvgText(svgOf('<circle cx="0" cy="0" r="0"/>')).entities).toEqual([]);
   });
 
-  it("averages a non-circular ellipse's radii and says so", () => {
+  it("imports a non-circular ellipse as a real ellipse", () => {
     const result = parseSvgText(svgOf('<ellipse cx="0" cy="0" rx="10" ry="20"/>'));
-    expect((result.entities[0] as CircleEntity).radius).toBe(15);
-    expect(result.warnings).toEqual(["an <ellipse> was not circular — imported as the average radius"]);
+    const e = result.entities[0] as EllipseEntity;
+    expect(e.type).toBe("ellipse");
+    expect(Math.hypot(e.majorAxis.x, e.majorAxis.y)).toBeCloseTo(20, 9);
+    expect(e.ratio).toBeCloseTo(0.5, 9);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it("applies the element's transform to an ellipse (rotation, non-uniform scale)", () => {
+    const e = parseSvgText(svgOf('<ellipse cx="0" cy="0" rx="10" ry="5" transform="rotate(90) scale(2 1)"/>')).entities[0] as EllipseEntity;
+    // scale(2,1) first: 20 x 5, then rotate 90° → long axis is vertical.
+    expect(Math.hypot(e.majorAxis.x, e.majorAxis.y)).toBeCloseTo(20, 6);
+    expect(Math.abs(e.majorAxis.x)).toBeLessThan(1e-6);
+    expect(e.ratio).toBeCloseTo(0.25, 6);
+  });
+
+  it("round-trips an ellipse through export and import", () => {
+    const src: EllipseEntity = { id: "e1", type: "ellipse", center: { x: 12, y: 7 }, majorAxis: { x: 6, y: 8 }, ratio: 0.4, start: 0, end: Math.PI * 2 };
+    const svg = entitiesToSvgDocument([src]);
+    expect(svg).toContain("<ellipse");
+    const back = parseSvgText(svg).entities[0] as EllipseEntity;
+    const b0 = boundsOf([src])!;
+    const b1 = boundsOf([back])!;
+    expect(b1.maxX - b1.minX).toBeCloseTo(b0.maxX - b0.minX, 3);
+    expect(b1.maxY - b1.minY).toBeCloseTo(b0.maxY - b0.minY, 3);
+    expect(back.ratio).toBeCloseTo(0.4, 4);
   });
 
   it("takes a near-circular ellipse without complaint", () => {

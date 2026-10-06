@@ -1,5 +1,6 @@
 import type { Entity, EntityId } from "./entities";
 import { newEntityId } from "./entities";
+import { isFullEllipse } from "./ellipse";
 import type { SketchDocument } from "./document";
 import type { Command } from "./commands";
 
@@ -41,6 +42,10 @@ const POINT_RE = new RegExp(
 // Note: sketch code doesn't express per-segment bulge — a polyline with
 // curved (bulged) segments round-trips through code with those segments
 // straightened, same as how layers already aren't expressed in code.
+// Angles are the ellipse's *parametric* angles in degrees (a point is centre + major·cos t + minor·sin t), omitted = full.
+const ELLIPSE_RE = new RegExp(
+  String.raw`^ellipse\s+([A-Za-z_]\w*)\s+at\s*\(\s*(${NUM})\s*,\s*(${NUM})\s*\)\s*major\s*\(\s*(${NUM})\s*,\s*(${NUM})\s*\)\s*ratio\s+(${NUM})(?:\s+from\s+(${NUM})\s+to\s+(${NUM}))?$`,
+);
 const POINT_PAIR = String.raw`\(\s*${NUM}\s*,\s*${NUM}\s*\)`;
 const POLYLINE_RE = new RegExp(
   String.raw`^polyline\s+(?<name>[A-Za-z_]\w*)\s+pts\s+(?<pts>(?:${POINT_PAIR}\s*)+)(?<closed>closed)?$`,
@@ -75,7 +80,7 @@ export function assignNames(doc: SketchDocument): Map<EntityId, string> {
       used.add(e.name);
     }
   }
-  const counters: Record<Entity["type"], number> = { line: 1, circle: 1, arc: 1, point: 1, polyline: 1, text: 1, image: 1 };
+  const counters: Record<Entity["type"], number> = { line: 1, circle: 1, arc: 1, point: 1, ellipse: 1, polyline: 1, text: 1, image: 1 };
   for (const e of doc.all()) {
     if (names.has(e.id)) continue;
     const prefix = NAME_PREFIX[e.type];
@@ -88,7 +93,7 @@ export function assignNames(doc: SketchDocument): Map<EntityId, string> {
   return names;
 }
 
-const NAME_PREFIX: Record<Entity["type"], string> = { line: "L", circle: "C", arc: "A", point: "P", polyline: "PL", text: "T", image: "IMG" };
+const NAME_PREFIX: Record<Entity["type"], string> = { line: "L", circle: "C", arc: "A", point: "P", ellipse: "E", polyline: "PL", text: "T", image: "IMG" };
 
 /** Next free name for a newly drawn entity (used by the tools). */
 export function nextEntityName(doc: SketchDocument, type: Entity["type"]): string {
@@ -121,6 +126,12 @@ export function toCode(doc: SketchDocument): string {
       );
     } else if (e.type === "point") {
       out.push(`point ${name} at (${fmt(e.p.x)}, ${fmt(e.p.y)})`);
+    } else if (e.type === "ellipse") {
+      const full = isFullEllipse(e);
+      out.push(
+        `ellipse ${name} at (${fmt(e.center.x)}, ${fmt(e.center.y)}) major (${fmt(e.majorAxis.x)}, ${fmt(e.majorAxis.y)}) ratio ${fmt(e.ratio)}` +
+          (full ? "" : ` from ${fmt(toDeg(e.start))} to ${fmt(toDeg(e.end))}`),
+      );
     } else if (e.type === "text") {
       out.push(
         `text ${name} at (${fmt(e.at.x)}, ${fmt(e.at.y)}) ${JSON.stringify(e.text)} h ${fmt(e.height)}` +
@@ -153,6 +164,15 @@ export type ParsedEntity =
       ccw: boolean;
     }
   | { type: "point"; name: string; p: { x: number; y: number } }
+  | {
+      type: "ellipse";
+      name: string;
+      center: { x: number; y: number };
+      majorAxis: { x: number; y: number };
+      ratio: number;
+      start: number;
+      end: number;
+    }
   | { type: "polyline"; name: string; points: { x: number; y: number }[]; closed: boolean }
   | { type: "text"; name: string; at: { x: number; y: number }; text: string; height: number; rotation: number }
   | { type: "image"; name: string; insert: { x: number; y: number }; width: number; height: number; rotation: number };
@@ -218,6 +238,26 @@ export function parseCode(text: string): { entities: ParsedEntity[]; errors: Par
         endAngle: (Number(match[6]) * Math.PI) / 180,
         ccw: !match[7],
       };
+    } else if ((match = row.match(ELLIPSE_RE))) {
+      const major = { x: Number(match[4]), y: Number(match[5]) };
+      const ratio = Number(match[6]);
+      if (Math.hypot(major.x, major.y) <= 0) {
+        errors.push({ line: lineNo, message: "ellipse major axis must not be zero-length" });
+        continue;
+      }
+      if (!(ratio > 0 && ratio <= 1)) {
+        errors.push({ line: lineNo, message: "ellipse ratio (minor/major) must be above 0 and at most 1" });
+        continue;
+      }
+      parsed = {
+        type: "ellipse",
+        name: match[1],
+        center: { x: Number(match[2]), y: Number(match[3]) },
+        majorAxis: major,
+        ratio,
+        start: match[7] === undefined ? 0 : (Number(match[7]) * Math.PI) / 180,
+        end: match[8] === undefined ? Math.PI * 2 : (Number(match[8]) * Math.PI) / 180,
+      };
     } else if ((match = row.match(POINT_RE))) {
       parsed = { type: "point", name: match[1], p: { x: Number(match[2]), y: Number(match[3]) } };
     } else if ((match = row.match(TEXT_RE))) {
@@ -271,7 +311,7 @@ export function parseCode(text: string): { entities: ParsedEntity[]; errors: Par
     }
 
     if (!parsed) {
-      const known = ["line", "circle", "arc", "point", "polyline", "text", "image"];
+      const known = ["line", "circle", "arc", "point", "ellipse", "polyline", "text", "image"];
       errors.push({
         line: lineNo,
         message: known.includes(keyword)
@@ -284,6 +324,8 @@ export function parseCode(text: string): { entities: ParsedEntity[]; errors: Par
                   ? "arc NAME at (x, y) r RADIUS from DEG to DEG [cw]"
                   : keyword === "point"
                     ? "point NAME at (x, y)"
+                    : keyword === "ellipse"
+                      ? "ellipse NAME at (x, y) major (dx, dy) ratio R [from DEG to DEG]"
                     : keyword === "text"
                       ? 'text NAME at (x, y) "content" h HEIGHT [rot DEG]'
                       : keyword === "image"
@@ -331,6 +373,17 @@ function sameGeometry(existing: Entity, parsed: ParsedEntity): boolean {
       Math.abs(existing.startAngle - parsed.startAngle) < EPS &&
       Math.abs(existing.endAngle - parsed.endAngle) < EPS &&
       existing.ccw === parsed.ccw
+    );
+  }
+  if (existing.type === "ellipse" && parsed.type === "ellipse") {
+    return (
+      Math.abs(existing.center.x - parsed.center.x) < EPS &&
+      Math.abs(existing.center.y - parsed.center.y) < EPS &&
+      Math.abs(existing.majorAxis.x - parsed.majorAxis.x) < EPS &&
+      Math.abs(existing.majorAxis.y - parsed.majorAxis.y) < EPS &&
+      Math.abs(existing.ratio - parsed.ratio) < EPS &&
+      Math.abs(existing.start - parsed.start) < EPS &&
+      Math.abs(existing.end - parsed.end) < EPS
     );
   }
   if (existing.type === "point" && parsed.type === "point") {
@@ -402,6 +455,18 @@ export function toEntity(parsed: ParsedEntity, id: EntityId, layer?: string, bul
       };
     case "point":
       return { id, type: "point", name: parsed.name, ...layerProp, p: parsed.p };
+    case "ellipse":
+      return {
+        id,
+        type: "ellipse",
+        name: parsed.name,
+        ...layerProp,
+        center: parsed.center,
+        majorAxis: parsed.majorAxis,
+        ratio: parsed.ratio,
+        start: parsed.start,
+        end: parsed.end,
+      };
     case "text":
       return {
         id,

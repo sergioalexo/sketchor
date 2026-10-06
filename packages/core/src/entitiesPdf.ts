@@ -1,3 +1,4 @@
+import { isFullEllipse } from "./ellipse";
 import type { ArcEntity, Entity, PolylineEntity } from "./entities";
 import { polylineSegments } from "./entities";
 import type { Point } from "./geometry";
@@ -69,7 +70,7 @@ export function drawEntitiesToPdf(
 
   const width = opts.strokeWidth ?? 0.5;
   const paintOf = (e: Entity) => {
-    const closed = e.type === "circle" || (e.type === "polyline" && e.closed);
+    const closed = e.type === "circle" || (e.type === "ellipse" && isFullEllipse(e)) || (e.type === "polyline" && e.closed);
     const fill = opts.fill !== false && closed && "fill" in e ? (e.fill as string | undefined) : undefined;
     // Real mm pattern, scaled from world to page units same as everything else here.
     const linePattern = "linetype" in e && e.linetype ? builtinLinetype(e.linetype).pattern : [];
@@ -124,7 +125,11 @@ export function drawEntitiesToPdf(
       pdf.polyline(polylinePoints(e), paint, e.closed);
     } else {
       // A kind outside the built-in seven (kinds/registry.ts): its tessellation, one path per run.
-      for (const run of kindTessellate(e as Entity, 0.01)) if (run.length >= 2) pdf.polyline(run.map(at), paint);
+      for (const run of kindTessellate(e as Entity, 0.01)) {
+        if (run.length < 2) continue;
+        const closed = e.type === "ellipse" && isFullEllipse(e);
+        pdf.polyline((closed ? run.slice(0, -1) : run).map(at), paint, closed);
+      }
     }
   }
 

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Command, Entity, PolylineEntity } from "@sketchor/core";
-import { arcPointAt, arcSweep, bulgeToArc, BUILTIN_LINETYPES, dist, findClosedRegions, layerOf, polylineLength } from "@sketchor/core";
+import { arcPointAt, arcSweep, bulgeToArc, BUILTIN_LINETYPES, dist, ellipseSweep, findClosedRegions, isFullEllipse, layerOf, polylineLength } from "@sketchor/core";
 import { bus, doc, useApp } from "../state/store";
 import { parseLength } from "../tools/typedInput";
 import { factorFromMm, formatArea, formatLength, type DisplayUnit } from "../units";
@@ -216,6 +216,28 @@ function Geometry({ entity, unit }: { entity: Entity; unit: DisplayUnit }) {
           <ReadRow label="Length" value={formatLength(entity.radius * sweep, unit)} />
           <ReadRow label="Start point" value={fmtPoint(arcPointAt(entity.center, entity.radius, entity.startAngle), unit)} />
           <ReadRow label="End point" value={fmtPoint(arcPointAt(entity.center, entity.radius, entity.endAngle), unit)} />
+        </Section>
+      );
+    }
+    case "ellipse": {
+      const major = Math.hypot(entity.majorAxis.x, entity.majorAxis.y);
+      const full = isFullEllipse(entity);
+      const rotation = (Math.atan2(entity.majorAxis.y, entity.majorAxis.x) * 180) / Math.PI;
+      const setMajor = (length: number, angleDeg: number) =>
+        length > 0 && update({ ...entity, majorAxis: { x: length * Math.cos(rad(angleDeg)), y: length * Math.sin(rad(angleDeg)) } });
+      return (
+        <Section title={full ? "Ellipse" : "Elliptical arc"}>
+          <PointRow label="Center" p={entity.center} unit={unit} onCommit={(p) => update({ ...entity, center: p })} testId="prop-center" />
+          <LengthRow label="Major radius" value={major} unit={unit} testId="prop-major" onCommit={(v) => setMajor(v, rotation)} />
+          <LengthRow label="Minor radius" value={major * entity.ratio} unit={unit} testId="prop-minor" onCommit={(v) => v > 0 && major > 0 && update({ ...entity, ratio: Math.min(1, v / major) })} />
+          <NumberRow label="Rotation" value={round(rotation)} suffix="°" testId="prop-rotation" onCommit={(v) => setMajor(major, v)} />
+          {full ? null : (
+            <>
+              <NumberRow label="Start" value={deg(entity.start)} suffix="°" testId="prop-start" onCommit={(v) => update({ ...entity, start: rad(v) })} />
+              <NumberRow label="End" value={deg(entity.end)} suffix="°" testId="prop-end" onCommit={(v) => update({ ...entity, end: rad(v) })} />
+              <ReadRow label="Sweep" value={`${round(deg(ellipseSweep(entity)))}°`} />
+            </>
+          )}
         </Section>
       );
     }

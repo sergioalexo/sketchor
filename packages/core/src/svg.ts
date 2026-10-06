@@ -1,10 +1,11 @@
-import type { ArcEntity, CircleEntity, Entity, ImageEntity, LineEntity, PolylineEntity } from "./entities";
+import type { ArcEntity, CircleEntity, EllipseEntity, Entity, ImageEntity, LineEntity, PolylineEntity } from "./entities";
 import { layerOf, newEntityId, polylineSegments } from "./entities";
 import type { Point } from "./geometry";
 import { arcPointAt, arcSweep, bulgeToArc, dist } from "./geometry";
 import { boundsOf } from "./dxf";
 import { builtinLinetype } from "./linetypes";
 import { kindTessellate } from "./kinds/registry";
+import { ellipsePointAt, ellipseSweep, isFullEllipse, transformEllipse } from "./ellipse";
 
 /**
  * Full-fidelity SVG import/export — unlike dxf.ts's `entitiesToSvg` (a
@@ -56,6 +57,24 @@ function arcPathD(e: ArcEntity, toSvg: (p: Point) => Point): string {
     pts.push(`${i === 0 ? "M" : "L"}${fmt(p.x)} ${fmt(p.y)}`);
   }
   return pts.join(" ");
+}
+
+/** A full ellipse as `<ellipse>` (rotated about its centre), an elliptical arc as a path with an `A` command — both exact. */
+function ellipseSvg(e: EllipseEntity, toSvg: (p: Point) => Point, attrs: string): string {
+  const rx = Math.hypot(e.majorAxis.x, e.majorAxis.y);
+  const ry = rx * e.ratio;
+  const rotDeg = -(Math.atan2(e.majorAxis.y, e.majorAxis.x) * 180) / Math.PI; // Y flips, so the angle negates
+  if (isFullEllipse(e)) {
+    const c = toSvg(e.center);
+    const rot = Math.abs(rotDeg) > 1e-9 ? ` transform="rotate(${fmt(rotDeg)} ${fmt(c.x)} ${fmt(c.y)})"` : "";
+    return `<ellipse cx="${fmt(c.x)}" cy="${fmt(c.y)}" rx="${fmt(rx)}" ry="${fmt(ry)}"${rot}${attrs}/>`;
+  }
+  const sweep = ellipseSweep(e);
+  const p0 = toSvg(ellipsePointAt(e, e.start));
+  const p1 = toSvg(ellipsePointAt(e, e.start + sweep));
+  const large = sweep > Math.PI ? 1 : 0;
+  // World ccw is SVG sweep-flag 0 (Y is flipped).
+  return `<path d="M${fmt(p0.x)} ${fmt(p0.y)} A${fmt(rx)} ${fmt(ry)} ${fmt(rotDeg)} ${large} 0 ${fmt(p1.x)} ${fmt(p1.y)}"${attrs}/>`;
 }
 
 /** A polyline's segments (straight or bulge-arc) as one SVG path `d` attribute. */
@@ -114,7 +133,7 @@ export function entitiesToSvgDocument(entities: Entity[], opts: SvgExportOptions
   // stroke, and `fill` (closed shapes only) a low-opacity fill so the geometry
   // still reads through it.
   const paint = (e: Entity): string => {
-    const closed = e.type === "circle" || (e.type === "polyline" && e.closed);
+    const closed = e.type === "circle" || (e.type === "ellipse" && isFullEllipse(e)) || (e.type === "polyline" && e.closed);
     let out = "";
     if (e.color) out += ` stroke="${escapeXml(e.color)}"`;
     if (closed && "fill" in e && e.fill) out += ` fill="${escapeXml(e.fill)}" fill-opacity="${fmt(fillOpacity)}"`;
@@ -165,6 +184,8 @@ export function entitiesToSvgDocument(entities: Entity[], opts: SvgExportOptions
           `<image x="${fmt(topLeft.x)}" y="${fmt(topLeft.y)}" width="${fmt(e.width)}" height="${fmt(e.height)}" ` +
             `href="${escapeXml(e.dataUrl)}" preserveAspectRatio="none"${rot}/>`,
         );
+      } else if (e.type === "ellipse") {
+        body.push(ellipseSvg(e, toSvg, paint(e)));
       } else if (e.type === "polyline") {
         body.push(`<path d="${polylinePathD(e, toSvg)}"${paint(e)}/>`);
       } else {
@@ -701,20 +722,31 @@ export function parseSvgText(text: string): SvgImportResult {
         case "ellipse": {
           const rx = numAttr(child, "rx");
           const ry = numAttr(child, "ry");
-          const center = applyMat(m, numAttr(child, "cx"), numAttr(child, "cy"));
-          const r = ((rx + ry) / 2) * matScale(m);
-          if (r > 0) {
-            if (Math.abs(rx - ry) > Math.max(rx, ry) * 0.02) {
-              warnings.push("an <ellipse> was not circular — imported as the average radius");
-            }
+          if (rx <= 0 || ry <= 0) break;
+          const [ma, mb, mc, md] = m;
+          const similar = Math.abs(ma * mc + mb * md) < 1e-6 * (Math.hypot(ma, mb) * Math.hypot(mc, md) || 1) && Math.abs(Math.hypot(ma, mb) - Math.hypot(mc, md)) < 1e-6 * (Math.hypot(ma, mb) || 1);
+          const cx = numAttr(child, "cx");
+          const cy = numAttr(child, "cy");
+          if (similar && Math.abs(rx - ry) <= Math.max(rx, ry) * 0.001) {
             entities.push({
               id: newEntityId(),
               type: "circle",
               ...(layer ? { layer } : {}),
-              center: fromSvgPoint(center),
-              radius: r,
+              center: fromSvgPoint(applyMat(m, cx, cy)),
+              radius: ((rx + ry) / 2) * matScale(m),
             } as CircleEntity);
+            break;
           }
+          // A real ellipse (C-03): the images of the two semi-diameters under the element's transform
+          // are conjugate semi-diameters of the result, which transformEllipse turns into principal axes.
+          const c0 = fromSvgPoint(applyMat(m, cx, cy));
+          const u = fromSvgPoint(applyMat(m, cx + rx, cy));
+          const v = fromSvgPoint(applyMat(m, cx, cy + ry));
+          const g = transformEllipse(
+            { center: { x: 0, y: 0 }, majorAxis: { x: 1, y: 0 }, ratio: 1, start: 0, end: Math.PI * 2 },
+            [u.x - c0.x, u.y - c0.y, v.x - c0.x, v.y - c0.y, c0.x, c0.y],
+          );
+          if (g) entities.push({ id: newEntityId(), type: "ellipse", ...(layer ? { layer } : {}), ...g });
           break;
         }
         case "rect": {

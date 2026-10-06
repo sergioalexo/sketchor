@@ -142,6 +142,52 @@ export interface PointEntity {
   p: Point;
 }
 
+export interface EllipseEntity {
+  id: EntityId;
+  type: "ellipse";
+  /** Human-readable handle used in the sketch code view (e.g. "E1"). */
+  name?: string;
+  /** Layer this entity belongs to; absent means the default layer "0". */
+  layer?: string;
+  /** Stroke colour (any CSS colour). Absent = the theme's default entity colour. */
+  color?: string;
+  /**
+   * Hatch-fill colour for closed shapes (a `closed` polyline or a circle);
+   * ignored for open shapes. Absent = no fill. Set by the Fill/Hatch tool and
+   * by plugins (e.g. the load planner colours pallets by order).
+   */
+  fill?: string;
+  /** Named linetype from the `linetypes` table (CONTINUOUS, DASHED, HIDDEN, CENTER, PHANTOM, DOT, DASHDOT, BORDER, DIVIDE, or a custom imported one — see linetypes.ts). Absent = BYLAYER: inherit the entity's layer's linetype, or CONTINUOUS if the layer has none either. */
+  linetype?: string;
+  /** Plot/display line weight in mm (the DXF standard set: 0, 0.05, 0.09, ... up to 2.11). Absent = BYLAYER, same inheritance as {@link linetype}. */
+  lineweight?: number;
+  /**
+   * A construction/guide entity: visible but excluded from export weight —
+   * BOM/measure/nest and similar tools treat it as a reference, not real
+   * geometry. Independent of {@link linetype} (before Z-04 this one boolean,
+   * `dashed`, meant both "draw dashed" and "is construction" at once; an old
+   * document's `dashed: true` migrates to `construction: true` +
+   * `linetype: "DASHED"`, see `tables.ts`'s v3→v4 migration).
+   */
+  construction?: boolean;
+  center: Point;
+  /**
+   * The semi-major axis as a vector from the centre (DXF convention), so its
+   * length is the major radius and its direction the ellipse's rotation.
+   */
+  majorAxis: Point;
+  /** Minor radius / major radius, 0 < ratio <= 1. The minor axis is the major axis turned +90 degrees, scaled by this. */
+  ratio: number;
+  /**
+   * Parametric start/end in radians (counterclockwise, measured on the
+   * ellipse's own parameter — not the polar angle): a point is
+   * `center + major*cos(t) + minor*sin(t)`. A full ellipse is `0 .. 2*PI`.
+   */
+  start: number;
+  end: number;
+}
+
+
 export interface PolylineEntity {
   id: EntityId;
   type: "polyline";
@@ -270,7 +316,15 @@ export function layerOf(entity: Entity): string {
 
 export const DEFAULT_LAYER = "0";
 
-export type Entity = LineEntity | CircleEntity | ArcEntity | PointEntity | PolylineEntity | TextEntity | ImageEntity;
+export type Entity =
+  | LineEntity
+  | CircleEntity
+  | ArcEntity
+  | PointEntity
+  | EllipseEntity
+  | PolylineEntity
+  | TextEntity
+  | ImageEntity;
 
 /** Rough width of a {@link TextEntity} string in world units — one built-in font, ~0.55 em per glyph. */
 export function textWidth(text: string, height: number): number {

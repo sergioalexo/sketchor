@@ -4,6 +4,7 @@ import type { Point } from "./geometry";
 import { kindBounds, kindTessellate } from "./kinds/registry";
 import { arcExtentPoints, arcPointAt, arcSweep, bulgeToArc, dist } from "./geometry";
 import { aciToHex } from "./aci";
+import { transformEllipse } from "./ellipse";
 import { unescapeDxfText } from "./dxfText";
 
 /** Minimal XML text-content escape for the thumbnail SVG. */
@@ -387,38 +388,6 @@ function dxfArc(cx: number, cy: number, r: number, a0deg: number, a1deg: number,
   return arc({ x: cx, y: cy }, r, (a0deg * Math.PI) / 180, (a1deg * Math.PI) / 180, true, layer);
 }
 
-/** DXF ELLIPSE -> polyline. Major axis is an endpoint relative to center. */
-function ellipseToLines(
-  cx: number,
-  cy: number,
-  majorX: number,
-  majorY: number,
-  ratio: number,
-  startParam: number,
-  endParam: number,
-  layer?: string,
-): Entity[] {
-  const majorLen = Math.hypot(majorX, majorY);
-  if (majorLen < 1e-9) return [];
-  const minorLen = majorLen * ratio;
-  const rot = Math.atan2(majorY, majorX);
-  const cosR = Math.cos(rot);
-  const sinR = Math.sin(rot);
-  let sweep = endParam - startParam;
-  if (Math.abs(sweep) < 1e-9) sweep = 2 * Math.PI;
-  const steps = Math.min(128, Math.max(8, Math.ceil((Math.abs(sweep) / (2 * Math.PI)) * 96)));
-  const pts: Point[] = [];
-  for (let i = 0; i <= steps; i++) {
-    const t = startParam + sweep * (i / steps);
-    const ex = majorLen * Math.cos(t);
-    const ey = minorLen * Math.sin(t);
-    pts.push({ x: cx + ex * cosR - ey * sinR, y: cy + ex * sinR + ey * cosR });
-  }
-  const out: Entity[] = [];
-  polyline(pts, out, layer);
-  return out;
-}
-
 /** A polyline vertex, carrying the bulge for the segment that follows it. */
 interface Vertex {
   x: number;
@@ -646,6 +615,15 @@ function placeEntity(
         ccw: mirrored ? !entity.ccw : entity.ccw,
       };
     }
+    case "ellipse": {
+      // The insert map is affine, and an ellipse stays an ellipse under any affine map — including non-uniform scale.
+      const a = cos * sx;
+      const b = sin * sx;
+      const c = -sin * sy;
+      const d = cos * sy;
+      const g = transformEllipse(entity, [a, b, c, d, insertion.x - (a * base.x + c * base.y), insertion.y - (b * base.x + d * base.y)]);
+      return g ? { ...entity, ...g, id } : { ...entity, id };
+    }
     case "text":
       return { ...entity, id, at: map(entity.at), height: entity.height * radiusScale, rotation: entity.rotation + rotation };
     case "image":
@@ -725,18 +703,26 @@ function convertRecords(raws: RawEntity[], ctx: ConvertContext): Entity[] {
         break;
       }
       case "ELLIPSE": {
-        entities.push(
-          ...ellipseToLines(
-            num(raw, 10),
-            num(raw, 20),
-            num(raw, 11),
-            num(raw, 21),
-            num(raw, 40, 1),
-            num(raw, 41, 0),
-            num(raw, 42, 2 * Math.PI),
-            layer,
-          ),
-        );
+        // A real ellipse entity (C-03). DXF stores the major-axis endpoint relative to the centre, the
+        // minor/major ratio, and parametric start/end (counterclockwise, 0..2π for a full one).
+        const major = { x: num(raw, 11), y: num(raw, 21) };
+        const ratio = num(raw, 40, 1);
+        if (Math.hypot(major.x, major.y) < 1e-9 || !(ratio > 0)) break;
+        const start = num(raw, 41, 0);
+        let end = num(raw, 42, 2 * Math.PI);
+        if (end <= start) end += 2 * Math.PI * Math.ceil((start - end) / (2 * Math.PI) + 1e-12);
+        // Writers round angles (6 decimals is common): a sweep within that of a full turn is a full ellipse.
+        if (end - start > 2 * Math.PI - 1e-5) end = start + 2 * Math.PI;
+        entities.push({
+          id: newEntityId(),
+          type: "ellipse",
+          layer,
+          center: { x: num(raw, 10), y: num(raw, 20) },
+          // A ratio above 1 means the "major" axis was really the minor: swap the roles (turn 90°, invert).
+          ...(ratio > 1
+            ? { majorAxis: { x: -major.y * ratio, y: major.x * ratio }, ratio: 1 / ratio, start: start - Math.PI / 2, end: end - Math.PI / 2 }
+            : { majorAxis: major, ratio, start, end }),
+        });
         break;
       }
       case "LWPOLYLINE": {

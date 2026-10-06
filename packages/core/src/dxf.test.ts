@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import "./kinds/builtin";
 import { boundsOf, dxfToSvg, entitiesToSvg, parseDxf, type DxfParseOptions } from "./dxf";
-import type { ArcEntity, CircleEntity, Entity, LineEntity, PointEntity, PolylineEntity, TextEntity } from "./entities";
+import { ellipsePointAt, isFullEllipse } from "./ellipse";
+import type { ArcEntity, CircleEntity, EllipseEntity, Entity, LineEntity, PointEntity, PolylineEntity, TextEntity } from "./entities";
 
 /**
  * The DXF importer — the widest surface in the codebase and the one fed by
@@ -153,12 +155,13 @@ describe("legacy POLYLINE / VERTEX / SEQEND", () => {
 });
 
 describe("ELLIPSE", () => {
-  it("tessellates a full ellipse into a closed polyline", () => {
+  it("imports a full ellipse as one exact ellipse entity", () => {
     // Major axis (10, 0) from the centre, ratio 0.5 -> 10 x 5 half-axes.
     const text = entitiesOnly(rec("ELLIPSE", [[10, 0], [20, 0], [11, 10], [21, 0], [40, 0.5], [41, 0], [42, 2 * Math.PI]]));
-    const [e] = entitiesOf(text) as PolylineEntity[];
-    expect(e.type).toBe("polyline");
-    expect(e.closed).toBe(true);
+    const [e] = entitiesOf(text) as EllipseEntity[];
+    expect(e.type).toBe("ellipse");
+    expect(e.ratio).toBe(0.5);
+    expect(isFullEllipse(e)).toBe(true);
     const b = boundsOf([e])!;
     expect(b.minX).toBeCloseTo(-10, 6);
     expect(b.maxX).toBeCloseTo(10, 6);
@@ -174,12 +177,22 @@ describe("ELLIPSE", () => {
     expect(b.maxX).toBeCloseTo(5, 6);
   });
 
-  it("emits an open arc for a partial sweep", () => {
+  it("keeps a partial sweep as an elliptical arc", () => {
     const text = entitiesOnly(rec("ELLIPSE", [[10, 0], [20, 0], [11, 10], [21, 0], [40, 1], [41, 0], [42, Math.PI / 2]]));
-    const [e] = entitiesOf(text) as PolylineEntity[];
-    expect(e.closed).toBe(false);
-    closeTo(e.points[0], 10, 0, 6);
-    closeTo(e.points[e.points.length - 1], 0, 10, 6);
+    const [e] = entitiesOf(text) as EllipseEntity[];
+    expect(isFullEllipse(e)).toBe(false);
+    closeTo(ellipsePointAt(e, e.start), 10, 0, 6);
+    closeTo(ellipsePointAt(e, e.end), 0, 10, 6);
+  });
+
+  it("reads a ratio above 1 as the same curve with the axes swapped", () => {
+    // Axis (4, 0), ratio 2 -> the vertical half-axis is 8.
+    const text = entitiesOnly(rec("ELLIPSE", [[10, 0], [20, 0], [11, 4], [21, 0], [40, 2], [41, 0], [42, 2 * Math.PI]]));
+    const [e] = entitiesOf(text) as EllipseEntity[];
+    expect(e.ratio).toBeCloseTo(0.5, 9);
+    const b = boundsOf([e])!;
+    expect(b.maxY).toBeCloseTo(8, 6);
+    expect(b.maxX).toBeCloseTo(4, 6);
   });
 
   it("ignores a degenerate ellipse with no major axis", () => {

@@ -1,6 +1,7 @@
-import type { ArcEntity, CircleEntity, Entity, ImageEntity, LineEntity, PointEntity, PolylineEntity, TextEntity } from "../entities";
+import type { ArcEntity, CircleEntity, EllipseEntity, Entity, ImageEntity, LineEntity, PointEntity, PolylineEntity, TextEntity } from "../entities";
 import { imageCorners, layerOf } from "../entities";
 import { dist } from "../geometry";
+import { ellipseSweep, isFullEllipse } from "../ellipse";
 import { kindTessellate } from "../kinds/registry";
 import { aciToHex, hexToRgb, nearestAci } from "../aci";
 import { n, pair } from "./write";
@@ -88,6 +89,30 @@ export function arcEntity2018(e: ArcEntity, handle: string, owner: string): stri
     pair(40, e.radius) +
     `100\nAcDbArc\n` +
     pair(50, startDeg) + pair(51, endDeg) +
+    nameXdata(e.name)
+  );
+}
+
+/** A parametric angle or ratio at full double precision — 6 decimals would turn a full ellipse's 2π into "almost full". */
+const hi = (code: number, v: number): string => `${code}
+${Number.isInteger(v) ? `${v}.0` : String(+v.toPrecision(15))}
+`;
+
+export function ellipseEntity2018(e: EllipseEntity, handle: string, owner: string): string {
+  const full = isFullEllipse(e);
+  return (
+    `0
+ELLIPSE
+` +
+    entityHead(handle, owner, e) +
+    `100
+AcDbEllipse
+` +
+    pair(10, e.center.x) + pair(20, e.center.y) + pair(30, 0) +
+    pair(11, e.majorAxis.x) + pair(21, e.majorAxis.y) + pair(31, 0) +
+    pair(210, 0) + pair(220, 0) + pair(230, 1) +
+    hi(40, e.ratio) +
+    hi(41, full ? 0 : e.start) + hi(42, full ? Math.PI * 2 : e.start + ellipseSweep(e)) +
     nameXdata(e.name)
   );
 }
@@ -180,6 +205,8 @@ export function entityDxf2018(e: Entity, handle: string, owner: string, nextHand
       return arcEntity2018(e, handle, owner);
     case "point":
       return pointEntity2018(e, handle, owner);
+    case "ellipse":
+      return ellipseEntity2018(e, handle, owner);
     case "polyline":
       return polylineEntity2018(e, handle, owner);
     case "text":
