@@ -252,3 +252,26 @@ two separate command-proposal pipelines.**
   `batch` command (one undo step)? (Recommendation: yes, by default.)
 - **Signing authority:** who holds the Sketchor counter-sign key, and what's the
   review bar before a plugin is countersigned?
+
+## Appendix — theming a plugin panel (TH-08)
+
+A panel is an opaque-origin iframe, so it cannot read the app's CSS variables.
+The host injects the current theme into every panel as CSS custom properties
+on `:root` and re-sends them when the theme changes (the panel is not
+reloaded, so its state survives):
+
+| Variable | Meaning |
+| --- | --- |
+| `--sk-bg` | window background |
+| `--sk-panel` | panel / input / card surface |
+| `--sk-border` | borders and dividers |
+| `--sk-text` | primary text |
+| `--sk-text-dim` | secondary text, icons |
+| `--sk-accent` | primary buttons, active tab |
+| `--sk-accent-soft` | selected / drop-target tint |
+| `--sk-danger` | errors |
+
+Use them with a fallback, which keeps the panel readable in a host that
+predates them: `background: var(--sk-bg, #1e1f22); color: var(--sk-text, #dfe1e5);`.
+Panels that ignore them keep their own colours. Print/report HTML passed to
+`ui.print` is a sheet of paper and should stay fixed black-on-white.

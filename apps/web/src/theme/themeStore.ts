@@ -79,6 +79,7 @@ function applyTheme(tokens: ThemeTokens): void {
   root.style.setProperty("--accent", tokens.ui.accent);
   root.style.setProperty("--accent-soft", tokens.ui.accentSoft);
   root.style.setProperty("--danger", tokens.ui.danger);
+  root.style.setProperty("--canvas-bg", tokens.canvas.bg);
   if (tokens.fonts?.mono) root.style.setProperty("--mono", tokens.fonts.mono);
 }
 

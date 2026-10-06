@@ -21,6 +21,8 @@
   --accent: #3574f0;
   --accent-soft: #2c3d63;
   --danger: #e06c75;
+  --canvas-bg: #17181c;
+  --accent-text: color-mix(in srgb, var(--accent) 45%, var(--text));
 }
 
 html,
@@ -72,7 +74,7 @@ body {
 
 .brand:hover {
   background: var(--accent-soft);
-  color: #9ec1ff;
+  color: var(--accent-text, #9ec1ff);
 }
 
 .brand svg {
@@ -169,7 +171,7 @@ body {
 .tool.active {
   background: var(--accent-soft);
   border-color: var(--accent);
-  color: #9ec1ff;
+  color: var(--accent-text, #9ec1ff);
 }
 
 .keyhint {
@@ -274,7 +276,7 @@ body {
   border: none;
   outline: none;
   resize: none;
-  background: #17181c;
+  background: var(--canvas-bg, #17181c);
   color: var(--text);
   font-family: "Cascadia Code", Consolas, monospace;
   font-size: 12px;
@@ -315,7 +317,7 @@ body {
 
 .action.toggled {
   background: var(--accent-soft);
-  color: #9ec1ff;
+  color: var(--accent-text, #9ec1ff);
 }
 
 .action-menu-wrap {
@@ -681,7 +683,7 @@ body {
   padding: 2px 4px;
   border: 1px solid var(--accent);
   border-radius: 4px;
-  background: #17181c;
+  background: var(--canvas-bg, #17181c);
   color: var(--text);
   font: inherit;
 }
@@ -854,7 +856,7 @@ body {
   padding: 3px 6px;
   border-radius: 6px;
   border: 1px solid var(--border);
-  background: #17181c;
+  background: var(--canvas-bg, #17181c);
   color: var(--text);
   font-size: 12px;
 }
@@ -980,7 +982,7 @@ body {
   padding: 3px 6px;
   border-radius: 5px;
   border: 1px solid var(--border);
-  background: #17181c;
+  background: var(--canvas-bg, #17181c);
   color: var(--text);
   font-size: 12px;
   width: 100%;
@@ -1215,7 +1217,7 @@ body {
   padding: 4px 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: #17181c;
+  background: var(--canvas-bg, #17181c);
   color: var(--text);
   font-size: 11.5px;
 }
@@ -1280,7 +1282,7 @@ body {
 .filetag.active {
   background: var(--accent-soft);
   border-color: var(--accent);
-  color: #9ec1ff;
+  color: var(--accent-text, #9ec1ff);
 }
 
 .filetag.clear {
@@ -1372,7 +1374,7 @@ body {
 }
 
 .filexplorer-col.active {
-  color: #9ec1ff;
+  color: var(--accent-text, #9ec1ff);
 }
 
 .filexplorer-col-arrow {
@@ -1408,7 +1410,7 @@ body {
   line-height: 0;
   border-radius: 3px;
   overflow: hidden;
-  background: #17181c;
+  background: var(--canvas-bg, #17181c);
 }
 
 .filerow-thumb svg {
@@ -1475,7 +1477,7 @@ body {
   border-radius: 5px;
   overflow: hidden;
   aspect-ratio: 1;
-  background: #17181c;
+  background: var(--canvas-bg, #17181c);
 }
 
 .filecard-thumb svg {
@@ -1515,7 +1517,7 @@ body {
 /* The action a plain Ctrl+S would take — the menu's suggested default. */
 .action-menu button.action-menu-default {
   font-weight: 600;
-  color: #9ec1ff;
+  color: var(--accent-text, #9ec1ff);
 }
 
 /* ---------- update popover & banner ---------- */
@@ -1614,7 +1616,7 @@ body {
 /* A small badge on the toolbar button so an available update is visible
    even after the banner has been dismissed. */
 .action.update-ready {
-  color: #9ec1ff;
+  color: var(--accent-text, #9ec1ff);
 }
 
 .update-dot {
@@ -1951,7 +1953,7 @@ kbd.shortcut-key-fixed {
 .model-stage {
   position: absolute;
   inset: 0;
-  background: #17181c;
+  background: var(--canvas-bg, #17181c);
   overflow: hidden;
   /* Lets the overlays below adapt to the stage's own width (a tablet, or a
      desktop with every side panel open), not the window's. */
@@ -2557,7 +2559,7 @@ kbd.shortcut-key-fixed {
 .tracking-toggle.active {
   background: var(--accent-soft);
   border-color: var(--accent);
-  color: #9ec1ff;
+  color: var(--accent-text, #9ec1ff);
 }
 
 .app.touch .tracking-toggle {
