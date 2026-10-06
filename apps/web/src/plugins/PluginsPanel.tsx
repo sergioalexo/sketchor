@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { PERMISSIONS, isThemeBundle, loadThemeBundle, type Permission, type PluginManifest, type SignedBundle } from "@sketchor/core";
+import { PERMISSIONS, type Permission, type PluginManifest, type SignedBundle } from "@sketchor/core";
 import { installBundle, uninstall, updateGrants, type InstallDecision, type InstallPromptInfo } from "./host/install";
 import { listInstalled, onInstalledChange, type InstalledPlugin } from "./host/pluginStore";
 import { BUILTIN_MANIFESTS } from "./builtins/manifests";
+import { parseThemeFileText } from "../theme/themeFileInstall";
 import { installThemeBundle, listInstalledThemes, onThemesChange, uninstallThemePlugin } from "../theme/installedThemes";
 import { useTheme } from "../theme/themeStore";
 import {
@@ -95,18 +96,19 @@ export function PluginsPanel({ onClose }: { onClose: () => void }) {
     setNotice(null);
     let bundle: SignedBundle;
     try {
-      const parsed: unknown = JSON.parse(await file.text());
-      if (isThemeBundle(parsed)) {
+      const text = await file.text();
+      const parsed: unknown = JSON.parse(text);
+      const asTheme = parseThemeFileText(text);
+      if (asTheme.ok || !asTheme.notATheme) {
         // Theme-only bundles carry no code, so they install unsigned (TH-02) — after an explicit confirm.
-        const r = loadThemeBundle(parsed);
-        if (!r.ok) return setNotice(`Not installed: ${r.errors.join("; ")}`);
-        const names = r.themes.map((t) => t.title).join(", ");
-        if (!window.confirm(`Install the unsigned theme${r.themes.length > 1 ? "s" : ""} ${names}?
+        if (!asTheme.ok) return setNotice(`Not installed: ${asTheme.reason}`);
+        const names = asTheme.titles.join(", ");
+        if (!window.confirm(`Install the unsigned theme${asTheme.titles.length > 1 ? "s" : ""} ${names}?
 
 Themes only change colours and can't run code.`)) {
           return setNotice("Installation declined.");
         }
-        installThemeBundle(parsed);
+        installThemeBundle(asTheme.bundle);
         return setNotice(`Installed ${names}. Pick it from the Themes list below or the topbar theme menu.`);
       }
       bundle = parsed as SignedBundle;

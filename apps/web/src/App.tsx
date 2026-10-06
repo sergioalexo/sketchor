@@ -38,6 +38,7 @@ import { MetricsNotice } from "./metrics/MetricsNotice";
 import { openExternal } from "./update/updateService";
 import { useTheme } from "./theme/themeStore";
 import { ThemePicker } from "./theme/ThemePicker";
+import { useThemeDrop } from "./theme/useThemeDrop";
 
 /**
  * The project's home page, opened by the logo in the toolbar. Must stay
@@ -537,6 +538,7 @@ export function App() {
   const pinMeasurement = useApp((s) => s.pinMeasurement);
   const clearPinnedMeasurements = useApp((s) => s.clearPinnedMeasurements);
   const referenceEdgeId = useApp((s) => s.referenceEdgeId);
+  useThemeDrop();
   const saveNotice = useApp((s) => s.saveNotice);
   const setSaveNotice = useApp((s) => s.setSaveNotice);
 
