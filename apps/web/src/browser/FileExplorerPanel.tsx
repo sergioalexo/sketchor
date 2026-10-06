@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { parseSvgText } from "@sketchor/core";
+import { decodeDxfBytes, parseSvgText } from "@sketchor/core";
 import { getSessions, importDxfText, importSvgText, openIntoSession, useApp } from "../state/store";
-import { bindDxfVersion, bindSaveHandle, bindSavePath, openModelBytes } from "../io/drawingFile";
+import { bindDxfVersion, bindSaveHandle, bindSavePath, fileDxfText, openModelBytes } from "../io/drawingFile";
 import { isModelFile } from "../model3d/stepImport";
 import { fileToSvg, isDrawingFile, queueThumbnail } from "./thumbnail";
 
@@ -68,11 +68,19 @@ function tauri(): TauriInvoke | undefined {
 
 async function readEntryText(entry: Entry): Promise<string> {
   if (entry.text !== undefined) return entry.text;
-  if (entry.file) return entry.file.text();
-  if (entry.handle) return (await entry.handle.getFile()).text();
+  const isDxf = /\.dxf$/i.test(entry.name);
+  if (entry.file) return isDxf ? fileDxfText(entry.file) : entry.file.text();
+  if (entry.handle) {
+    const f = await entry.handle.getFile();
+    return isDxf ? fileDxfText(f) : f.text();
+  }
   if (entry.path) {
     const t = tauri();
     if (!t) return "";
+    if (isDxf) {
+      const bytes = (await t.core.invoke("read_file_bytes", { path: entry.path })) as ArrayBuffer;
+      return decodeDxfBytes(new Uint8Array(bytes));
+    }
     return (await t.core.invoke("read_drawing_file", { path: entry.path })) as string;
   }
   return "";

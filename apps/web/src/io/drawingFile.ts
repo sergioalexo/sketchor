@@ -1,4 +1,4 @@
-import { entitiesToDxf, entitiesToDxf2018, entitiesToSvgDocument } from "@sketchor/core";
+import { decodeDxfBytes, entitiesToDxf, entitiesToDxf2018, entitiesToSvgDocument } from "@sketchor/core";
 import { DWG_UNREADABLE, dwgToDxfText } from "../browser/dwgImport";
 import { isModelFile, loadModel } from "../model3d/stepImport";
 import {
@@ -314,6 +314,11 @@ export function openModelBytes(name: string, buffer: ArrayBuffer): void {
 // Debug / automation hook, alongside the drawing ones in state/store.ts.
 window.sketchor.openModel = openModelBytes;
 
+/** A DXF `File` as text, decoded as UTF-8 or its declared codepage (see `decodeDxfBytes`). */
+export async function fileDxfText(file: File): Promise<string> {
+  return decodeDxfBytes(new Uint8Array(await file.arrayBuffer()));
+}
+
 /** Loads a DXF/SVG/DWG `File` into a tab (opening or reusing one — see openIntoSession), or a STEP/IGES into a viewer tab. */
 export async function loadDrawingFile(name: string, file: File): Promise<void> {
   if (isModelFile(name)) {
@@ -325,7 +330,7 @@ export async function loadDrawingFile(name: string, file: File): Promise<void> {
     const text = await dwgToDxfText(await file.arrayBuffer());
     openIntoSession(name, () => (text ? importDxfText(text) : importEntities([], [DWG_UNREADABLE])));
   } else {
-    const text = await file.text();
+    const text = await fileDxfText(file);
     openIntoSession(name, () => importDxfText(text));
     bindDxfVersion(text);
   }
@@ -389,7 +394,7 @@ export async function overlayDrawingFile(name: string, file: File): Promise<{ co
     useApp.getState().setFileWarnings([DWG_UNREADABLE]);
     return { ...overlayEntities([], label), warnings: [DWG_UNREADABLE] };
   }
-  const text = await file.text();
+  const text = await fileDxfText(file);
   return overlayDxfText(text, label);
 }
 

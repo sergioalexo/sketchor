@@ -4,7 +4,7 @@ import { boundsOf } from "../dxf";
 import { CONTINUOUS, builtinLinetype } from "../linetypes";
 import { HandleAllocator } from "./handles";
 import { entityDxf2018 } from "./entities";
-import { n, pair } from "./write";
+import { n, pair, unitsAndExtentsHeader } from "./write";
 
 const ORIGIN = { x: 0, y: 0 };
 
@@ -129,26 +129,13 @@ function blockRecordEntry(h: string, owner: string, name: string): string {
 }
 
 function header(insUnits: number, bounds: { minX: number; minY: number; maxX: number; maxY: number }, seed: string): string {
-  const metric = insUnits === 4 || insUnits === 5 || insUnits === 6;
-  // $MEASUREMENT is only written when a real unit is declared. dxf.ts's own
-  // parser treats $MEASUREMENT as authoritative whenever $INSUNITS is absent
-  // or 0 (real-world files — notably Onshape's R14 export — only carry
-  // $MEASUREMENT, see resolveUnits in dxf.ts) — so writing "$MEASUREMENT 0"
-  // for insUnits=0 ("truly unspecified") would make our *own* files come
-  // back misread as inches and scaled 25.4x, same bug that rule exists to
-  // catch in files from other applications.
-  const measurement = insUnits === 0 ? "" : `9\n$MEASUREMENT\n70\n${metric ? 1 : 0}\n`;
   return (
     `0\nSECTION\n2\nHEADER\n` +
     `9\n$ACADVER\n1\nAC1032\n` +
     `9\n$ACADMAINTVER\n70\n0\n` +
     `9\n$DWGCODEPAGE\n3\nANSI_1252\n` +
     `9\n$HANDSEED\n5\n${seed}\n` +
-    measurement +
-    `9\n$INSUNITS\n70\n${insUnits}\n` +
-    `9\n$INSBASE\n10\n0.0\n20\n0.0\n30\n0.0\n` +
-    `9\n$EXTMIN\n10\n${n(bounds.minX)}\n20\n${n(bounds.minY)}\n30\n0.0\n` +
-    `9\n$EXTMAX\n10\n${n(bounds.maxX)}\n20\n${n(bounds.maxY)}\n30\n0.0\n` +
+    unitsAndExtentsHeader(insUnits, bounds) +
     `9\n$LTSCALE\n40\n1.0\n` +
     `9\n$CLAYER\n8\n0\n` +
     `9\n$TEXTSTYLE\n7\nStandard\n` +
@@ -248,7 +235,7 @@ export function entitiesToDxf2018(entities: Entity[], options: DxfWriteOptions20
   const layers = [...new Set(scaled.map((e) => layerOf(e)))];
   if (layers.length === 0) layers.push("0");
   const linetypes = [...new Set(scaled.map((e) => e.linetype).filter((l): l is string => !!l))];
-  const bounds = boundsOf(scaled) ?? { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+  const bounds = boundsOf(scaled.filter((e) => !(e.type === "line" && e.infinite))) ?? { minX: 0, minY: 0, maxX: 0, maxY: 0 };
 
   const plan = buildPlan(layers, linetypes);
 

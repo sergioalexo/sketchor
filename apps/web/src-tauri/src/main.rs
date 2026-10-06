@@ -35,7 +35,9 @@ struct OpenFile {
 fn emit_file(app: &AppHandle, path: &str) {
     let lower = path.to_lowercase();
     let (event, is_binary) = if lower.ends_with(".dxf") {
-        ("open-dxf", false)
+        // Path-only: the UI reads the bytes and picks UTF-8 or the file's
+        // $DWGCODEPAGE (a Cyrillic 1251 file is not valid UTF-8).
+        ("open-dxf", true)
     } else if lower.ends_with(".svg") {
         ("open-svg", false)
     } else if lower.ends_with(".dwg") {

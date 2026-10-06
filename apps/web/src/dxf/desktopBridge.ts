@@ -1,5 +1,6 @@
 import { importDxfText, importEntities, importSvgText, openIntoSession, useApp } from "../state/store";
 import { DWG_UNREADABLE, dwgToDxfText } from "../browser/dwgImport";
+import { decodeDxfBytes } from "@sketchor/core";
 import { bindDxfVersion, bindSavePath, openModelBytes } from "../io/drawingFile";
 
 /**
@@ -73,11 +74,17 @@ export function initDesktopFileOpen(): void {
   if (!tauri?.event) return;
 
   tauri.event.listen("open-dxf", ({ payload }) => {
-    if (!payload?.text) return;
-    openIntoSession(payload.name, () => importDxfText(payload.text!));
-    bindDxfVersion(payload.text!);
-    bindOpened(payload.path, payload.name);
-    revealFolder(payload.dir);
+    if (!payload) return;
+    const textPromise = payload.text
+      ? Promise.resolve(payload.text)
+      : payloadBytes(tauri, payload).then((bytes) => (bytes ? decodeDxfBytes(new Uint8Array(bytes)) : undefined));
+    textPromise.then((text) => {
+      if (!text) return;
+      openIntoSession(payload.name, () => importDxfText(text));
+      bindDxfVersion(text);
+      bindOpened(payload.path, payload.name);
+      revealFolder(payload.dir);
+    });
   });
 
   tauri.event.listen("open-svg", ({ payload }) => {

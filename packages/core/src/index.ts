@@ -24,6 +24,7 @@ export * from "./commands";
 export * from "./sketchtext";
 export * from "./dxf";
 export * from "./dxfExport";
+export * from "./dxfText";
 export * from "./dxfw/index";
 export * from "./theme";
 export * from "./aci";

@@ -4,6 +4,8 @@ import { dist } from "./geometry";
 import { boundsOf } from "./dxf";
 import { kindTessellate } from "./kinds/registry";
 import { nearestAci } from "./aci";
+import { escapeDxfText } from "./dxfText";
+import { unitsAndExtentsHeader } from "./dxfw/write";
 import { CONTINUOUS, builtinLinetype } from "./linetypes";
 
 const ORIGIN = { x: 0, y: 0 };
@@ -23,12 +25,12 @@ function n(x: number): string {
 }
 
 function pair(code: number, value: string | number): string {
-  return `${code}\n${typeof value === "number" ? n(value) : value}\n`;
+  return `${code}\n${typeof value === "number" ? n(value) : escapeDxfText(value)}\n`;
 }
 
 function layerTable(layers: string[]): string {
   const rows = layers
-    .map((name) => `0\nLAYER\n2\n${name}\n70\n0\n62\n7\n6\nCONTINUOUS\n`)
+    .map((name) => `0\nLAYER\n2\n${escapeDxfText(name)}\n70\n0\n62\n7\n6\nCONTINUOUS\n`)
     .join("");
   return `0\nTABLE\n2\nLAYER\n70\n${layers.length}\n${rows}0\nENDTAB\n`;
 }
@@ -242,15 +244,12 @@ export function entitiesToDxf(entities: Entity[], insUnits = 0, scale = 1): stri
   const layers = [...new Set(scaled.map((e) => layerOf(e)))];
   if (layers.length === 0) layers.push("0");
   const linetypes = [...new Set(scaled.map((e) => e.linetype).filter((l): l is string => !!l))];
-  const bounds = boundsOf(scaled) ?? { minX: 0, minY: 0, maxX: 0, maxY: 0 };
+  const bounds = boundsOf(scaled.filter((e) => !(e.type === "line" && e.infinite))) ?? { minX: 0, minY: 0, maxX: 0, maxY: 0 };
 
   const header =
     `0\nSECTION\n2\nHEADER\n` +
     `9\n$ACADVER\n1\nAC1009\n` +
-    `9\n$INSUNITS\n70\n${insUnits}\n` +
-    `9\n$INSBASE\n10\n0.0\n20\n0.0\n30\n0.0\n` +
-    `9\n$EXTMIN\n10\n${n(bounds.minX)}\n20\n${n(bounds.minY)}\n30\n0.0\n` +
-    `9\n$EXTMAX\n10\n${n(bounds.maxX)}\n20\n${n(bounds.maxY)}\n30\n0.0\n` +
+    unitsAndExtentsHeader(insUnits, bounds) +
     `0\nENDSEC\n`;
 
   const tables = `0\nSECTION\n2\nTABLES\n${ltypeTable(linetypes)}${layerTable(layers)}0\nENDSEC\n`;

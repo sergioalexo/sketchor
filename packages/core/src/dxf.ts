@@ -4,6 +4,7 @@ import type { Point } from "./geometry";
 import { kindBounds, kindTessellate } from "./kinds/registry";
 import { arcExtentPoints, arcPointAt, arcSweep, bulgeToArc, dist } from "./geometry";
 import { aciToHex } from "./aci";
+import { unescapeDxfText } from "./dxfText";
 
 /** Minimal XML text-content escape for the thumbnail SVG. */
 function escapeXml(s: string): string {
@@ -257,7 +258,10 @@ function num(raw: RawEntity, code: number, fallback = 0): number {
 /** First string value for a group code (e.g. code 8 = layer name). */
 function str(raw: RawEntity, code: number, fallback = ""): string {
   const p = raw.pairs.find((x) => x.code === code);
-  return p ? p.value.trim() : fallback;
+  if (!p) return fallback;
+  const v = p.value.trim();
+  // Names (block 2, layer 8) in R12 files carry backslash-U escapes for non-ASCII.
+  return code === 2 || code === 8 ? unescapeDxfText(v) : v;
 }
 
 /** Every numeric value for a repeated group code, in document order (e.g. SPLINE control points). */
@@ -753,8 +757,8 @@ function convertRecords(raws: RawEntity[], ctx: ConvertContext): Entity[] {
         const raw1 = str(raw, 1, "");
         const content =
           raw.type === "MTEXT"
-            ? cleanMtext(raw.pairs.filter((p) => p.code === 3).map((p) => p.value).join("") + raw1)
-            : raw1;
+            ? cleanMtext(unescapeDxfText(raw.pairs.filter((p) => p.code === 3).map((p) => p.value).join("") + raw1))
+            : unescapeDxfText(raw1);
         if (content) {
           entities.push({ id: newEntityId(), type: "text", layer, at, text: content, height, rotation });
         }
