@@ -1,6 +1,7 @@
 import { decodeDxfBytes, entitiesToDxf, entitiesToDxf2018, entitiesToSvgDocument } from "@sketchor/core";
 import { DWG_UNREADABLE, dwgToDxfText } from "../browser/dwgImport";
 import { isModelFile, loadModel } from "../model3d/stepImport";
+import { acceptList, allExtensions, formatOf } from "./formats";
 import {
   doc,
   finishSessionSave,
@@ -92,9 +93,9 @@ interface WindowWithFS extends Window {
 }
 
 const OPEN_TYPES: PickerType[] = [
-  { description: "Drawing or 3D model", accept: { "application/octet-stream": [".dxf", ".svg", ".dwg", ".step", ".stp", ".iges", ".igs"] } },
+  { description: "Drawing or 3D model", accept: { "application/octet-stream": allExtensions().map((e) => `.${e}`) } },
 ];
-const OPEN_ACCEPT = ".dxf,.svg,.dwg,.step,.stp,.iges,.igs";
+const OPEN_ACCEPT = acceptList();
 
 function serialize(format: SaveFormat): string {
   const entities = doc.all();
@@ -136,10 +137,9 @@ const saveTargets = new Map<string, SaveTarget>();
 
 /** The format a filename implies, or null when it isn't something we can write (DWG, 3D models). */
 function writableFormat(name: string): SaveFormat | null {
-  if (/\.svg$/i.test(name)) return "svg";
-  if (/\.dwg$/i.test(name)) return null; // import-only, nothing to save back to
-  if (isModelFile(name)) return null; // view-only
-  return "dxf";
+  const f = formatOf(name);
+  if (f && !f.writable) return null; // DWG is import-only, 3D models are view-only
+  return f?.ext[0] === "svg" ? "svg" : "dxf";
 }
 
 function activeSessionId(): string {
@@ -418,7 +418,7 @@ export async function overlayDrawing(): Promise<{ count: number; warnings: strin
   return new Promise((resolve) => {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = ".dxf,.svg,.dwg";
+    input.accept = acceptList((f) => f.kind === "2d");
     input.onchange = async () => {
       const file = input.files?.[0];
       resolve(file ? await overlayDrawingFile(file.name, file) : null);

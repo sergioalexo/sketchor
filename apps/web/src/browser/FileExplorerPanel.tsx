@@ -3,6 +3,7 @@ import { decodeDxfBytes, parseSvgText } from "@sketchor/core";
 import { getSessions, importDxfText, importSvgText, openIntoSession, useApp } from "../state/store";
 import { bindDxfVersion, bindSaveHandle, bindSavePath, fileDxfText, openModelBytes } from "../io/drawingFile";
 import { isModelFile } from "../model3d/stepImport";
+import { acceptList, browserAddFilter, mimeOf } from "../io/formats";
 import { fileToSvg, isDrawingFile, queueThumbnail } from "./thumbnail";
 
 interface Entry {
@@ -263,8 +264,7 @@ function saveTags(tags: Record<string, string[]>): void {
   }
 }
 
-const MIME_FOR = (name: string): string =>
-  /\.svg$/i.test(name) ? "image/svg+xml" : /\.dwg$/i.test(name) ? "application/acad" : "application/dxf";
+const MIME_FOR = mimeOf;
 
 /**
  * Starts a drag carrying real files out of the panel.
@@ -668,7 +668,7 @@ export function FileExplorerPanel({ hidden, onClose }: { hidden: boolean; onClos
         <input
           ref={fileInputRef}
           type="file"
-          accept=".dxf,.svg,.step,.stp,.iges,.igs"
+          accept={acceptList(browserAddFilter)}
           multiple
           hidden
           onChange={(e) => void addFiles(e.target.files)}
