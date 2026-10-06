@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { DEFAULT_DARK, DEFAULT_LIGHT, type ThemeTokens } from "@sketchor/core";
+import { BUILTIN_THEMES, DEFAULT_DARK, DEFAULT_LIGHT, resolveTheme, type ThemeTokens } from "@sketchor/core";
 import { listInstalledThemes, onThemesChange } from "./installedThemes";
 import { useTheme, type ThemeSetting } from "./themeStore";
 
@@ -28,6 +28,9 @@ function useEntries(): Entry[] {
   return [
     { setting: "dark", title: "Dark", tokens: DEFAULT_DARK, dark: true, custom: false },
     { setting: "light", title: "Light", tokens: DEFAULT_LIGHT, dark: false, custom: false },
+    ...BUILTIN_THEMES.map(
+      (t): Entry => ({ setting: `builtin:${t.id}`, title: t.name, tokens: resolveTheme(t), dark: t.base === "dark", custom: false }),
+    ),
     ...installed.map(
       (t): Entry => ({ setting: `custom:${t.key}`, title: t.title, tokens: t.tokens, dark: t.file.base === "dark", custom: true }),
     ),
@@ -94,7 +97,7 @@ export function ThemePicker({ onClose }: { onClose: () => void }) {
           <button
             key={e.setting}
             className={`theme-card${setting === e.setting ? " theme-card-active" : ""}`}
-            data-testid={e.setting.startsWith("custom:") ? `theme-custom-${e.setting.slice(7)}` : `theme-${e.setting}`}
+            data-testid={e.setting.startsWith("custom:") ? `theme-custom-${e.setting.slice(7)}` : `theme-${e.setting.replace(":", "-")}`}
             onMouseEnter={() => preview(e.setting)}
             onFocus={() => preview(e.setting)}
             onBlur={() => preview(null)}

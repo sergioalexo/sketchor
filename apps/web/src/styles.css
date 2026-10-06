@@ -3280,3 +3280,8 @@ kbd.shortcut-key-fixed {
   background: var(--bg);
   color: var(--text);
 }
+.theme-grid {
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 2px;
+}

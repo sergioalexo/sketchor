@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { ThemeMode, ThemeTokens } from "@sketchor/core";
-import { defaultTheme } from "@sketchor/core";
+import { builtinTheme, defaultTheme, resolveTheme } from "@sketchor/core";
 import { setCanvasTheme } from "../viewport/renderer";
 import { getInstalledTheme } from "./installedThemes";
 
@@ -12,15 +12,31 @@ import { getInstalledTheme } from "./installedThemes";
  * `keybindings.ts` (no zustand `persist` middleware in this codebase).
  */
 
-/** A built-in mode, "system", or an installed theme plugin's `custom:<pluginId>/<themeId>` (TH-02). */
-export type ThemeSetting = ThemeMode | "system" | `custom:${string}`;
+/** A built-in mode, "system", a shipped theme `builtin:<id>` (TH-06), or an installed theme plugin's `custom:<pluginId>/<themeId>` (TH-02). */
+export type ThemeSetting = ThemeMode | "system" | `builtin:${string}` | `custom:${string}`;
+
+const isNamed = (v: unknown): v is `builtin:${string}` | `custom:${string}` =>
+  typeof v === "string" && (v.startsWith("builtin:") || v.startsWith("custom:"));
+
+/** The tokens and base mode a non-trivial setting names, or undefined when it's missing (an uninstalled theme). */
+export function lookupTheme(setting: ThemeSetting): { tokens: ThemeTokens; base: ThemeMode } | undefined {
+  if (setting.startsWith("builtin:")) {
+    const file = builtinTheme(setting.slice(8));
+    return file && { tokens: resolveTheme(file), base: file.base };
+  }
+  if (setting.startsWith("custom:")) {
+    const t = getInstalledTheme(setting.slice(7));
+    return t && { tokens: t.tokens, base: t.file.base };
+  }
+  return undefined;
+}
 
 const STORAGE_KEY = "sketchor.theme.v1";
 
 function loadSetting(): ThemeSetting {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw === "dark" || raw === "light" || raw === "system" || raw?.startsWith("custom:") ? (raw as ThemeSetting) : "system";
+    return raw === "dark" || raw === "light" || raw === "system" || isNamed(raw) ? (raw as ThemeSetting) : "system";
   } catch {
     return "system";
   }
@@ -36,9 +52,7 @@ function saveSetting(setting: ThemeSetting): void {
 
 /** Pure: a `ThemeSetting` plus whatever `prefers-color-scheme` says resolves to one real mode. Exported for testing without touching `matchMedia`. */
 export function resolveMode(setting: ThemeSetting, systemPrefersDark: boolean): ThemeMode {
-  if (setting.startsWith("custom:")) {
-    return getInstalledTheme(setting.slice(7))?.file.base ?? (systemPrefersDark ? "dark" : "light");
-  }
+  if (isNamed(setting)) return lookupTheme(setting)?.base ?? (systemPrefersDark ? "dark" : "light");
   return setting === "system" ? (systemPrefersDark ? "dark" : "light") : (setting as ThemeMode);
 }
 
@@ -77,7 +91,7 @@ export interface SystemPair {
 const PAIR_KEY = "sketchor.theme.pair.v1";
 const DEFAULT_PAIR: SystemPair = { dark: "dark", light: "light" };
 
-const isPairSetting = (v: unknown): v is SystemPair["dark"] => v === "dark" || v === "light" || (typeof v === "string" && v.startsWith("custom:"));
+const isPairSetting = (v: unknown): v is SystemPair["dark"] => v === "dark" || v === "light" || isNamed(v);
 
 function loadPair(): SystemPair {
   try {
@@ -119,7 +133,7 @@ function computeAndApply(setting: ThemeSetting, pair: SystemPair): { resolved: T
   const effective = effectiveSetting(setting, pair, systemPrefersDark());
   const resolved = resolveMode(effective, systemPrefersDark());
   // An uninstalled custom theme falls back to its base mode's defaults.
-  const tokens = (effective.startsWith("custom:") ? getInstalledTheme(effective.slice(7))?.tokens : undefined) ?? defaultTheme(resolved);
+  const tokens = lookupTheme(effective)?.tokens ?? defaultTheme(resolved);
   applyTheme(tokens);
   return { resolved, tokens };
 }

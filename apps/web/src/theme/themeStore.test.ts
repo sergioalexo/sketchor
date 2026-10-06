@@ -85,3 +85,30 @@ describe("effectiveSetting + pairing (TH-03)", () => {
     useTheme.getState().setSetting("dark");
   });
 });
+
+describe("built-in themes (TH-06)", () => {
+  it("builtin:<id> applies the resolved theme and reports its base mode", () => {
+    useTheme.getState().setSetting("builtin:solarized-light");
+    expect(useTheme.getState().resolved).toBe("light");
+    expect(document.documentElement.style.getPropertyValue("--bg").trim()).toBe("#fdf6e3");
+    useTheme.getState().setSetting("builtin:blueprint");
+    expect(useTheme.getState().resolved).toBe("dark");
+    expect(useTheme.getState().tokens.canvas.bg).toBe("#123c7c");
+    expect(localStorage.getItem("sketchor.theme.v1")).toBe("builtin:blueprint");
+    useTheme.getState().setSetting("dark");
+  });
+
+  it("an unknown builtin id falls back to the plain theme instead of throwing", () => {
+    useTheme.getState().setSetting("builtin:does-not-exist");
+    expect(useTheme.getState().tokens).toBeDefined();
+    useTheme.getState().setSetting("dark");
+  });
+
+  it("can be the system pair's dark or light side", () => {
+    useTheme.getState().setPair({ dark: "builtin:nord" });
+    useTheme.getState().setSetting("system"); // jsdom: no matchMedia → reads as dark
+    expect(useTheme.getState().tokens.ui.bg).toBe("#2e3440");
+    useTheme.getState().setPair({ dark: "dark" });
+    useTheme.getState().setSetting("dark");
+  });
+});

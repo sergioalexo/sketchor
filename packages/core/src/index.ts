@@ -28,6 +28,7 @@ export * from "./dxfText";
 export * from "./dxfw/index";
 export * from "./theme";
 export * from "./themeFile";
+export * from "./builtinThemes";
 export * from "./aci";
 export * from "./linetypes";
 export * from "./svg";

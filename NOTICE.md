@@ -55,3 +55,12 @@ modification's source — which is the usual way to satisfy those terms.
 Nothing here changes Sketchor's own AGPL-3.0 license.
 
 three.js (MIT) renders the result.
+
+## Built-in theme palettes
+
+The Nord, Solarized (Dark/Light) and Monokai themes in
+`packages/core/src/builtinThemes.ts` use those palettes' published colour
+values: Nord © Arctic Ice Studio / Sven Greb (MIT), Solarized © Ethan
+Schoonover (MIT), Monokai © Wimer Hazenberg. Only colour values are used — no
+code or theme files from those projects. The other built-in themes are
+Sketchor's own.
