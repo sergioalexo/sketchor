@@ -32,10 +32,10 @@ const PANEL_HTML = `<!doctype html>
 <html>
   <head>
     <style>
-      body { margin: 0; padding: 12px; font: 13px system-ui, sans-serif; color: #dfe1e5; background: #1e1f22; }
+      body { margin: 0; padding: 12px; font: 13px system-ui, sans-serif; color: var(--sk-text,#dfe1e5); background: var(--sk-bg,#1e1f22); }
       label { display: block; margin-bottom: 8px; }
-      input { width: 100%; box-sizing: border-box; margin-top: 4px; padding: 6px; background: #2b2d31; color: inherit; border: 1px solid #3a3d42; border-radius: 4px; }
-      button { width: 100%; padding: 7px; border: none; border-radius: 5px; background: #4f7cff; color: #fff; font: inherit; cursor: pointer; }
+      input { width: 100%; box-sizing: border-box; margin-top: 4px; padding: 6px; background: var(--sk-panel,#2b2d31); color: inherit; border: 1px solid var(--sk-border,#3a3d42); border-radius: 4px; }
+      button { width: 100%; padding: 7px; border: none; border-radius: 5px; background: var(--sk-accent,#4f7cff); color: #fff; font: inherit; cursor: pointer; }
       .status { margin-top: 8px; min-height: 16px; opacity: 0.7; }
     </style>
   </head>

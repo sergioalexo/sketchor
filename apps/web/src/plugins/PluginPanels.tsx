@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useTheme } from "../theme/themeStore";
+import { panelThemeHead, panelThemeMessage, panelThemeVars } from "./host/panelTheme";
 import { hidePanel, listPanels, onPanelsChange, registerFrame, type PanelState } from "./host/uiManager";
 
 /**
@@ -30,8 +32,8 @@ export function PluginPanels() {
 const PANEL_CSP =
   "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; form-action 'none'; base-uri 'none'";
 
-function withCsp(html: string): string {
-  const meta = `<meta http-equiv="Content-Security-Policy" content="${PANEL_CSP}">`;
+function withCsp(html: string, themeHead: string): string {
+  const meta = `<meta http-equiv="Content-Security-Policy" content="${PANEL_CSP}">${themeHead}`;
   return /<head[\s>]/i.test(html)
     ? html.replace(/<head([^>]*)>/i, `<head$1>${meta}`)
     : `<!doctype html><html><head>${meta}</head><body>${html}</body></html>`;
@@ -39,6 +41,18 @@ function withCsp(html: string): string {
 
 function PluginPanel({ panel }: { panel: PanelState }) {
   const ref = useRef<HTMLIFrameElement>(null);
+  const tokens = useTheme((s) => s.tokens);
+  // Baked in once per html: re-rendering srcDoc on a theme change would reload the panel and lose its state.
+  const tokensRef = useRef(tokens);
+  tokensRef.current = tokens;
+  const srcDoc = useMemo(
+    () => withCsp(panel.html, panelThemeHead(panelThemeVars(tokensRef.current))),
+    [panel.html],
+  );
+
+  useEffect(() => {
+    ref.current?.contentWindow?.postMessage(panelThemeMessage(panelThemeVars(tokens)), "*");
+  }, [tokens]);
 
   useEffect(() => {
     if (ref.current) return registerFrame(panel.pluginId, ref.current);
@@ -61,7 +75,7 @@ function PluginPanel({ panel }: { panel: PanelState }) {
         className="pluginpanel-frame"
         title={panel.title}
         sandbox="allow-scripts"
-        srcDoc={withCsp(panel.html)}
+        srcDoc={srcDoc}
         style={{ height: panel.height ? `${panel.height}px` : undefined }}
       />
     </aside>

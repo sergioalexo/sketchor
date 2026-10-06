@@ -121,23 +121,23 @@ const PANEL_HTML = `<!doctype html>
   <head>
     <style>
       * { box-sizing: border-box; }
-      body { margin: 0; padding: 12px; font: 12px system-ui, -apple-system, sans-serif; color: #dfe1e5; background: #1e1f22; }
+      body { margin: 0; padding: 12px; font: 12px system-ui, -apple-system, sans-serif; color: var(--sk-text,#dfe1e5); background: var(--sk-bg,#1e1f22); }
       label { display: block; margin-bottom: 8px; }
-      textarea, input, select { width: 100%; margin-top: 3px; padding: 6px; background: #2b2d31; color: inherit; border: 1px solid #3a3d42; border-radius: 4px; font: 12px ui-monospace, monospace; }
+      textarea, input, select { width: 100%; margin-top: 3px; padding: 6px; background: var(--sk-panel,#2b2d31); color: inherit; border: 1px solid var(--sk-border,#3a3d42); border-radius: 4px; font: 12px ui-monospace, monospace; }
       textarea { height: 130px; resize: vertical; }
       select { font-family: system-ui, -apple-system, sans-serif; }
       input[type="checkbox"] { width: auto; margin: 0 6px 0 0; }
       .row { display: flex; align-items: center; gap: 4px; margin-bottom: 8px; }
-      button { padding: 7px 12px; border: none; border-radius: 5px; background: #4f7cff; color: #fff; font: inherit; cursor: pointer; }
+      button { padding: 7px 12px; border: none; border-radius: 5px; background: var(--sk-accent,#4f7cff); color: #fff; font: inherit; cursor: pointer; }
       .muted { opacity: 0.6; }
-      .f { padding: 5px 7px; border-radius: 4px; background: #2b2d31; border-left: 3px solid #e3a008; margin-top: 4px; }
+      .f { padding: 5px 7px; border-radius: 4px; background: var(--sk-panel,#2b2d31); border-left: 3px solid #e3a008; margin-top: 4px; }
       .f.ok { border-left-color: #4f9d69; }
       #out { margin-top: 10px; }
       /* The drop zone wraps the paste field and the file picker, so dropping a
          file "onto the field" does the obvious thing. A drop anywhere in the
          panel counts, but the outline shows where it's aimed. */
-      #zone { border: 1px dashed #4a4e55; border-radius: 6px; padding: 8px; margin-bottom: 8px; transition: border-color 0.1s, background 0.1s; }
-      #zone.over { border-color: #4f7cff; border-style: solid; background: #23283a; }
+      #zone { border: 1px dashed var(--sk-border,#4a4e55); border-radius: 6px; padding: 8px; margin-bottom: 8px; transition: border-color 0.1s, background 0.1s; }
+      #zone.over { border-color: var(--sk-accent,#4f7cff); border-style: solid; background: var(--sk-accent-soft,#23283a); }
       #zone label:last-of-type { margin-bottom: 0; }
       #hint { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
       #picked { font: 11px ui-monospace, monospace; color: #9fd3ac; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
