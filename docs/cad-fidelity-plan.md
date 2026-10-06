@@ -26,7 +26,7 @@ Written 2026-09-28 against `main` @ `8bafb82` (v0.28.0). Intended to be executed
 | 2026-10-06 | TH-06 | `packages/core/src/builtinThemes.ts` — eight built-ins as ordinary TH-01 `ThemeFile`s (so they pass the same validator and prove the format): High Contrast, Classic CAD (black canvas, pure ACI-style colours), Blueprint (blue paper, white lines, translucent grid), Paper (white canvas/black ink), Nord, Solarized Dark/Light, Monokai. Plain Dark/Light stay the `dark`/`light` settings; new setting kind `builtin:<id>` (`lookupTheme()` in `themeStore.ts` now serves both builtin and custom), valid as a system-pair side, shown in the picker (list scrolls). Tests: every theme validates, text/panel contrast ≥ 4.5 (dim ≥ 3), entity vs canvas ≥ 7 and selection/snap/handle/reference ≥ 3, declared `base` matches real brightness (caught Solarized's dim text at 2.9 → lightened to base0). Palette credits in NOTICE.md. Verified live: all eight applied, `--bg` and canvas pixels match each theme. `model3d` tokens remain shared (see Z-03). Not done: High Contrast has no OS `prefers-contrast` auto-pairing. |
 | — | — | nothing else started |
 
-### Open items checklist (status 2026-10-02: SV-01, SV-02, Z-01, Z-02, X-01, X-02, Z-03, X-04 (partial), Z-04 done — the rest open)
+### Open items checklist (status 2026-10-06: SV-01, SV-02, Z-01, Z-02, X-01, X-02, Z-03, X-04 (partial), Z-04, X-06, X-07, F-09, TH-01, TH-02, TH-03, TH-06 done — the rest open; next: TH-08 or TH-04, then C-01..C-04)
 
 Tick `[x]` and add a progress-log row as items land. Order = recommended execution order.
 
