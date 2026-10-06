@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   distToEllipse,
+  ellipseFromAxes,
+  ellipseParamOfPoint,
   ellipseBounds,
   ellipsePointAt,
   ellipseSweep,
@@ -142,6 +144,40 @@ describe("ellipse geometry", () => {
       near(t.majorAxis, { x: 8, y: 0 });
       expect(t.ratio).toBeCloseTo(0.5, 9);
     });
+  });
+});
+
+describe("ellipseFromAxes / ellipseParamOfPoint", () => {
+  it("a shorter second distance keeps the picked axis as the major", () => {
+    const g = ellipseFromAxes({ x: 1, y: 1 }, { x: 11, y: 1 }, 4)!;
+    expect(g.majorAxis).toEqual({ x: 10, y: 0 });
+    expect(g.ratio).toBeCloseTo(0.4, 9);
+  });
+
+  it("a longer second distance turns the ellipse over — the new major is perpendicular", () => {
+    const g = ellipseFromAxes({ x: 0, y: 0 }, { x: 10, y: 0 }, 25)!;
+    near(g.majorAxis, { x: 0, y: 25 });
+    expect(g.ratio).toBeCloseTo(0.4, 9);
+    // Both picked half-lengths are still the curve's extents.
+    const b = ellipseBounds(g);
+    expect(b.maxX).toBeCloseTo(10, 9);
+    expect(b.maxY).toBeCloseTo(25, 9);
+  });
+
+  it("rejects a zero axis", () => {
+    expect(ellipseFromAxes({ x: 0, y: 0 }, { x: 0, y: 0 }, 3)).toBeNull();
+    expect(ellipseFromAxes({ x: 0, y: 0 }, { x: 5, y: 0 }, 0)).toBeNull();
+  });
+
+  it("the parameter of a point recovers the parameter it was generated from", () => {
+    const e = ell();
+    for (const t of [-2.5, -0.7, 0, 0.4, 1.9, 3]) {
+      const p = ellipsePointAt(e, t);
+      expect(ellipseParamOfPoint(e, p)).toBeCloseTo(t, 9);
+      // Any point further along the same ray gives the same parameter.
+      const far = { x: e.center.x + (p.x - e.center.x) * 3, y: e.center.y + (p.y - e.center.y) * 3 };
+      expect(ellipseParamOfPoint(e, far)).toBeCloseTo(t, 9);
+    }
   });
 });
 

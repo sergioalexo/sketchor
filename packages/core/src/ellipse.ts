@@ -176,3 +176,30 @@ export function transformEllipse(e: EllipseGeom, m: readonly [number, number, nu
   const start = full ? 0 : -(e.start + sweep - t0);
   return { center, majorAxis: A, ratio, start, end: full ? TAU : start + sweep };
 }
+
+/**
+ * An ellipse from its centre, one end of an axis and the half-length of the
+ * other axis (AutoCAD's ELLIPSE). Whichever is longer becomes the major axis,
+ * so dragging the second distance past the first turns the ellipse over
+ * instead of failing. Null when either is zero.
+ */
+export function ellipseFromAxes(center: Point, axisEnd: Point, otherRadius: number): EllipseGeom | null {
+  const dx = axisEnd.x - center.x;
+  const dy = axisEnd.y - center.y;
+  const a = Math.hypot(dx, dy);
+  const b = Math.abs(otherRadius);
+  if (a < 1e-9 || b < 1e-9) return null;
+  if (b <= a) return { center, majorAxis: { x: dx, y: dy }, ratio: b / a, start: 0, end: TAU };
+  // The "other" axis is the longer one: it perpendicular to the given axis, so the major axis is that turned 90°.
+  return { center, majorAxis: { x: (-dy / a) * b, y: (dx / a) * b }, ratio: a / b, start: 0, end: TAU };
+}
+
+/** The parameter `t` of the direction from the centre to `p` — what an arc's start/end pick means. */
+export function ellipseParamOfPoint(e: EllipseGeom, p: Point): number {
+  const n = minorAxisOf(e);
+  const a2 = e.majorAxis.x ** 2 + e.majorAxis.y ** 2;
+  const b2 = n.x ** 2 + n.y ** 2;
+  const dx = p.x - e.center.x;
+  const dy = p.y - e.center.y;
+  return Math.atan2((dx * n.x + dy * n.y) / b2, (dx * e.majorAxis.x + dy * e.majorAxis.y) / a2);
+}

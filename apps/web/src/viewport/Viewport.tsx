@@ -916,6 +916,8 @@ export function Viewport() {
         app.setTool("circle");
       } else if (matchesBinding(e, "tool.arc")) {
         app.setTool("arc");
+      } else if (matchesBinding(e, "tool.ellipse")) {
+        app.setTool("ellipse");
       } else if (matchesBinding(e, "tool.polygon")) {
         app.setTool("polygon");
       } else if (matchesBinding(e, "tool.slot")) {
@@ -1179,6 +1181,7 @@ export function Viewport() {
       case "polyline":
       case "circle":
       case "arc":
+      case "ellipse":
       case "polygon":
       case "slot":
       case "rectangle":

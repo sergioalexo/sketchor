@@ -10,6 +10,8 @@ import {
   circleFrom3Points,
   circleTangentToTwo,
   dist,
+  ellipseFromAxes,
+  ellipseParamOfPoint,
   newEntityId,
   nextEntityName,
   rectFrom3Points,
@@ -536,6 +538,121 @@ export class PointTool implements Tool {
 }
 
 /* --------------------------------- polygon -------------------------------- */
+
+/* --------------------------------- ellipse -------------------------------- */
+
+export type EllipseMode = "axis-end" | "center" | "arc";
+
+/**
+ * Ellipse (C-05), AutoCAD's ELLIPSE: axis-end — the two ends of one axis,
+ * then a point at the other half-axis's distance from the centre; center —
+ * the centre, one axis end, then that other distance; arc — the centre
+ * version, then the start and end of an elliptical arc. A bare number at the
+ * last distance step is that half-axis. Whichever axis is longer becomes the
+ * major, so pulling the third pick past the first turns the ellipse over.
+ * Tab cycles.
+ */
+export class EllipseTool implements Tool {
+  readonly id = "ellipse" as const;
+  mode: EllipseMode = "axis-end";
+  private picks: Point[] = [];
+
+  prompt(): string {
+    const modes = "(Tab: axis end / center / elliptical arc)";
+    const n = this.picks.length;
+    if (n === 0) return this.mode === "axis-end" ? `Ellipse: specify one end of an axis ${modes}` : `${this.mode === "arc" ? "Elliptical arc" : "Ellipse"}: specify the center ${modes}`;
+    if (n === 1) return this.mode === "axis-end" ? "Specify the other end of the axis" : "Specify one end of an axis";
+    if (n === 2) return "Specify the distance to the other axis (or type it)";
+    return n === 3 ? "Specify the start of the arc" : "Specify the end of the arc (counterclockwise)";
+  }
+  busy(): boolean {
+    return this.picks.length > 0;
+  }
+  anchor(): Point | null {
+    return this.picks.length >= 2 ? this.centre() : (this.picks[0] ?? null);
+  }
+  cancel(): void {
+    this.picks = [];
+  }
+  key(ctx: ToolContext, e: KeyboardEvent): boolean {
+    if (e.key !== "Tab" || e.ctrlKey || e.metaKey || e.altKey) return false;
+    const order: EllipseMode[] = ["axis-end", "center", "arc"];
+    this.mode = order[(order.indexOf(this.mode) + (e.shiftKey ? 2 : 1)) % 3];
+    this.cancel();
+    ctx.redraw();
+    return true;
+  }
+  typed(ctx: ToolContext, text: string): boolean {
+    if (this.picks.length !== 2) return false;
+    const v = parseLength(text, ctx.displayUnit());
+    if (v === null || v <= 0) return false;
+    const base = this.base();
+    if (!base) return false;
+    // A typed distance is the other half-axis, along the axis' perpendicular — same as picking there.
+    const dx = base.axisEnd.x - base.center.x;
+    const dy = base.axisEnd.y - base.center.y;
+    const l = Math.hypot(dx, dy) || 1;
+    this.pick(ctx, { point: { x: base.center.x - (dy / l) * v, y: base.center.y + (dx / l) * v }, world: base.center, snap: null, shiftKey: false, ctrlKey: false, altKey: false });
+    return true;
+  }
+  pick(ctx: ToolContext, p: Pick): void {
+    const last = this.picks[this.picks.length - 1];
+    if (last && dist(last, p.point) === 0) return;
+    this.picks.push(p.point);
+    const n = this.picks.length;
+    if (n === 3 && this.mode !== "arc") this.commit(ctx);
+    else if (n === 5) this.commit(ctx);
+  }
+  private base(): { center: Point; axisEnd: Point } | null {
+    if (this.picks.length < 2) return null;
+    const [a, b] = this.picks;
+    return this.mode === "axis-end" ? { center: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 }, axisEnd: b } : { center: a, axisEnd: b };
+  }
+  private centre(): Point {
+    return this.base()?.center ?? this.picks[0];
+  }
+  private geometry(third: Point) {
+    const base = this.base();
+    return base ? ellipseFromAxes(base.center, base.axisEnd, dist(base.center, third)) : null;
+  }
+  private commit(ctx: ToolContext): void {
+    const g = this.geometry(this.picks[2]);
+    if (g && this.mode === "arc" && this.picks.length === 5) {
+      const start = ellipseParamOfPoint(g, this.picks[3]);
+      let end = ellipseParamOfPoint(g, this.picks[4]);
+      if (end <= start + 1e-9) end += Math.PI * 2;
+      this.add(ctx, { ...g, start, end });
+    } else if (g && this.mode !== "arc") {
+      this.add(ctx, g);
+    }
+    this.picks = [];
+  }
+  private add(ctx: ToolContext, g: { center: Point; majorAxis: Point; ratio: number; start: number; end: number }): void {
+    ctx.execute({
+      type: "add-entity",
+      entity: { id: newEntityId(), type: "ellipse", name: nextEntityName(ctx.doc, "ellipse"), ...layerProp(ctx.activeLayer()), ...g },
+    });
+  }
+  preview(_ctx: ToolContext, cursor: Point | null): Entity[] {
+    if (!cursor || this.picks.length === 0) return [];
+    const n = this.picks.length;
+    if (n === 1) return [{ id: PREVIEW, type: "line", a: this.picks[0], b: cursor }];
+    if (n === 2) {
+      const g = this.geometry(cursor);
+      const base = this.base()!;
+      const axis: Entity = { id: PREVIEW + "-axis", type: "line", a: { x: 2 * base.center.x - base.axisEnd.x, y: 2 * base.center.y - base.axisEnd.y }, b: base.axisEnd };
+      return g ? [{ id: PREVIEW, type: "ellipse", ...g }, axis] : [axis];
+    }
+    const g = this.geometry(this.picks[2]);
+    if (!g) return [];
+    const full: Entity = { id: PREVIEW + "-full", type: "ellipse", ...g };
+    if (n === 3) return [full, { id: PREVIEW, type: "line", a: g.center, b: cursor }];
+    const start = ellipseParamOfPoint(g, this.picks[3]);
+    let end = ellipseParamOfPoint(g, cursor);
+    if (end <= start + 1e-9) end += Math.PI * 2;
+    return [full, { id: PREVIEW, type: "ellipse", ...g, start, end }];
+  }
+}
 
 export type PolygonMode = "inscribed" | "circumscribed" | "edge";
 

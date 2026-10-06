@@ -121,6 +121,17 @@ const TOOLS: { id: ToolId; label: string; keyHint: string; icon: JSX.Element; di
     ),
   },
   {
+    id: "ellipse",
+    label: "Ellipse",
+    keyHint: "E",
+    icon: (
+      <svg viewBox="0 0 24 24" width="20" height="20">
+        <ellipse cx="12" cy="12" rx="9" ry="5.5" transform="rotate(-25 12 12)" stroke="currentColor" strokeWidth="2" fill="none" />
+        <circle cx="12" cy="12" r="1.6" fill="currentColor" />
+      </svg>
+    ),
+  },
+  {
     id: "polygon",
     label: "Polygon",
     keyHint: "",

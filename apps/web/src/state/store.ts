@@ -378,6 +378,7 @@ export type ToolId =
   | "rectangle"
   | "circle"
   | "arc"
+  | "ellipse"
   | "polygon"
   | "slot"
   | "point"
@@ -411,6 +412,7 @@ export const TOOL_HINTS: Record<ToolId, string> = {
   polyline: "Click each vertex - A switches to an arc leg (two clicks: through-point, end), T to a tangent arc, L back to lines - Enter or double-click to finish, C to close, Backspace undoes the last vertex",
   rectangle: "Click one corner, then the opposite corner - Tab cycles to center + corner and to three-point (rotated)",
   circle: "Click center, then a point on the circle or type the radius - Tab cycles to center-diameter, two-point, three-point, and tangent-tangent-radius (type the radius, click two entities)",
+  ellipse: "Click one end of an axis, the other end, then a point at the other half-axis (or type it) - Tab cycles to center + axis end and to an elliptical arc (then click its start and end)",
   polygon: "Type the number of sides, click the center, then a vertex - Tab cycles to circumscribed (click an edge midpoint - across flats) and by edge",
   slot: "Click the two centres, then type the width or pick a point at half the width from the centreline - Tab switches to an arc slot (center, start, end, width)",
   arc: "Three-point arc: click start, end, then a point on the arc - Tab cycles to center-start-end (Shift-click for clockwise) and tangent arc (click near the end of a line or arc, then the end point)",

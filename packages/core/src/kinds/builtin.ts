@@ -14,6 +14,7 @@ import {
   distToEllipse,
   ellipseBounds,
   ellipseHasParam,
+  ellipseParamOfPoint,
   ellipsePointAt,
   ellipseSweep,
   isFullEllipse,
@@ -227,13 +228,8 @@ const ellipseKind: EntityKind<EllipseEntity> = {
       const along = Math.abs((to.x - c.x) * mu.x + (to.y - c.y) * mu.y);
       return { ...e, ratio: Math.min(1, Math.max(1e-4, along / a)) };
     }
-    // Arc end grips: the parameter is the polar angle in the ellipse's own (unit-circle) frame.
-    const n = minorAxisOf(e);
-    const a2 = e.majorAxis.x ** 2 + e.majorAxis.y ** 2;
-    const b2 = n.x ** 2 + n.y ** 2;
-    const dx = to.x - c.x;
-    const dy = to.y - c.y;
-    const t = Math.atan2((dx * n.x + dy * n.y) / b2, (dx * e.majorAxis.x + dy * e.majorAxis.y) / a2);
+    // Arc end grips: the parameter of the direction the cursor is in.
+    const t = ellipseParamOfPoint(e, to);
     const sweep = ellipseSweep(e);
     if (g.index === 0) {
       const end = e.start + sweep;
