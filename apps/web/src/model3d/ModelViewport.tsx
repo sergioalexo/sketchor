@@ -203,7 +203,7 @@ function Viewer({ model, up, onToggleUp }: { model: Model3D; up: UpAxis; onToggl
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const sceneRef = useRef<Scene | null>(null);
-  const themeResolved = useTheme((s) => s.resolved);
+  const themeResolved = useTheme((s) => s.tokens);
   const selection = useViewer((v) => v.selection);
   const hover = useViewer((v) => v.hover);
   const hidden = useViewer((v) => v.hidden);

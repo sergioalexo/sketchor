@@ -37,6 +37,7 @@ import { UpdateBanner, UpdateButton } from "./update/UpdatePanel";
 import { MetricsNotice } from "./metrics/MetricsNotice";
 import { openExternal } from "./update/updateService";
 import { useTheme } from "./theme/themeStore";
+import { listInstalledThemes, onThemesChange } from "./theme/installedThemes";
 
 /**
  * The project's home page, opened by the logo in the toolbar. Must stay
@@ -538,6 +539,8 @@ export function App() {
   const [showThemeMenu, setShowThemeMenu] = useState(false);
   const themeSetting = useTheme((s) => s.setting);
   const setThemeSetting = useTheme((s) => s.setSetting);
+  const [installedThemes, setInstalledThemes] = useState(() => listInstalledThemes());
+  useEffect(() => onThemesChange(() => setInstalledThemes(listInstalledThemes())), []);
   const touchMode = useTouchMode((s) => s.enabled);
   const toggleTouchMode = useTouchMode((s) => s.toggle);
   const prompt = useApp((s) => s.prompt);
@@ -1245,6 +1248,19 @@ export function App() {
                     }}
                   >
                     {setting === "dark" ? "Dark" : setting === "light" ? "Light" : "System"}
+                  </button>
+                ))}
+                {installedThemes.map((t) => (
+                  <button
+                    key={t.key}
+                    className={themeSetting === `custom:${t.key}` ? "action-menu-default" : undefined}
+                    data-testid={`theme-custom-${t.key}`}
+                    onClick={() => {
+                      setThemeSetting(`custom:${t.key}`);
+                      setShowThemeMenu(false);
+                    }}
+                  >
+                    {t.title}
                   </button>
                 ))}
               </div>

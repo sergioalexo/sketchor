@@ -8,3 +8,4 @@ export * from "./readModel";
 export * from "./manifest";
 export * from "./hostApi";
 export * from "./signing";
+export * from "./themeBundle";

@@ -18,8 +18,8 @@ export interface PluginManifest {
   publisher?: string;
   /** Host-compatibility ranges. `sketchor` is a semver range over the host API version. */
   engines: { sketchor: string };
-  /** Entry module for the plugin's logic (runs in the worker sandbox). */
-  main: string;
+  /** Entry module for the plugin's logic (runs in the worker sandbox). Absent only on a theme-only plugin (TH-02). */
+  main?: string;
   /** Optional entry HTML for a sandboxed-iframe UI panel. */
   ui?: string;
   contributes?: PluginContributions;
@@ -41,6 +41,15 @@ export interface PluginContributions {
    * load-time error.
    */
   tools?: ToolContribution[];
+  /** Colour themes (TH-02): data-only JSON files in the bundle, validated by `validateTheme`. */
+  themes?: ThemeContribution[];
+}
+
+export interface ThemeContribution {
+  id: string;
+  title: string;
+  /** Bundle-relative path of the `.json` theme file, e.g. "themes/nord.json". */
+  file: string;
 }
 
 export interface CommandContribution {
@@ -97,7 +106,12 @@ export function validateManifest(value: unknown): ManifestValidation {
   requireString(obj, "id", errors, ID_RE, "reverse-DNS style (letters, digits, '-' and '.')");
   requireString(obj, "version", errors, SEMVER_RE, "a semver like 1.2.0");
   requireString(obj, "name", errors);
-  requireString(obj, "main", errors);
+  const themeOnly = isThemeOnly(obj as unknown as PluginManifest);
+  if (themeOnly) {
+    if (obj.main !== undefined) errors.push('a theme-only plugin must not declare "main"');
+  } else {
+    requireString(obj, "main", errors);
+  }
   optionalString(obj, "description", errors);
   optionalString(obj, "publisher", errors);
   optionalString(obj, "ui", errors);
@@ -124,6 +138,7 @@ export function validateManifest(value: unknown): ManifestValidation {
     } else if (Array.isArray(contributes.tools) && contributes.tools.length > 0) {
       errors.push('"contributes.tools" is reserved for a future version and cannot be used yet');
     }
+    if (isRecord(contributes) && contributes.themes !== undefined) validateThemeContributions(contributes.themes, errors);
   }
 
   if (errors.length > 0) return { ok: false, errors };
@@ -151,4 +166,49 @@ function requireString(
 
 function optionalString(obj: Record<string, unknown>, key: string, errors: string[]): void {
   if (obj[key] !== undefined && typeof obj[key] !== "string") errors.push(`"${key}" must be a string when present`);
+}
+
+const THEME_ID_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/;
+
+function validateThemeContributions(v: unknown, errors: string[]): void {
+  if (!Array.isArray(v)) {
+    errors.push('"contributes.themes" must be an array');
+    return;
+  }
+  const seen = new Set<string>();
+  v.forEach((t, i) => {
+    const at = `contributes.themes[${i}]`;
+    if (!isRecord(t)) return void errors.push(`"${at}" must be an object`);
+    if (typeof t.id !== "string" || !THEME_ID_RE.test(t.id)) errors.push(`"${at}.id" must be lowercase letters, digits, '.', '_' or '-'`);
+    else if (seen.has(t.id)) errors.push(`"${at}.id" duplicates another theme id`);
+    else seen.add(t.id);
+    if (typeof t.title !== "string" || !t.title.trim()) errors.push(`"${at}.title" is required`);
+    if (typeof t.file !== "string" || !isSafeBundlePath(t.file)) {
+      errors.push(`"${at}.file" must be a relative .json path inside the bundle (no "..", no leading "/")`);
+    }
+  });
+}
+
+/** A bundle-relative `.json` path that cannot climb out of the bundle. */
+export function isSafeBundlePath(p: string): boolean {
+  return (
+    p.length <= 200 &&
+    /\.json$/i.test(p) &&
+    !p.startsWith("/") &&
+    !p.includes("\\") &&
+    !/^[a-z]:/i.test(p) &&
+    p.split("/").every((seg) => seg !== "" && seg !== "." && seg !== "..")
+  );
+}
+
+/**
+ * A plugin that contributes themes and nothing that runs: no entry module, UI,
+ * permissions, or other contribution kinds. Such a bundle is data, so it may be
+ * installed unsigned (decided 2026-09-28); anything with code must be signed.
+ */
+export function isThemeOnly(m: Pick<PluginManifest, "contributes" | "main" | "ui" | "permissions">): boolean {
+  const c = m.contributes;
+  if (!c || !Array.isArray(c.themes) || c.themes.length === 0) return false;
+  if (m.ui !== undefined || (m.permissions?.length ?? 0) > 0) return false;
+  return Object.entries(c).every(([k, v]) => k === "themes" || (Array.isArray(v) && v.length === 0));
 }

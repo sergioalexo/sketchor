@@ -344,7 +344,7 @@ export function Viewport() {
   const promptText = useApp((s) => s.prompt);
   const selection = useApp((s) => s.selection);
   const revision = useApp((s) => s.revision);
-  const themeResolved = useTheme((s) => s.resolved);
+  const themeResolved = useTheme((s) => s.tokens);
   const layers = useApp((s) => s.layers);
 
   // The floating text editor: open while placing or editing a text entity.

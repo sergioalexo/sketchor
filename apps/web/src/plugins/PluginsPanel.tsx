@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { PERMISSIONS, type Permission, type PluginManifest, type SignedBundle } from "@sketchor/core";
+import { PERMISSIONS, isThemeBundle, loadThemeBundle, type Permission, type PluginManifest, type SignedBundle } from "@sketchor/core";
 import { installBundle, uninstall, updateGrants, type InstallDecision, type InstallPromptInfo } from "./host/install";
 import { listInstalled, onInstalledChange, type InstalledPlugin } from "./host/pluginStore";
 import { BUILTIN_MANIFESTS } from "./builtins/manifests";
+import { installThemeBundle, listInstalledThemes, onThemesChange, uninstallThemePlugin } from "../theme/installedThemes";
+import { useTheme } from "../theme/themeStore";
 import {
   fetchRegistry,
   installFromRegistry,
@@ -72,8 +74,12 @@ export function PluginsPanel({ onClose }: { onClose: () => void }) {
   const [registry, setRegistry] = useState<RegistryEntry[] | null>(null);
   const [registryError, setRegistryError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [themes, setThemes] = useState(() => listInstalledThemes());
+  const themeSetting = useTheme((s) => s.setting);
+  const setThemeSetting = useTheme((s) => s.setSetting);
 
   useEffect(() => onInstalledChange(() => setInstalled(listInstalled())), []);
+  useEffect(() => onThemesChange(() => setThemes(listInstalledThemes())), []);
 
   // Load the registry the first time the Browse tab is opened.
   useEffect(() => {
@@ -89,7 +95,21 @@ export function PluginsPanel({ onClose }: { onClose: () => void }) {
     setNotice(null);
     let bundle: SignedBundle;
     try {
-      bundle = JSON.parse(await file.text()) as SignedBundle;
+      const parsed: unknown = JSON.parse(await file.text());
+      if (isThemeBundle(parsed)) {
+        // Theme-only bundles carry no code, so they install unsigned (TH-02) — after an explicit confirm.
+        const r = loadThemeBundle(parsed);
+        if (!r.ok) return setNotice(`Not installed: ${r.errors.join("; ")}`);
+        const names = r.themes.map((t) => t.title).join(", ");
+        if (!window.confirm(`Install the unsigned theme${r.themes.length > 1 ? "s" : ""} ${names}?
+
+Themes only change colours and can't run code.`)) {
+          return setNotice("Installation declined.");
+        }
+        installThemeBundle(parsed);
+        return setNotice(`Installed ${names}. Pick it from the Themes list below or the topbar theme menu.`);
+      }
+      bundle = parsed as SignedBundle;
     } catch {
       setNotice("That file isn't a valid Sketchor plugin bundle (expected JSON).");
       return;
@@ -153,6 +173,31 @@ export function PluginsPanel({ onClose }: { onClose: () => void }) {
       )}
 
       {notice && <div className="diagpanel-empty" data-testid="plugins-notice">{notice}</div>}
+
+      {tab === "installed" && themes.length > 0 && (
+        <div className="diagpanel-list" data-testid="installed-themes">
+          {themes.map((t) => (
+            <div key={t.key} className="plugin-row" data-testid={`theme-${t.key}`}>
+              <div className="plugin-row-head">
+                <strong>{t.title}</strong>
+                <span className="plugin-origin origin-file" title="Colours only — contains no code and isn't signed">Unsigned theme</span>
+                <button className="btn ghost sm" disabled={themeSetting === `custom:${t.key}`} onClick={() => setThemeSetting(`custom:${t.key}`)}>
+                  {themeSetting === `custom:${t.key}` ? "In use" : "Apply"}
+                </button>
+                <button
+                  className="btn ghost sm"
+                  onClick={() => {
+                    if (themeSetting === `custom:${t.key}`) setThemeSetting("system");
+                    uninstallThemePlugin(t.pluginId);
+                  }}
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {tab === "installed" ? (
         <div className="diagpanel-list">

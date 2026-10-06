@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { ThemeMode, ThemeTokens } from "@sketchor/core";
 import { defaultTheme } from "@sketchor/core";
 import { setCanvasTheme } from "../viewport/renderer";
+import { getInstalledTheme } from "./installedThemes";
 
 /**
  * Z-03: the one place a theme is chosen and pushed out to every surface —
@@ -11,14 +12,15 @@ import { setCanvasTheme } from "../viewport/renderer";
  * `keybindings.ts` (no zustand `persist` middleware in this codebase).
  */
 
-export type ThemeSetting = ThemeMode | "system";
+/** A built-in mode, "system", or an installed theme plugin's `custom:<pluginId>/<themeId>` (TH-02). */
+export type ThemeSetting = ThemeMode | "system" | `custom:${string}`;
 
 const STORAGE_KEY = "sketchor.theme.v1";
 
 function loadSetting(): ThemeSetting {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw === "dark" || raw === "light" || raw === "system" ? raw : "system";
+    return raw === "dark" || raw === "light" || raw === "system" || raw?.startsWith("custom:") ? (raw as ThemeSetting) : "system";
   } catch {
     return "system";
   }
@@ -34,7 +36,10 @@ function saveSetting(setting: ThemeSetting): void {
 
 /** Pure: a `ThemeSetting` plus whatever `prefers-color-scheme` says resolves to one real mode. Exported for testing without touching `matchMedia`. */
 export function resolveMode(setting: ThemeSetting, systemPrefersDark: boolean): ThemeMode {
-  return setting === "system" ? (systemPrefersDark ? "dark" : "light") : setting;
+  if (setting.startsWith("custom:")) {
+    return getInstalledTheme(setting.slice(7))?.file.base ?? (systemPrefersDark ? "dark" : "light");
+  }
+  return setting === "system" ? (systemPrefersDark ? "dark" : "light") : (setting as ThemeMode);
 }
 
 function systemPrefersDark(): boolean {
@@ -72,7 +77,8 @@ interface ThemeState {
 
 function computeAndApply(setting: ThemeSetting): { resolved: ThemeMode; tokens: ThemeTokens } {
   const resolved = resolveMode(setting, systemPrefersDark());
-  const tokens = defaultTheme(resolved);
+  // An uninstalled custom theme falls back to its base mode's defaults.
+  const tokens = (setting.startsWith("custom:") ? getInstalledTheme(setting.slice(7))?.tokens : undefined) ?? defaultTheme(resolved);
   applyTheme(tokens);
   return { resolved, tokens };
 }
