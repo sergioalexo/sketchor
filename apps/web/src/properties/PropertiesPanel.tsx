@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import type { Command, Entity, PolylineEntity } from "@sketchor/core";
-import { arcPointAt, arcSweep, bulgeToArc, BUILTIN_LINETYPES, dist, ellipseSweep, nurbsDomain, nurbsPointAt, findClosedRegions, isFullEllipse, layerOf, polylineLength } from "@sketchor/core";
+import type { Command, Entity, PolylineEntity, SplineEntity } from "@sketchor/core";
+import { arcPointAt, arcSweep, bulgeToArc, BUILTIN_LINETYPES, dist, ellipseSweep, nurbsDomain, nurbsPointAt, findClosedRegions, isFullEllipse, layerOf, polylineLength, addSplinePoint, polylineToSpline, rebuildSpline, removeSplinePoint, splineToControlPoints, splineToPolyline } from "@sketchor/core";
 import { bus, doc, useApp } from "../state/store";
 import { parseLength } from "../tools/typedInput";
 import { factorFromMm, formatArea, formatLength, type DisplayUnit } from "../units";
@@ -255,6 +255,7 @@ function Geometry({ entity, unit }: { entity: Entity; unit: DisplayUnit }) {
           <Row label="Closed">
             <input type="checkbox" checked={entity.closed} data-testid="prop-closed" onChange={(e) => update({ ...entity, closed: e.target.checked })} />
           </Row>
+          <SplineActions entity={entity} />
         </Section>
       );
     }
@@ -291,6 +292,51 @@ function Geometry({ entity, unit }: { entity: Entity; unit: DisplayUnit }) {
   }
 }
 
+/** Spline editing actions (C-07): each is one undo step through `update-entity`. */
+function SplineActions({ entity }: { entity: SplineEntity }) {
+  const update = (e: Entity | null) => e && bus.execute({ type: "update-entity", entity: e });
+  const [count, setCount] = useState(8);
+  const points = entity.fitPoints ?? entity.controlPoints;
+  const addAtWidestGap = () => {
+    let best = 0;
+    let at = { x: 0, y: 0 };
+    for (let i = 1; i < points.length; i++) {
+      const d = dist(points[i - 1], points[i]);
+      if (d > best) {
+        best = d;
+        at = { x: (points[i - 1].x + points[i].x) / 2, y: (points[i - 1].y + points[i].y) / 2 };
+      }
+    }
+    update(addSplinePoint(entity, at));
+  };
+  return (
+    <>
+      <div className="propspanel-row propspanel-actions">
+        {entity.fitPoints && (
+          <button className="btn ghost sm" title="Drop the fit points; edit the control points instead" data-testid="prop-to-cvs" onClick={() => update(splineToControlPoints(entity))}>
+            Convert to CVs
+          </button>
+        )}
+        <button className="btn ghost sm" title={`Add a ${entity.fitPoints ? "fit point" : "control point"} in the widest gap`} data-testid="prop-add-point" onClick={addAtWidestGap}>
+          Add point
+        </button>
+        <button className="btn ghost sm" title="Remove the last point" data-testid="prop-remove-point" onClick={() => update(removeSplinePoint(entity, points.length - 1))}>
+          Remove point
+        </button>
+      </div>
+      <div className="propspanel-row propspanel-actions">
+        <input type="number" min={2} max={500} value={count} data-testid="prop-rebuild-count" style={{ width: 56 }} onChange={(e) => setCount(Number(e.target.value))} />
+        <button className="btn ghost sm" title="Refit as a cubic with this many control points" data-testid="prop-rebuild" onClick={() => update(rebuildSpline(entity, count))}>
+          Rebuild
+        </button>
+        <button className="btn ghost sm" title="Replace with a polyline within 0.05 mm of the curve (arcs are refitted)" data-testid="prop-to-polyline" onClick={() => update(splineToPolyline(entity, 0.05))}>
+          Convert to polyline
+        </button>
+      </div>
+    </>
+  );
+}
+
 function PolylineGeometry({ entity, unit }: { entity: PolylineEntity; unit: DisplayUnit }) {
   const update = (e: Entity) => bus.execute({ type: "update-entity", entity: e });
   const area = useMemo(() => (entity.closed ? findClosedRegions([entity])[0]?.area ?? null : null), [entity]);
@@ -304,6 +350,17 @@ function PolylineGeometry({ entity, unit }: { entity: PolylineEntity; unit: Disp
       <ReadRow label="Length" value={formatLength(polylineLength(entity), unit)} />
       {area !== null && <ReadRow label="Area" value={formatArea(area, unit)} />}
       <div className="propspanel-row propspanel-actions">
+        <button
+          className="btn ghost sm"
+          title="Replace with a smooth spline through the vertices"
+          data-testid="prop-to-spline"
+          onClick={() => {
+            const s = polylineToSpline(entity);
+            if (s) update(s);
+          }}
+        >
+          Convert to spline
+        </button>
         <button className="btn ghost sm" onClick={() => setShowVertices((v) => !v)} data-testid="prop-vertices-toggle">
           {showVertices ? "Hide vertices" : `Vertices (${entity.points.length})`}
         </button>

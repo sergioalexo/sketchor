@@ -48,6 +48,7 @@ export * from "./pattern";
 export * from "./palette";
 export * from "./dimension";
 export * from "./simplify";
+export * from "./splineEdit";
 export * from "./plugin";
 export * from "./ellipse";
 export * from "./nurbs";
