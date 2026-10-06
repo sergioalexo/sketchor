@@ -1,0 +1,213 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://sketchor.sergioalexo.com/schemas/theme-1.json",
+  "title": "Sketchor theme",
+  "type": "object",
+  "required": [
+    "id",
+    "name",
+    "base",
+    "tokens"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 80
+    },
+    "author": {
+      "type": "string",
+      "maxLength": 120
+    },
+    "version": {
+      "type": "string",
+      "maxLength": 32
+    },
+    "base": {
+      "enum": [
+        "dark",
+        "light"
+      ],
+      "description": "Tokens the theme doesn't set come from this built-in theme."
+    },
+    "tokens": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ui": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "bg": {
+              "$ref": "#/$defs/colour"
+            },
+            "panel": {
+              "$ref": "#/$defs/colour"
+            },
+            "border": {
+              "$ref": "#/$defs/colour"
+            },
+            "text": {
+              "$ref": "#/$defs/colour"
+            },
+            "textDim": {
+              "$ref": "#/$defs/colour"
+            },
+            "accent": {
+              "$ref": "#/$defs/colour"
+            },
+            "accentSoft": {
+              "$ref": "#/$defs/colour"
+            },
+            "danger": {
+              "$ref": "#/$defs/colour"
+            }
+          }
+        },
+        "canvas": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "bg": {
+              "$ref": "#/$defs/colour"
+            },
+            "gridMinor": {
+              "$ref": "#/$defs/colour"
+            },
+            "gridMajor": {
+              "$ref": "#/$defs/colour"
+            },
+            "axis": {
+              "$ref": "#/$defs/colour"
+            },
+            "entity": {
+              "$ref": "#/$defs/colour"
+            },
+            "selected": {
+              "$ref": "#/$defs/colour"
+            },
+            "preview": {
+              "$ref": "#/$defs/colour"
+            },
+            "snap": {
+              "$ref": "#/$defs/colour"
+            },
+            "handle": {
+              "$ref": "#/$defs/colour"
+            },
+            "measure": {
+              "$ref": "#/$defs/colour"
+            },
+            "hover": {
+              "$ref": "#/$defs/colour"
+            },
+            "measureLabelBg": {
+              "$ref": "#/$defs/colour"
+            },
+            "reference": {
+              "$ref": "#/$defs/colour"
+            },
+            "connectivityHint": {
+              "$ref": "#/$defs/colour"
+            },
+            "windowSelect": {
+              "$ref": "#/$defs/colour"
+            },
+            "crossingSelect": {
+              "$ref": "#/$defs/colour"
+            },
+            "closedRegionFill": {
+              "$ref": "#/$defs/colour"
+            },
+            "duplicateMarker": {
+              "$ref": "#/$defs/colour"
+            },
+            "crossingMarker": {
+              "$ref": "#/$defs/colour"
+            },
+            "origin": {
+              "$ref": "#/$defs/colour"
+            },
+            "originOff": {
+              "$ref": "#/$defs/colour"
+            },
+            "axisX": {
+              "$ref": "#/$defs/colour"
+            },
+            "axisY": {
+              "$ref": "#/$defs/colour"
+            }
+          }
+        },
+        "model3d": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "bg": {
+              "$ref": "#/$defs/colour"
+            },
+            "edge": {
+              "$ref": "#/$defs/colour"
+            },
+            "highlight": {
+              "$ref": "#/$defs/colour"
+            },
+            "hover": {
+              "$ref": "#/$defs/colour"
+            }
+          }
+        },
+        "code": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "keyword": {
+              "$ref": "#/$defs/colour"
+            },
+            "number": {
+              "$ref": "#/$defs/colour"
+            },
+            "comment": {
+              "$ref": "#/$defs/colour"
+            },
+            "error": {
+              "$ref": "#/$defs/colour"
+            }
+          }
+        },
+        "fonts": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "ui": {
+              "type": "string",
+              "maxLength": 200,
+              "description": "Comma-separated families from: system-ui, sans-serif, serif, monospace, ui-monospace, ui-sans-serif, Segoe UI, Cascadia Code, Consolas, Arial, Helvetica, Helvetica Neue, Inter, Roboto, SF Pro Text, SF Mono, Menlo, Monaco, Courier New, Fira Code, JetBrains Mono, Source Code Pro, Georgia, Verdana, Tahoma, Ubuntu, Noto Sans"
+            },
+            "mono": {
+              "type": "string",
+              "maxLength": 200,
+              "description": "Comma-separated families from: system-ui, sans-serif, serif, monospace, ui-monospace, ui-sans-serif, Segoe UI, Cascadia Code, Consolas, Arial, Helvetica, Helvetica Neue, Inter, Roboto, SF Pro Text, SF Mono, Menlo, Monaco, Courier New, Fira Code, JetBrains Mono, Source Code Pro, Georgia, Verdana, Tahoma, Ubuntu, Noto Sans"
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "colour": {
+      "type": "string",
+      "maxLength": 64,
+      "description": "A plain CSS colour: #rgb[a], #rrggbb[aa], rgb()/rgba(), hsl()/hsla() or a colour name. No url(), var() or calc()."
+    }
+  }
+}
