@@ -718,6 +718,37 @@ export function selectableEntities(): Entity[] {
   return doc.all().filter((e) => isPickable(e, hidden, locked));
 }
 
+/** Hatch tool settings: the paint, island style and how boundaries are found. */
+export interface HatchSettings {
+  kind: "pattern" | "solid" | "gradient";
+  pattern: string;
+  scale: number;
+  angle: number;
+  solidColor: string;
+  gradientName: string;
+  gradientColors: [string, string];
+  gradientAngle: number;
+  style: "normal" | "outer" | "ignore";
+  /** HPGAPTOL: endpoints this close count as joined (world units). */
+  gapTol: number;
+  /** Click inside a region, pick boundary objects, or copy the paint of an existing hatch. */
+  mode: "point" | "objects" | "match";
+}
+
+export const DEFAULT_HATCH_SETTINGS: HatchSettings = {
+  kind: "pattern",
+  pattern: "ANSI31",
+  scale: 1,
+  angle: 0,
+  solidColor: PALETTE[0],
+  gradientName: "LINEAR",
+  gradientColors: ["#2f6fdb", "#ffffff"],
+  gradientAngle: 0,
+  style: "normal",
+  gapTol: 0,
+  mode: "point",
+};
+
 interface AppState {
   tool: ToolId;
   selection: EntityId[];
@@ -753,6 +784,9 @@ interface AppState {
   /** The colour the Fill/Hatch tool applies on click and the Fill panel seeds from. */
   fillColor: string;
   setFillColor: (color: string) => void;
+  /** What the Hatch tool applies (H-04). */
+  hatchSettings: HatchSettings;
+  setHatchSettings: (patch: Partial<HatchSettings>) => void;
   /** Cap height (world units / mm) for new text and dimension labels. */
   textHeight: number;
   setTextHeight: (h: number) => void;
@@ -878,6 +912,8 @@ export const useApp = create<AppState>((set, get) => ({
   setStraightenPivot: (pivot) => set({ straightenPivot: pivot }),
   fillColor: PALETTE[0],
   setFillColor: (color) => set({ fillColor: color }),
+  hatchSettings: DEFAULT_HATCH_SETTINGS,
+  setHatchSettings: (patch) => set((s) => ({ hatchSettings: { ...s.hatchSettings, ...patch } })),
   textHeight: 100,
   setTextHeight: (textHeight) => set({ textHeight: Math.max(1, textHeight) }),
   healIssues: [],

@@ -89,7 +89,7 @@ describe("actionForTestId", () => {
     expect(actionForTestId("layer-lock-Customer secret")).toBe("layers.lock");
     expect(actionForTestId("constraint-remove-c17")).toBe("constraints.remove");
     expect(actionForTestId("prop-vertex-remove-3")).toBe("properties.vertexRemove");
-    expect(actionForTestId("fill-swatch-#ff00aa")).toBe("fill.swatch");
+    expect(actionForTestId("hatch-swatch-#ff00aa")).toBe("hatch.swatch");
     expect(actionForTestId("uninstall-com.acme.gear-generator")).toBe("plugins.uninstall");
     expect(actionForTestId("install-com.acme.gear-generator")).toBe("plugins.installRegistry");
     expect(actionForTestId("update-com.acme.gear-generator")).toBe("plugins.updateRegistry");

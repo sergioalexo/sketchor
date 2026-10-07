@@ -17,7 +17,7 @@ import { LayerPanel } from "./layers/LayerPanel";
 import { PropertiesPanel } from "./properties/PropertiesPanel";
 import { ConstraintPanel } from "./constraints/ConstraintPanel";
 import { PatternPanel } from "./pattern/PatternPanel";
-import { FillPanel } from "./fill/FillPanel";
+import { HatchPanel } from "./fill/HatchPanel";
 import { TextPanel } from "./text/TextPanel";
 import { printDrawing } from "./print/printDrawing";
 import { PluginCommandPalette } from "./plugins/PluginCommandPalette";
@@ -229,7 +229,7 @@ const TOOLS: { id: ToolId; label: string; keyHint: string; icon: JSX.Element; di
   },
   {
     id: "fill",
-    label: "Fill",
+    label: "Hatch",
     keyHint: "H",
     icon: (
       <svg viewBox="0 0 24 24" width="20" height="20">
@@ -1302,7 +1302,7 @@ export function App() {
               <>
                 <Viewport />
                 {tool === "straighten" && <StraightenPanel />}
-                {tool === "fill" && <FillPanel />}
+                {tool === "fill" && <HatchPanel />}
                 {(tool === "text" || tool === "dim") && <TextPanel />}
               </>
             )}

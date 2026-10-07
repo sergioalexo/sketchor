@@ -42,6 +42,25 @@ approximately; `bounds`/`transform`/`path`/`snaps`/`hitDistance`/`grips` make it
 exact. The seven built-ins live in `kinds/builtin.ts`. **Adding a type: follow
 `docs/new-entity-checklist.md`.**
 
+## Hatching (`packages/core/src/hatch/`, plan §6)
+
+`HatchEntity {loops, paint, style}`: loops are chains of exact edges
+(line/arc/ellipse/spline, tessellated through the kind registry by
+`loops.ts`); `paint` is `pattern | solid | gradient` — named `paint`, not
+`fill`, because generic code reads `entity.fill` as a colour string. A pattern
+is a list of `.pat`-style line families (`pat.ts` parse/write); `fillLines.ts`
+(`hatchFill`) clips them to the loops under the island style with dash phase
+anchored to the family origin, and returns a density-guard result
+(`truncated`/`inkPerArea`) instead of strokes when a region would need more than
+200k — the renderer then draws a tint (`viewport/hatchRender.ts`). The built-in
+library (`hatch/library/*.ts`, 70 patterns) is authored clean-room through the
+`fam()`/`dots()` DSL — never paste acad.pat/LibreCAD pattern numbers (licence,
+plan §0.9). `boundary.ts` (`detectBoundary`, `boundaryFromObjects`) finds the
+region under a click with a planar-graph face search and returns loops with
+exact edges; the Hatch tool (`tools/hatchTool.ts`, key H, panel
+`fill/HatchPanel.tsx`) is its only caller. Sketch code: `hatch H1 pattern
+ANSI31 scale 1 angle 0 boundary (x, y) … | …` (`loops N` for curved boundaries).
+
 ## Document tables and settings (`packages/core/src/tables.ts`)
 
 `SketchDocument` also holds named **tables** (`layers`, `blocks`, `dimStyles`,

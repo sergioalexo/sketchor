@@ -94,8 +94,7 @@ export const TRACKED_BUTTONS: Record<string, string> = {
   "pattern-rotate": "pattern.rotate",
   "pattern-apply": "pattern.apply",
   "straighten-apply": "straighten.apply",
-  "fill-apply": "fill.apply",
-  "fill-remove": "fill.remove",
+  "hatch-convert": "hatch.convertFills",
   "code-apply": "code.apply",
   "toggle-glyphs": "constraints.glyphs",
   "prop-closed": "properties.closed",
@@ -187,7 +186,7 @@ export const TRACKED_PREFIXES: [prefix: string, action: (suffix: string) => stri
   ["prop-vertex-arc-", () => "properties.vertexArc"],
   ["prop-vertex-remove-", () => "properties.vertexRemove"],
   // The fill palette's swatches, and the file browser's column headers.
-  ["fill-swatch-", () => "fill.swatch"],
+  ["hatch-swatch-", () => "hatch.swatch"],
   ["file-explorer-col-", () => "files.sortColumn"],
   // Plugin rows in the manage/browse lists.
   ["uninstall-", byPluginId("plugins.uninstall")],

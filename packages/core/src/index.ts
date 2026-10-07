@@ -62,3 +62,4 @@ export * from "./hatch/pat";
 export * from "./hatch/fillLines";
 export * from "./hatch/registry";
 export * from "./hatch/library";
+export * from "./hatch/boundary";

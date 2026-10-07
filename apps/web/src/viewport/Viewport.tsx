@@ -1428,23 +1428,6 @@ export function Viewport() {
         }
         break;
       }
-      case "fill": {
-        // Click a closed shape — on its edge or anywhere inside it — to
-        // hatch-fill it in the current colour; Alt-click clears a fill.
-        const hit = hitTest(view, world);
-        const hitEntity = hit ? doc.get(hit) : null;
-        const target =
-          hitEntity && (hitEntity.type === "circle" || (hitEntity.type === "polyline" && hitEntity.closed))
-            ? hitEntity
-            : closedEntityAt(world);
-        if (target) {
-          const next = { ...target };
-          if (e.altKey) delete next.fill;
-          else next.fill = app.fillColor;
-          bus.execute({ type: "update-entity", entity: next });
-        }
-        break;
-      }
       case "text": {
         // Edit the text under the cursor, or start a fresh one where you clicked.
         const hit = hitTest(view, world);

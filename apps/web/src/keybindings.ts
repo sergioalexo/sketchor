@@ -34,7 +34,7 @@ export const ACTIONS: ActionDef[] = [
   { id: "tool.image", label: "Image tool", group: "Tools" },
   { id: "tool.measure", label: "Measure tool", group: "Tools" },
   { id: "tool.straighten", label: "Straighten tool", group: "Tools" },
-  { id: "tool.fill", label: "Fill tool", group: "Tools" },
+  { id: "tool.fill", label: "Hatch tool", group: "Tools" },
   { id: "tool.text", label: "Text tool", group: "Tools" },
   { id: "tool.dim", label: "Dimension tool", group: "Tools" },
   { id: "tool.pan", label: "Pan tool (one-finger pan on touch screens)", group: "Tools" },

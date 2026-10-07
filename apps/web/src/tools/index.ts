@@ -1,6 +1,7 @@
 import type { ToolId } from "../state/store";
 import { ArcTool, CircleTool, EllipseTool, LineTool, PointTool, PolygonTool, PolylineTool, RectangleTool, SlotTool, SplineTool } from "./drawTools";
 import { AlignTool, ChamferTool, DivideTool, FilletTool, LengthenTool, MatchTool, OffsetTool, SplitTool, StretchTool, TrimTool, ZoomWindowTool } from "./editTools";
+import { HatchTool } from "./hatchTool";
 import { SplineEditTool } from "./splineEditTool";
 import { CopyTool, MirrorTool, MoveTool, RotateTool, ScaleTool } from "./modifyTools";
 import type { Tool } from "./tool";
@@ -38,6 +39,7 @@ const TOOLS: Partial<Record<ToolId, Tool>> = {
   lengthen: new LengthenTool(),
   match: new MatchTool(),
   stretch: new StretchTool(),
+  fill: new HatchTool(),
 };
 
 export function getTool(id: ToolId): Tool | null {
