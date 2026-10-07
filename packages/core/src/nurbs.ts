@@ -343,39 +343,70 @@ function solveDense(A: number[][], B: number[][]): number[][] | null {
 
 /**
  * The clamped cubic (lower degree for few points) B-spline passing through
- * `points`: chord-length parameters, averaged knots, free end conditions.
+ * `points`: chord-length parameters, averaged knots. End conditions are free
+ * unless `tangents` fixes a start and/or end direction: each adds one control
+ * point and one equation `C'(end) = 3·T` (T is the handle vector, a Bezier
+ * leg, in world units; the curve parameter runs 0..1 over the whole run).
  * Consecutive duplicates are dropped. Null for fewer than two distinct points
  * or a singular system.
  */
-export function interpolateNurbs(points: Point[], maxDegree = 3): NurbsData | null {
+export function interpolateNurbs(points: Point[], maxDegree = 3, tangents?: { start?: Point; end?: Point }): NurbsData | null {
   const pts = points.filter((p, i) => i === 0 || Math.hypot(p.x - points[i - 1].x, p.y - points[i - 1].y) > 1e-9);
   const n = pts.length;
   if (n < 2) return null;
-  const p = Math.min(maxDegree, n - 1);
+  const hasS = !!tangents?.start && Math.hypot(tangents.start.x, tangents.start.y) > 1e-12;
+  const hasE = !!tangents?.end && Math.hypot(tangents.end.x, tangents.end.y) > 1e-12;
+  const nd = (hasS ? 1 : 0) + (hasE ? 1 : 0);
+  const p = Math.min(maxDegree, n - 1 + nd);
   const chord = [0];
   for (let i = 1; i < n; i++) chord.push(chord[i - 1] + Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y));
   const total = chord[n - 1];
   const t = chord.map((c) => c / total);
+  const m = n + nd; // control point count
   const knots: number[] = new Array(p + 1).fill(0);
-  for (let j = 1; j <= n - p - 1; j++) {
+  // Interior knots by averaging (Piegl & Tiller 9.2.2): a derivative end shifts the window by one.
+  const jFrom = hasS ? 0 : 1;
+  const jTo = hasE ? n - p : n - p - 1;
+  for (let j = jFrom; j <= jTo; j++) {
     let sum = 0;
-    for (let i = j; i < j + p; i++) sum += t[i];
+    for (let i = j; i < j + p; i++) sum += t[Math.min(i, n - 1)];
     knots.push(sum / p);
   }
   for (let i = 0; i <= p; i++) knots.push(1);
-  const base: NurbsData = { degree: p, controlPoints: pts, knots };
+  if (knots.length !== m + p + 1) return null;
+  const base: NurbsData = { degree: p, controlPoints: new Array(m).fill(pts[0]), knots };
   const A: number[][] = [];
-  for (let i = 0; i < n; i++) {
-    const row = new Array<number>(n).fill(0);
-    const span = findSpan(base, t[i]);
-    const N = basisFuns(knots, span, Math.min(t[i], 1), p);
+  const B: number[][] = [];
+  const dataRow = (k: number) => {
+    const row = new Array<number>(m).fill(0);
+    const span = findSpan(base, t[k]);
+    const N = basisFuns(knots, span, Math.min(t[k], 1), p);
     for (let j = 0; j <= p; j++) row[span - p + j] = N[j];
     A.push(row);
+    B.push([pts[k].x, pts[k].y]);
+  };
+  dataRow(0);
+  if (hasS) {
+    // C'(0) = p/u[p+1] · (P1 − P0) = 3·T
+    const a = p / knots[p + 1];
+    const row = new Array<number>(m).fill(0);
+    row[0] = -a;
+    row[1] = a;
+    A.push(row);
+    B.push([3 * tangents!.start!.x, 3 * tangents!.start!.y]);
   }
-  const sol = solveDense(
-    A,
-    pts.map((q) => [q.x, q.y]),
-  );
+  for (let k = 1; k < n - 1; k++) dataRow(k);
+  if (hasE) {
+    // C'(1) = p/(1 − u[m−1]) · (Pm − Pm−1) = 3·T
+    const a = p / (1 - knots[m - 1 + 0]);
+    const row = new Array<number>(m).fill(0);
+    row[m - 2] = -a;
+    row[m - 1] = a;
+    A.push(row);
+    B.push([3 * tangents!.end!.x, 3 * tangents!.end!.y]);
+  }
+  dataRow(n - 1);
+  const sol = solveDense(A, B);
   if (!sol) return null;
   return { degree: p, controlPoints: sol.map(([x, y]) => ({ x, y })), knots };
 }

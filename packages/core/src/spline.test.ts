@@ -118,7 +118,7 @@ describe("spline kind", () => {
   it("fit-point grips re-solve the curve: it passes through the moved point and the others", () => {
     const e = fitSpline();
     const grips = gripsOf(e);
-    expect(grips).toHaveLength(5);
+    expect(grips.filter((g) => g.kind === "vertex")).toHaveLength(5);
     expect(grips[0].point).toEqual({ x: 0, y: 0 });
     const moved = applyGrip(e, grips[2], { x: 25, y: 20 }) as SplineEntity;
     expect(moved.fitPoints![2]).toEqual({ x: 25, y: 20 });

@@ -678,6 +678,7 @@ export function Viewport() {
   const healFocus = useApp((s) => s.healFocus);
   const showConnectivityHint = useApp((s) => s.showConnectivityHint);
   const showClosedRegions = useApp((s) => s.showClosedRegions);
+  const showSplineCvs = useApp((s) => s.showSplineCvs);
 
   // Closed-loop detection only needs to rerun when the document changes, not
   // on every redraw (pan/zoom/selection) — cached here. Computed regardless
@@ -704,6 +705,7 @@ export function Viewport() {
     crossingIssues,
     showConnectivityHint,
     showClosedRegions,
+    showSplineCvs,
     themeResolved,
   ]);
 

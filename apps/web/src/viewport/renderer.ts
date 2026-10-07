@@ -813,9 +813,25 @@ function drawHandles(ctx: CanvasRenderingContext2D, view: View, entity: Entity):
   ctx.fillStyle = COLORS.handle;
   ctx.strokeStyle = COLORS.handle;
   ctx.lineWidth = 1.5;
-  for (const g of gripsOf(entity)) {
+  const grips = gripsOf(entity);
+  for (const g of grips) {
     const s = worldToScreen(view, g.point);
-    if (g.kind === "mid" || g.kind === "center") ctx.strokeRect(s.x - 3.5, s.y - 3.5, 7, 7);
+    if (g.kind === "tangent" && entity.type === "spline" && entity.fitPoints) {
+      // A tangent handle hangs off its end by a thin line and reads as a round knob.
+      const fit = entity.fitPoints;
+      const from = worldToScreen(view, g.index === 0 ? fit[0] : fit[fit.length - 1]);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(from.x, from.y);
+      ctx.lineTo(s.x, s.y);
+      ctx.stroke();
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, 4, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (g.kind === "cv") {
+      ctx.strokeRect(s.x - 3, s.y - 3, 6, 6); // a hollow, smaller square: pulls the curve, is not on it
+    } else if (g.kind === "mid" || g.kind === "center") ctx.strokeRect(s.x - 3.5, s.y - 3.5, 7, 7);
     else ctx.fillRect(s.x - 3.5, s.y - 3.5, 7, 7);
   }
 }

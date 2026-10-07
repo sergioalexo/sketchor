@@ -14,7 +14,8 @@ import { kindApplyGrip, kindGrips } from "./kinds/registry";
  * has to draw squares and drag one.
  */
 
-export type GripKind = "end" | "mid" | "center" | "quadrant" | "vertex" | "insert";
+/** `tangent`: a fit spline's end-tangent handle (index 0 start, 1 end). `cv`: a control vertex shown on a fit spline ("Show CVs"). */
+export type GripKind = "end" | "mid" | "center" | "quadrant" | "vertex" | "insert" | "tangent" | "cv";
 
 export interface Grip {
   point: Point;

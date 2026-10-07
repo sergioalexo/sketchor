@@ -116,7 +116,10 @@ const fmt6 = (n: number): string => String(Math.round(n * 1e6) / 1e6);
 
 function splineLine(name: string, e: SplineEntity): string {
   const pts = (list: { x: number; y: number }[]) => list.map((p) => `(${fmt(p.x)}, ${fmt(p.y)})`).join(" ");
-  if (e.fitPoints) return `spline ${name} degree ${e.degree} fit ${pts(e.fitPoints)}${e.closed ? " closed" : ""}`;
+  if (e.fitPoints) {
+    const tan = (word: string, v: { x: number; y: number } | undefined) => (v ? ` ${word} (${fmt(v.x)}, ${fmt(v.y)})` : "");
+    return `spline ${name} degree ${e.degree} fit ${pts(e.fitPoints)}${tan("start", e.startTangent)}${tan("end", e.endTangent)}${e.closed ? " closed" : ""}`;
+  }
   const uniform = clampedUniformKnots(e.controlPoints.length, e.degree);
   const stdKnots = e.knots.length === uniform.length && e.knots.every((k, i) => Math.abs(k - uniform[i]) < 1e-9);
   return (
@@ -133,7 +136,7 @@ function parseSpline(name: string, degree: number, mode: string, rest: string): 
     const m = new RegExp(String.raw`(?:^|\s)${word}(?=\s|$)`).exec(rest);
     return m ? m.index : -1;
   };
-  const cuts = ["knots", "weights", "closed"].map((w) => [w, keyAt(w)] as const).filter(([, i]) => i >= 0).sort((a, b) => a[1] - b[1]);
+  const cuts = ["knots", "weights", "start", "end", "closed"].map((w) => [w, keyAt(w)] as const).filter(([, i]) => i >= 0).sort((a, b) => a[1] - b[1]);
   const section = (word: string): string | null => {
     const i = cuts.findIndex(([w]) => w === word);
     if (i < 0) return null;
@@ -155,9 +158,20 @@ function parseSpline(name: string, degree: number, mode: string, rest: string): 
   if (degree < 1 || degree > 11) return "spline degree must be between 1 and 11";
   if (mode === "fit") {
     if (knots || weights) return "a fit spline takes no knots or weights (they are derived)";
-    const fitted = interpolateNurbs(points, degree);
+    const vec = (word: string): { x: number; y: number } | undefined | string => {
+      const text = section(word);
+      if (text === null) return undefined;
+      POINT_PAIR_CAPTURE.lastIndex = 0;
+      const m = POINT_PAIR_CAPTURE.exec(text);
+      return m ? { x: Number(m[1]), y: Number(m[2]) } : `'${word}' needs a (dx, dy) handle vector`;
+    };
+    const startTangent = vec("start");
+    const endTangent = vec("end");
+    if (typeof startTangent === "string") return startTangent;
+    if (typeof endTangent === "string") return endTangent;
+    const fitted = interpolateNurbs(points, degree, closed ? undefined : { start: startTangent, end: endTangent });
     if (!fitted) return "a fit spline needs at least two distinct points";
-    return { type: "spline", name, data: { ...fitted, fitPoints: points, closed } };
+    return { type: "spline", name, data: { ...fitted, fitPoints: points, ...(startTangent ? { startTangent } : {}), ...(endTangent ? { endTangent } : {}), closed } };
   }
   if (points.length < degree + 1) return `a degree ${degree} spline needs at least ${degree + 1} control points`;
   const data = {
@@ -409,7 +423,7 @@ export function parseCode(text: string): { entities: ParsedEntity[]; errors: Par
                   : keyword === "point"
                     ? "point NAME at (x, y)"
                     : keyword === "spline"
-                      ? "spline NAME degree N fit (x, y) ... | cv (x, y) ... [knots k ...] [weights w ...] [closed]"
+                      ? "spline NAME degree N fit (x, y) ... [start (dx, dy)] [end (dx, dy)] | cv (x, y) ... [knots k ...] [weights w ...] [closed]"
                     : keyword === "ellipse"
                       ? "ellipse NAME at (x, y) major (dx, dy) ratio R [from DEG to DEG]"
                     : keyword === "text"
@@ -471,6 +485,8 @@ function sameGeometry(existing: Entity, parsed: ParsedEntity): boolean {
       existing.degree === d.degree &&
       existing.closed === d.closed &&
       ptsSame(existing.fitPoints, d.fitPoints) &&
+      ptsSame(existing.startTangent && [existing.startTangent], d.startTangent && [d.startTangent]) &&
+      ptsSame(existing.endTangent && [existing.endTangent], d.endTangent && [d.endTangent]) &&
       (existing.fitPoints !== undefined || ptsSame(existing.controlPoints, d.controlPoints)) &&
       existing.knots.length === d.knots.length &&
       (existing.fitPoints !== undefined || existing.knots.every((k, i) => Math.abs(k - d.knots[i]) < 1e-6)) &&

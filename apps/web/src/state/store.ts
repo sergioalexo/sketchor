@@ -40,6 +40,7 @@ import {
   patternCommands,
   polylineLength,
   entityLength,
+  setSplineShowCvs,
   polylineSegments,
   reduceToHalfTurn,
   scanForCrossings,
@@ -381,6 +382,7 @@ export type ToolId =
   | "arc"
   | "ellipse"
   | "spline"
+  | "splinedit"
   | "polygon"
   | "slot"
   | "point"
@@ -416,6 +418,7 @@ export const TOOL_HINTS: Record<ToolId, string> = {
   circle: "Click center, then a point on the circle or type the radius - Tab cycles to center-diameter, two-point, three-point, and tangent-tangent-radius (type the radius, click two entities)",
   ellipse: "Click one end of an axis, the other end, then a point at the other half-axis (or type it) - Tab cycles to center + axis end and to an elliptical arc (then click its start and end)",
   spline: "Click points the curve passes through - Tab switches to control vertices (they pull the curve) - Enter or double-click to finish, C to close, Backspace undoes the last point",
+  splinedit: "Select a spline (or click one): click the curve to add a fit point / control vertex, Shift-click to remove the nearest - type rebuild N, cv or polyline [tolerance] to act on the selected splines",
   polygon: "Type the number of sides, click the center, then a vertex - Tab cycles to circumscribed (click an edge midpoint - across flats) and by edge",
   slot: "Click the two centres, then type the width or pick a point at half the width from the centreline - Tab switches to an arc slot (center, start, end, width)",
   arc: "Three-point arc: click start, end, then a point on the arc - Tab cycles to center-start-end (Shift-click for clockwise) and tangent arc (click near the end of a line or arc, then the end point)",
@@ -809,6 +812,9 @@ interface AppState {
   /** Fills detected closed loops (lines/arcs chained shut, or circles) with a translucent tint — on by default. */
   showClosedRegions: boolean;
   setShowClosedRegions: (v: boolean) => void;
+  /** Also show a fit spline's control vertices as grips (a view preference; the properties panel toggles it). */
+  showSplineCvs: boolean;
+  setShowSplineCvs: (v: boolean) => void;
   /** Bumped whenever the viewport should zoom-to-fit (e.g. after opening a file) — Viewport watches this. */
   fitRequestId: number;
   requestFit: () => void;
@@ -908,6 +914,11 @@ export const useApp = create<AppState>((set, get) => ({
   setHighlightedConstraint: (id) => set((s) => (s.highlightedConstraint === id ? s : { highlightedConstraint: id })),
   showClosedRegions: true,
   setShowClosedRegions: (v) => set({ showClosedRegions: v }),
+  showSplineCvs: false,
+  setShowSplineCvs: (v) => {
+    setSplineShowCvs(v);
+    set({ showSplineCvs: v });
+  },
   fitRequestId: 0,
   requestFit: () => set((s) => ({ fitRequestId: s.fitRequestId + 1 })),
   // Switching tools invalidates any in-progress reference-edge pick or entered group.

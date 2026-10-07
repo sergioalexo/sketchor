@@ -225,6 +225,12 @@ export interface SplineEntity {
   /** One positive weight per control point; absent = non-rational (all 1). */
   weights?: number[];
   /**
+   * Fit splines only: the direction the curve leaves its first / arrives at its last fit point, as a handle
+   * vector in world units (the Bezier leg: the curve's end derivative per unit parameter is 3x this). Absent = free end.
+   */
+  startTangent?: { x: number; y: number };
+  endTangent?: { x: number; y: number };
+  /**
    * Points the curve was drawn through, when it was drawn that way (DXF keeps
    * both). While present, editing a fit point re-solves the control points;
    * editing a control point drops them, as AutoCAD does.

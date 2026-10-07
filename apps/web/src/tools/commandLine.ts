@@ -62,6 +62,9 @@ export const TOOL_ALIASES: Record<string, ToolId> = {
   ellipse: "ellipse",
   spl: "spline",
   spline: "spline",
+  spe: "splinedit",
+  splinedit: "splinedit",
+  rebuild: "splinedit",
   pol: "polygon",
   polygon: "polygon",
   slot: "slot",
@@ -173,7 +176,8 @@ export function parseCommand(text: string): ParsedCommand {
   const app = APP_ALIASES[word];
   if (app) return { kind: "app", id: app };
   const tool = TOOL_ALIASES[word];
-  if (tool) return { kind: "tool", tool, argument };
+  // `rebuild 8` is the spline-edit tool's own typed command, so the verb stays part of its argument.
+  if (tool) return { kind: "tool", tool, argument: word === "rebuild" ? `rebuild${argument ? " " + argument : ""}` : argument };
   return { kind: "unknown", text: trimmed };
 }
 

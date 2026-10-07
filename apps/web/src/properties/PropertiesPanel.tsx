@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Command, Entity, PolylineEntity, SplineEntity } from "@sketchor/core";
-import { entityArea, entityLength, arcPointAt, arcSweep, bulgeToArc, BUILTIN_LINETYPES, dist, ellipseSweep, nurbsDomain, nurbsPointAt, findClosedRegions, isFullEllipse, layerOf, polylineLength, addSplinePoint, polylineToSpline, rebuildSpline, removeSplinePoint, splineToControlPoints, splineToPolyline } from "@sketchor/core";
+import { entityArea, entityLength, arcPointAt, arcSweep, bulgeToArc, BUILTIN_LINETYPES, dist, ellipseSweep, nurbsDomain, nurbsPointAt, findClosedRegions, isFullEllipse, layerOf, polylineLength, addSplinePoint, polylineToSpline, rebuildSpline, refitSpline, removeSplinePoint, splineToControlPoints, splineToPolyline } from "@sketchor/core";
 import { bus, doc, useApp } from "../state/store";
 import { parseLength } from "../tools/typedInput";
 import { factorFromMm, formatArea, formatLength, type DisplayUnit } from "../units";
@@ -260,6 +260,7 @@ function Geometry({ entity, unit }: { entity: Entity; unit: DisplayUnit }) {
             <input type="checkbox" checked={entity.closed} data-testid="prop-closed" onChange={(e) => update({ ...entity, closed: e.target.checked })} />
           </Row>
           <SplineActions entity={entity} />
+          <SplineHandles entity={entity} unit={unit} />
         </Section>
       );
     }
@@ -334,6 +335,43 @@ function Geometry({ entity, unit }: { entity: Entity; unit: DisplayUnit }) {
     default:
       return null; // a kind with no geometry editor yet
   }
+}
+
+/** Show-CVs toggle and the end-tangent handles of a fit spline (C-07). */
+function SplineHandles({ entity, unit }: { entity: SplineEntity; unit: DisplayUnit }) {
+  const showCvs = useApp((s) => s.showSplineCvs);
+  const setShowCvs = useApp((s) => s.setShowSplineCvs);
+  const update = (e: Entity | null) => e && bus.execute({ type: "update-entity", entity: e });
+  const first = entity.fitPoints?.[0];
+  const last = entity.fitPoints?.[entity.fitPoints.length - 1];
+  return (
+    <>
+      <Row label="Show CVs">
+        <input type="checkbox" checked={showCvs} data-testid="prop-show-cvs" onChange={(e) => setShowCvs(e.target.checked)} />
+      </Row>
+      {entity.fitPoints && !entity.closed && first && last && (
+        <>
+          <ReadRow label="Start tangent" value={entity.startTangent ? fmtPoint(entity.startTangent, unit) : "free (drag its handle)"} />
+          <ReadRow label="End tangent" value={entity.endTangent ? fmtPoint(entity.endTangent, unit) : "free (drag its handle)"} />
+          {(entity.startTangent || entity.endTangent) && (
+            <Row label="">
+              <button
+                className="btn ghost sm"
+                title="Release both end tangents"
+                data-testid="prop-clear-tangents"
+                onClick={() => {
+                  const { startTangent: _s, endTangent: _e, ...rest } = entity;
+                  update(refitSpline(rest as SplineEntity, entity.fitPoints!));
+                }}
+              >
+                Clear tangents
+              </button>
+            </Row>
+          )}
+        </>
+      )}
+    </>
+  );
 }
 
 /** Spline editing actions (C-07): each is one undo step through `update-entity`. */

@@ -49,6 +49,12 @@ describe("parseCommand", () => {
     expect(parseCommand("e")).toEqual({ kind: "app", id: "delete" });
   });
 
+  it("spline edit aliases (C-07): spe, splinedit, and rebuild keeps its verb as the argument", () => {
+    expect(parseCommand("spe")).toEqual({ kind: "tool", tool: "splinedit", argument: null });
+    expect(parseCommand("splinedit")).toEqual({ kind: "tool", tool: "splinedit", argument: null });
+    expect(parseCommand("rebuild 8")).toEqual({ kind: "tool", tool: "splinedit", argument: "rebuild 8" });
+  });
+
   it("parses simplify (P-03)", () => {
     expect(parseCommand("simplify")).toEqual({ kind: "app", id: "simplify" });
   });
@@ -57,7 +63,7 @@ describe("parseCommand", () => {
 describe("the alias tables", () => {
   it("map only to tools the app has", () => {
     const known = new Set([
-      "select", "line", "polyline", "rectangle", "circle", "arc", "ellipse", "spline", "polygon", "slot", "point", "image",
+      "select", "line", "polyline", "rectangle", "circle", "arc", "ellipse", "spline", "splinedit", "polygon", "slot", "point", "image",
       "measure", "straighten", "fill", "text", "dim", "pan", "move", "copy", "rotate", "scale", "mirror",
       "trim", "split", "fillet", "chamfer", "offset", "zoom", "divide", "align", "lengthen", "match", "stretch",
     ]);

@@ -2,6 +2,7 @@ import type { Command } from "./commands";
 import { newEntityId, type Entity, type PolylineEntity, type SplineEntity } from "./entities";
 import type { Point } from "./geometry";
 import { clampedUniformKnots, closestNurbsParam, insertKnot, interpolateNurbs, nurbsDomain, nurbsPointAt, tessellateNurbs } from "./nurbs";
+import { refitSpline } from "./spline";
 import { flattenPolylineToPoints, simplifyPolylineEntity } from "./simplify";
 
 /**
@@ -15,7 +16,7 @@ const dist = (a: Point, b: Point) => Math.hypot(a.x - b.x, a.y - b.y);
 /** Drops the fit data, leaving the control points as the editable handles (what SPLINEDIT "Convert to CVs" does). */
 export function splineToControlPoints(e: SplineEntity): SplineEntity | null {
   if (!e.fitPoints) return null;
-  const { fitPoints: _drop, ...rest } = e;
+  const { fitPoints: _drop, startTangent: _s, endTangent: _t, ...rest } = e;
   return rest;
 }
 
@@ -41,8 +42,7 @@ export function addSplinePoint(e: SplineEntity, near: Point): SplineEntity | nul
     if (at < 0) at = e.fitPoints.length;
     if (at === 0) at = 1;
     const fit = [...e.fitPoints.slice(0, at), on, ...e.fitPoints.slice(at)];
-    const fitted = interpolateNurbs(fit, e.degree);
-    return fitted ? { ...e, ...fitted, weights: undefined, fitPoints: fit } : null;
+    return refitSpline(e, fit);
   }
   const inserted = insertKnot(e, u);
   return { ...e, ...inserted };
@@ -53,8 +53,7 @@ export function removeSplinePoint(e: SplineEntity, index: number): SplineEntity 
   if (e.fitPoints) {
     if (e.fitPoints.length <= 2 || index < 0 || index >= e.fitPoints.length) return null;
     const fit = e.fitPoints.filter((_, i) => i !== index);
-    const fitted = interpolateNurbs(fit, e.degree);
-    return fitted ? { ...e, ...fitted, weights: undefined, fitPoints: fit } : null;
+    return refitSpline(e, fit);
   }
   const n = e.controlPoints.length;
   if (index < 0 || index >= n || n - 1 < 2) return null;
@@ -77,7 +76,7 @@ export function rebuildSpline(e: SplineEntity, count: number): SplineEntity | nu
   for (let i = 0; i < n; i++) pts.push(nurbsPointAt(e, lo + ((hi - lo) * i) / (n - 1)));
   const fitted = interpolateNurbs(pts, Math.min(3, e.degree < 3 ? 3 : e.degree));
   if (!fitted) return null;
-  const { fitPoints: _drop, ...rest } = e;
+  const { fitPoints: _drop, startTangent: _s, endTangent: _t, ...rest } = e;
   return { ...rest, ...fitted, weights: undefined };
 }
 

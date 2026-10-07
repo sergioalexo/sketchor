@@ -503,12 +503,28 @@ function splineFromRaw(raw: RawEntity): Omit<SplineEntity, "id" | "type" | "laye
     knots: knots.length === count + degree + 1 ? knots : clampedKnots(count, degree),
     ...(weights.length === count ? { weights } : {}),
   };
+  // Start/end tangents (12/13) are directions only; scale them to a handle about a third of the first/last fit leg.
+  const handle = (code: number, a: Point, b: Point): { x: number; y: number } | undefined => {
+    const x = num(raw, code, NaN);
+    const y = num(raw, code + 10, NaN);
+    const len = Math.hypot(x, y);
+    if (!(len > 1e-12)) return undefined;
+    const k = Math.hypot(b.x - a.x, b.y - a.y) / 3 / len;
+    return { x: x * k, y: y * k };
+  };
+  const tangents =
+    fit.length >= 2 && !closed
+      ? {
+          ...(handle(12, fit[0], fit[1]) ? { startTangent: handle(12, fit[0], fit[1]) } : {}),
+          ...(handle(13, fit[fit.length - 2], fit[fit.length - 1]) ? { endTangent: handle(13, fit[fit.length - 2], fit[fit.length - 1]) } : {}),
+        }
+      : {};
   if (count >= degree + 1 && isValidNurbs(candidate)) {
-    return { ...candidate, ...(fit.length >= 2 ? { fitPoints: fit } : {}), closed };
+    return { ...candidate, ...(fit.length >= 2 ? { fitPoints: fit, ...tangents } : {}), closed };
   }
   if (fit.length >= 2) {
-    const fitted = interpolateNurbs(fit, degree);
-    if (fitted) return { ...fitted, fitPoints: fit, closed };
+    const fitted = interpolateNurbs(fit, degree, closed ? undefined : { start: tangents.startTangent, end: tangents.endTangent });
+    if (fitted) return { ...fitted, fitPoints: fit, ...tangents, closed };
   }
   return null;
 }

@@ -128,6 +128,8 @@ export function splineEntity2018(e: SplineEntity, handle: string, owner: string)
     pair(210, 0) + pair(220, 0) + pair(230, 1) +
     `70\n${flags}\n71\n${e.degree}\n72\n${e.knots.length}\n73\n${e.controlPoints.length}\n74\n${fit.length}\n` +
     hi(42, 1e-7) + hi(43, 1e-7) + (fit.length > 0 ? hi(44, 1e-10) : "") +
+    (fit.length > 0 && e.startTangent ? hi(12, e.startTangent.x) + hi(22, e.startTangent.y) + hi(32, 0) : "") +
+    (fit.length > 0 && e.endTangent ? hi(13, e.endTangent.x) + hi(23, e.endTangent.y) + hi(33, 0) : "") +
     e.knots.map((k) => hi(40, k)).join("") +
     (rational ? e.weights!.map((x) => hi(41, x)).join("") : "") +
     e.controlPoints.map((c) => hi(10, c.x) + hi(20, c.y) + hi(30, 0)).join("") +

@@ -289,7 +289,7 @@ function withValues(entity: Entity, v: readonly number[], at: number): Entity {
       return { ...entity, center: { x: v[at], y: v[at + 1] }, majorAxis: { x: v[at + 2], y: v[at + 3] }, ratio: Math.abs(v[at + 4]) };
     case "spline": {
       // Fit points describe where the curve was meant to pass; once a solve moves the control points they would lie.
-      const { fitPoints: _dropped, ...rest } = entity;
+      const { fitPoints: _dropped, startTangent: _s, endTangent: _t, ...rest } = entity;
       return { ...rest, controlPoints: entity.controlPoints.map((_, i) => ({ x: v[at + i * 2], y: v[at + i * 2 + 1] })) };
     }
     case "text":
