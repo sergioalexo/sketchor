@@ -6,6 +6,8 @@ import { boundsOf } from "./dxf";
 import { builtinLinetype } from "./linetypes";
 import { kindTessellate } from "./kinds/registry";
 import { bezierPieces, tessellateNurbs } from "./nurbs";
+import type { Declarations, StyleRule } from "./svgStyle";
+import { INHERITED_PROPS, STYLE_PROPS, isBlack, nearestLinetype, paintColor, parseDashArray, parseDeclarations, parseStyleSheet, parseUserLength } from "./svgStyle";
 import { ellipsePointAt, ellipseSweep, isFullEllipse, transformEllipse } from "./ellipse";
 
 /**
@@ -705,11 +707,89 @@ export function parseSvgText(text: string): SvgImportResult {
     return cls ?? undefined;
   };
 
-  const walk = (el: Element, parentMat: Mat): void => {
+  // SV-03: <style> sheets, ordered by specificity then source order (the
+  // browser's own Element.matches does the selector matching).
+  const rules: StyleRule[] = [];
+  for (const st of Array.from(doc.getElementsByTagName("style"))) {
+    const type = st.getAttribute("type");
+    if (type && type !== "text/css") continue;
+    rules.push(...parseStyleSheet(st.textContent ?? "", rules.length));
+  }
+  rules.sort((a, b) => a.specificity - b.specificity || a.order - b.order);
+
+  /** Presentation attributes < matching rules < `style=""`, with the inherited properties flowing down from the parent. */
+  const computeStyle = (el: Element, parent: Declarations): Declarations => {
+    const decl: Declarations = {};
+    for (const p of STYLE_PROPS) {
+      const a = el.getAttribute(p);
+      if (a !== null && a.trim()) decl[p] = a.trim();
+    }
+    for (const r of rules) {
+      try {
+        if (el.matches(r.selector)) Object.assign(decl, r.decls);
+      } catch {
+        /* a selector this engine can't parse never matches */
+      }
+    }
+    Object.assign(decl, parseDeclarations(el.getAttribute("style") ?? ""));
+    const out: Declarations = {};
+    for (const p of INHERITED_PROPS) {
+      const v = decl[p];
+      if (v !== undefined && v !== "inherit") out[p] = v;
+      else if (parent[p] !== undefined) out[p] = parent[p];
+    }
+    if (decl.display) out.display = decl.display;
+    if (decl.opacity) out.opacity = decl.opacity;
+    return out;
+  };
+
+  let hiddenCount = 0;
+  const LEAF_TAGS = new Set(["line", "circle", "ellipse", "rect", "image", "polyline", "polygon", "path"]);
+
+  /** Stroke → colour, fill → fill (closed shapes), dasharray → nearest linetype, stroke-width → lineweight (mm). */
+  const applyStyle = (from: number, st: Declarations, m: Mat): void => {
+    const cur = st.color;
+    const stroke = paintColor(st.stroke, cur);
+    const fill = paintColor(st.fill, cur);
+    const scale = matScale(m);
+    const width = parseUserLength(st["stroke-width"]);
+    const dash = parseDashArray(st["stroke-dasharray"]);
+    for (let i = from; i < entities.length; i++) {
+      const e = entities[i];
+      if (e.type === "image" || e.type === "text") continue;
+      const rec = e as Entity & { color?: string; fill?: string; linetype?: string; lineweight?: number };
+      if (typeof stroke === "string") {
+        if (!isBlack(stroke)) rec.color = stroke;
+      } else if (stroke === null && typeof fill === "string" && !isBlack(fill)) {
+        rec.color = fill; // a fill-only shape: its outline takes the fill's colour
+      }
+      const closed = e.type === "circle" || (e.type === "polyline" && e.closed) || (e.type === "spline" && e.closed) || (e.type === "ellipse" && isFullEllipse(e));
+      if (closed && typeof fill === "string") rec.fill = fill;
+      if (width !== null && stroke !== null && width * scale > 0) rec.lineweight = Math.round(width * scale * 1000) / 1000;
+      if (dash && stroke !== null) rec.linetype = nearestLinetype(dash.map((v) => v * scale));
+    }
+  };
+
+  const walk = (el: Element, parentMat: Mat, parentStyle: Declarations): void => {
     for (const child of Array.from(el.children)) {
       const m = multiply(parentMat, parseTransform(child.getAttribute("transform")));
       const layer = layerOf(child);
-      switch (child.tagName.toLowerCase()) {
+      const tag = child.tagName.toLowerCase();
+      const cs = computeStyle(child, parentStyle);
+      const leaf = LEAF_TAGS.has(tag);
+      if (cs.display === "none") {
+        if (leaf || tag === "g") hiddenCount++;
+        continue;
+      }
+      const vis = cs.visibility;
+      const strokeNone = cs.stroke !== undefined && paintColor(cs.stroke, cs.color) === null;
+      const fillNone = cs.fill !== undefined && paintColor(cs.fill, cs.color) === null;
+      if (leaf && (vis === "hidden" || vis === "collapse" || (strokeNone && fillNone))) {
+        hiddenCount++;
+        continue;
+      }
+      const before = entities.length;
+      switch (tag) {
         case "line": {
           const a = applyMat(m, numAttr(child, "x1"), numAttr(child, "y1"));
           const b = applyMat(m, numAttr(child, "x2"), numAttr(child, "y2"));
@@ -844,17 +924,19 @@ export function parseSvgText(text: string): SvgImportResult {
         }
         case "g":
         case "svg":
-          walk(child, m);
+          walk(child, m, cs);
           break;
         default:
           // Unknown element (text, defs, style, ...): skip it, but still
           // walk its children in case a group nests further drawable content.
-          walk(child, m);
+          walk(child, m, cs);
       }
+      if (leaf && entities.length > before) applyStyle(before, cs, m);
     }
   };
 
   const viewport = svgViewport(doc.documentElement);
-  walk(doc.documentElement, viewport.mat);
+  walk(doc.documentElement, viewport.mat, computeStyle(doc.documentElement, {}));
+  if (hiddenCount) warnings.push(`${hiddenCount} hidden or invisible element${hiddenCount === 1 ? "" : "s"} (display:none, visibility:hidden, or no stroke and no fill) skipped`);
   return { entities, warnings: [...new Set(warnings)], units: viewport.units };
 }
