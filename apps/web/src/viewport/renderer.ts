@@ -20,6 +20,7 @@ import type { MeasureResult } from "../state/store";
 import { gridStep, worldToScreen, type View } from "./view";
 import type { Snap } from "./snapping";
 import { getCachedImage } from "./imageCache";
+import { drawHatchEntity } from "./hatchRender";
 
 /** A pending rigid transform (rotate about a pivot) previewed dashed over the real geometry. */
 export interface TransformPreview {
@@ -699,6 +700,11 @@ function drawEntity(
 ): void {
   ctx.strokeStyle = color;
   ctx.lineWidth = lineWidth;
+
+  if (entity.type === "hatch") {
+    drawHatchEntity(ctx, view, entity, color, lineWidth);
+    return;
+  }
 
   if (entity.type === "text") {
     const p = worldToScreen(view, entity.at);

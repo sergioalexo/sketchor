@@ -120,6 +120,21 @@ export function paintedAtDepth(style: HatchEntity["style"], count: number): bool
   return style === "normal" ? count % 2 === 1 : style === "outer" ? count === 1 : count >= 1;
 }
 
+/**
+ * The loops to fill with the even-odd rule so the island style comes out right:
+ * `normal` all of them, `outer` the outermost ring and its first islands, `ignore` only the outermost loops.
+ */
+export function paintedPolygons(h: HatchEntity, tol = 0.05): Point[][] {
+  const polys = hatchPolygons(h, tol);
+  if (h.style === "normal") return polys;
+  const depth = polys.map((poly, i) => {
+    const samples = [poly[0], poly[Math.floor(poly.length / 3)], poly[Math.floor((2 * poly.length) / 3)]];
+    const counts = samples.map((s) => polys.reduce((n, other, j) => (j !== i && pointInPolygon(s, other) ? n + 1 : n), 0)).sort((a, b) => a - b);
+    return counts[1];
+  });
+  return polys.filter((_, i) => (h.style === "outer" ? depth[i] <= 1 : depth[i] === 0));
+}
+
 /** Whether `p` lies in the painted area of the hatch (honouring the island style). */
 export function hatchContains(h: HatchEntity, p: Point): boolean {
   let count = 0;
