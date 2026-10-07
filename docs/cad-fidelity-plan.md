@@ -791,6 +791,6 @@ Audit every hard-coded colour: `grep -rn "#[0-9a-fA-F]\{3,6\}" apps/web/src --in
 1. ~~Embed licence (E-08)~~ — **decided 2026-09-28: MIT.**
 2. ~~Unsigned theme-only plugins (TH-02)~~ — **decided 2026-09-28: allowed, labelled "unsigned theme".**
 3. ~~Default DXF export (X-01)~~ — **decided 2026-09-28: write back in the source version; new files → 2018; R12 stays available for CAM.**
-4. **EPS inputs**: which programs produce the EPS files you receive (Illustrator, CorelDRAW, CAD)? Samples would let F-01 be tested against reality.
+4. ~~**EPS inputs**~~ — **answered 2026-10-07: Adobe Illustrator CC (AI 19.x, 23.0) EPS ≈85%, Photoshop raster EPS ≈15%; all DOS-binary header with TIFF preview, LanguageLevel 2.** Real samples are listed in the git-ignored `docs/local-samples.md` (customer artwork — never commit). F-01 should target Illustrator output first; Photoshop EPS → show the preview/embedded raster as an image.
 5. **Reference animation**: confirm the forgexus.com effect (couldn't be inspected — the page is script-rendered). Is it a 3D model turntable with pointer tilt, a 2D image parallax, or both?
 6. **Standards priority** for hatch/dim presets: ISO + ANSI + GOST enough, or also DIN/JIS/AS?
