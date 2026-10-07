@@ -124,6 +124,23 @@ it reconstructs an entity from a parsed code edit — it doesn't happen for
 free, and a gap here silently strips the field on the next code-panel edit
 (a real bug this way, found and fixed while building Z-04).
 
+## SVG (`svg.ts`, `svgStyle.ts`; SV-03..SV-09)
+
+Import resolves style the way a viewer would, minus a CSS engine: presentation
+attributes < `<style>` rules (ordered by `specificity`, matched with the DOM's
+own `Element.matches`) < `style=""`, inherited through `<g>`; `stroke` →
+colour (black = automatic, so it never becomes a literal black on a dark
+canvas), `fill` → `fill` on closed shapes, `stroke-width` → `lineweight` mm,
+`stroke-dasharray` → nearest builtin linetype. `<defs>`/`<symbol>`/gradients
+are never drawn in place; `<use>` expands as geometry on the use's layer
+(real blocks wait for B-01). Layers come from `data-layer`, Inkscape
+`groupmode="layer"`, or Illustrator top-level `<g id>`. Anything that walks the
+DOM must use `elementChildren` (sibling links, not the live `children`
+collection — quadratic in jsdom), respect `MAX_NESTING`, and the result is
+filtered to finite numbers. Export writes Inkscape layers, exact `A` arcs and
+`mode: "laser"` (hairline, one colour per layer, no fills/text). New SVG
+behaviour gets a fixture in `src/fixtures/svg/` + `svgFixtures.test.ts`.
+
 ## Build & run
 
 ```bash

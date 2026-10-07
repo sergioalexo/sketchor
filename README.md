@@ -207,7 +207,7 @@ format:
   expanded with their insertion point, scale, rotation and row/column arrays,
   including blocks nested inside other blocks. Geometry drawn on layer `0`
   inside a block inherits the layer the block was placed on, as CAD expects.
-- **SVG** — read/write, dimensionally accurate 1:1 world units; import resolves stroke/fill/dashes/weights from attributes, `style=` and `<style>` CSS, reads text, Inkscape layers and `<use>`; export writes Inkscape layers, exact arcs and a "for laser / CAM" mode
+- **SVG** — read/write, dimensionally accurate 1:1 world units; import resolves stroke/fill/dashes/weights from attributes, `style=` and `<style>` CSS, reads text, Inkscape layers and `<use>`; export writes Inkscape layers, exact arcs and a "for laser / CAM" mode; fixture corpus + hostile-input tests
   (`packages/core/src/svg.ts`).
 - **DWG** — read-only, via a GPL-3.0 WebAssembly build of GNU LibreDWG (see
   `apps/web/src/browser/dwgImport.ts` and `/NOTICE.md`). There is no DWG

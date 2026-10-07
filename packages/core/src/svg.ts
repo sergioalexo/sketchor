@@ -707,6 +707,24 @@ export interface SvgImportResult {
   units: SvgUnits;
 }
 
+/** True when no number anywhere inside `v` is NaN or infinite. */
+function allFinite(v: unknown): boolean {
+  if (typeof v === "number") return Number.isFinite(v);
+  if (Array.isArray(v)) return v.every(allFinite);
+  if (v && typeof v === "object") return Object.values(v).every(allFinite);
+  return true;
+}
+
+/** Element children via sibling links — linear everywhere (a live `children` collection is quadratic to copy in some DOMs). */
+function elementChildren(el: Element): Element[] {
+  const out: Element[] = [];
+  for (let c = el.firstElementChild; c; c = c.nextElementSibling) out.push(c);
+  return out;
+}
+
+/** Groups nested deeper than this are not walked (reported) — keeps a hostile file from overflowing the stack. */
+const MAX_NESTING = 256;
+
 /**
  * Parses SVG into entities: line/circle/ellipse/rect/polyline/polygon
  * exactly, paths incl. Béziers (as splines; arcs flattened).
@@ -743,9 +761,13 @@ export function parseSvgText(text: string): SvgImportResult {
     return undefined;
   };
   const byId = new Map<string, Element>();
-  for (const e of Array.from(doc.getElementsByTagName("*"))) {
+  const pending: Element[] = [doc.documentElement];
+  while (pending.length) {
+    const e = pending.pop()!;
     const id = e.getAttribute("id");
     if (id && !byId.has(id)) byId.set(id, e);
+    const kids = elementChildren(e);
+    for (let i = kids.length - 1; i >= 0; i--) pending.push(kids[i]);
   }
 
   // SV-03: <style> sheets, ordered by specificity then source order (the
@@ -878,10 +900,15 @@ export function parseSvgText(text: string): SvgImportResult {
     }
   };
 
-  const walk = (el: Element, parentMat: Mat, parentStyle: Declarations, forced?: string | null): void => walkList(Array.from(el.children), parentMat, parentStyle, forced);
+  let tooDeep = false;
+  const walk = (el: Element, parentMat: Mat, parentStyle: Declarations, forced?: string | null, depth = 0): void => walkList(elementChildren(el), parentMat, parentStyle, forced, depth + 1);
 
   /** `forced`: a layer imposed by a <use> (null = the default layer); undefined = read it off each element's ancestors. */
-  const walkList = (children: Element[], parentMat: Mat, parentStyle: Declarations, forced?: string | null): void => {
+  const walkList = (children: Element[], parentMat: Mat, parentStyle: Declarations, forced?: string | null, depth = 0): void => {
+    if (depth > MAX_NESTING) {
+      tooDeep = true;
+      return;
+    }
     for (const child of children) {
       const tag = child.tagName.toLowerCase();
       if (NOT_RENDERED.has(tag)) continue;
@@ -1068,9 +1095,9 @@ export function parseSvgText(text: string): SvgImportResult {
                 const oy = uh ? (uh - vb[3] * sc) / 2 : 0;
                 um = multiply(um, [sc, 0, 0, sc, ox - vb[0] * sc, oy - vb[1] * sc]);
               }
-              walk(target, um, computeStyle(target, cs), layer ?? null);
+              walk(target, um, computeStyle(target, cs), layer ?? null, depth);
             } else {
-              walkList([target], um, cs, layer ?? null);
+              walkList([target], um, cs, layer ?? null, depth + 1);
             }
           } finally {
             useStack.delete(target);
@@ -1079,12 +1106,12 @@ export function parseSvgText(text: string): SvgImportResult {
         }
         case "g":
         case "svg":
-          walk(child, m, cs, forced);
+          walk(child, m, cs, forced, depth);
           break;
         default:
           // Unknown element (<a>, <switch>, ...): not drawn itself, but its
           // children may be — walk them.
-          walk(child, m, cs, forced);
+          walk(child, m, cs, forced, depth);
       }
       if (leaf && entities.length > before) applyStyle(before, cs, m);
     }
@@ -1092,7 +1119,10 @@ export function parseSvgText(text: string): SvgImportResult {
 
   const viewport = svgViewport(doc.documentElement);
   walk(doc.documentElement, viewport.mat, computeStyle(doc.documentElement, {}));
+  if (tooDeep) warnings.push(`groups nested deeper than ${MAX_NESTING} levels were skipped`);
   if (effectCount) warnings.push(`${effectCount} element${effectCount === 1 ? "" : "s"} with clip-path, mask or filter were imported without that effect`);
   if (hiddenCount) warnings.push(`${hiddenCount} hidden or invisible element${hiddenCount === 1 ? "" : "s"} (display:none, visibility:hidden, or no stroke and no fill) skipped`);
-  return { entities, warnings: [...new Set(warnings)], units: viewport.units };
+  const finite = entities.filter(allFinite);
+  if (finite.length !== entities.length) warnings.push(`${entities.length - finite.length} element${entities.length - finite.length === 1 ? "" : "s"} with non-finite coordinates were skipped`);
+  return { entities: finite, warnings: [...new Set(warnings)], units: viewport.units };
 }

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="100mm" height="100mm" viewBox="0 0 100 100">
+<defs>
+<symbol id="bolt" viewBox="0 0 10 10">
+<circle cx="5" cy="5" r="4"/>
+<line x1="5" y1="1" x2="5" y2="9"/>
+</symbol>
+<g id="slot"><line x1="0" y1="0" x2="10" y2="0"/><line x1="0" y1="4" x2="10" y2="4"/></g>
+</defs>
+<use xlink:href="#bolt" x="10" y="10" width="10" height="10" stroke="#000"/>
+<use xlink:href="#bolt" x="80" y="10" width="10" height="10" stroke="#000"/>
+<use xlink:href="#bolt" x="10" y="80" width="10" height="10" stroke="#000"/>
+<use xlink:href="#bolt" x="80" y="80" width="10" height="10" stroke="#000"/>
+<use xlink:href="#slot" transform="translate(45 48)" stroke="#f00"/>
+</svg>
