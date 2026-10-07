@@ -47,19 +47,43 @@ export interface SvgExportOptions {
    * sizes it. Default `"mm"`.
    */
   unit?: "mm" | "in" | "none";
+  /**
+   * `"document"` (default): the drawing as displayed — colours, fills, dashes,
+   * lineweights, text. `"laser"` (SV-05): what LightBurn / Glowforge / RDWorks
+   * expect — 0.01 mm hairline strokes, no fills, no dashes, no text, points or
+   * construction geometry, and exactly one stroke colour per layer (so the
+   * laser software's colour→operation mapping equals the drawing's layers).
+   */
+  mode?: "document" | "laser";
 }
 
-/** Tessellates an arc into an SVG path's `d` attribute (sidesteps large-arc/sweep-flag sign risk entirely). */
+/** Distinct, well-separated layer colours for laser mode (the first few match LightBurn's default layer palette). */
+export const LASER_LAYER_COLORS = ["#000000", "#0000ff", "#ff0000", "#00e000", "#d0d000", "#ff8000", "#00e0e0", "#ff00ff", "#b4b4b4", "#0000a0", "#a00000", "#00a000"];
+
+/**
+ * One circular arc as exact SVG `A` commands (no tessellation). World ccw is
+ * SVG sweep-flag 0 (Y is flipped); an arc of a full turn is split in two
+ * halves because `A` with coincident endpoints draws nothing.
+ */
+function arcCommands(center: Point, r: number, startAngle: number, sweep: number, ccw: boolean, toSvg: (p: Point) => Point): string {
+  const dir = ccw ? 1 : -1;
+  const flag = ccw ? 0 : 1;
+  const pt = (t: number): string => {
+    const p = toSvg(arcPointAt(center, r, t));
+    return `${fmt(p.x)} ${fmt(p.y)}`;
+  };
+  const a = (span: number, t1: number): string => `A${fmt(r)} ${fmt(r)} 0 ${span > Math.PI ? 1 : 0} ${flag} ${pt(t1)}`;
+  if (sweep > 2 * Math.PI - 1e-9) {
+    return `${a(Math.PI, startAngle + dir * Math.PI)} ${a(Math.PI, startAngle + dir * 2 * Math.PI)}`;
+  }
+  return a(sweep, startAngle + dir * sweep);
+}
+
+/** An arc entity as an exact SVG path `d` attribute. */
 function arcPathD(e: ArcEntity, toSvg: (p: Point) => Point): string {
   const sweep = arcSweep(e.startAngle, e.endAngle, e.ccw);
-  const steps = Math.min(96, Math.max(2, Math.ceil((sweep / (2 * Math.PI)) * 96)));
-  const pts: string[] = [];
-  for (let i = 0; i <= steps; i++) {
-    const t = e.ccw ? e.startAngle + sweep * (i / steps) : e.startAngle - sweep * (i / steps);
-    const p = toSvg(arcPointAt(e.center, e.radius, t));
-    pts.push(`${i === 0 ? "M" : "L"}${fmt(p.x)} ${fmt(p.y)}`);
-  }
-  return pts.join(" ");
+  const p = toSvg(arcPointAt(e.center, e.radius, e.startAngle));
+  return `M${fmt(p.x)} ${fmt(p.y)} ${arcCommands(e.center, e.radius, e.startAngle, sweep, e.ccw, toSvg)}`;
 }
 
 /** A spline as exact Béziers (`C` for cubic, `Q` quadratic, `L` linear) when it is clamped and not rational, else its tessellation. */
@@ -109,14 +133,7 @@ function polylinePathD(e: PolylineEntity, toSvg: (p: Point) => Point): string {
       return;
     }
     const sweep = arcSweep(bulgeArc.startAngle, bulgeArc.endAngle, bulgeArc.ccw);
-    const steps = Math.min(48, Math.max(2, Math.ceil((sweep / (2 * Math.PI)) * 96)));
-    for (let s = 1; s <= steps; s++) {
-      const t = bulgeArc.ccw
-        ? bulgeArc.startAngle + sweep * (s / steps)
-        : bulgeArc.startAngle - sweep * (s / steps);
-      const p = toSvg(arcPointAt(bulgeArc.center, bulgeArc.radius, t));
-      parts.push(`L${fmt(p.x)} ${fmt(p.y)}`);
-    }
+    parts.push(arcCommands(bulgeArc.center, bulgeArc.radius, bulgeArc.startAngle, sweep, bulgeArc.ccw, toSvg));
   });
   if (e.closed) parts.push("Z");
   return parts.join(" ");
@@ -129,8 +146,9 @@ function polylinePathD(e: PolylineEntity, toSvg: (p: Point) => Point): string {
  */
 export function entitiesToSvgDocument(entities: Entity[], opts: SvgExportOptions = {}): string {
   const padding = opts.padding ?? 5;
+  const laser = opts.mode === "laser";
   const stroke = opts.strokeColor ?? "#000000";
-  const strokeWidth = opts.strokeWidth ?? Math.max(0.2, padding / 20);
+  const strokeWidth = laser ? 0.01 : (opts.strokeWidth ?? Math.max(0.2, padding / 20));
   const fillOpacity = opts.fillOpacity ?? 0.3;
 
   const b = boundsOf(entities) ?? { minX: 0, minY: 0, maxX: 100, maxY: 100 };
@@ -143,6 +161,7 @@ export function entitiesToSvgDocument(entities: Entity[], opts: SvgExportOptions
   const byLayer = new Map<string, Entity[]>();
   for (const e of entities) {
     if (e.type === "line" && e.infinite) continue; // construction aid, not geometry
+    if (laser && (e.type === "text" || e.type === "point" || e.type === "hatch" || ("construction" in e && e.construction))) continue;
     const l = layerOf(e);
     if (!byLayer.has(l)) byLayer.set(l, []);
     byLayer.get(l)!.push(e);
@@ -152,6 +171,7 @@ export function entitiesToSvgDocument(entities: Entity[], opts: SvgExportOptions
   // stroke, and `fill` (closed shapes only) a low-opacity fill so the geometry
   // still reads through it.
   const paint = (e: Entity): string => {
+    if (laser) return ""; // the layer group carries the one colour; hairline width is the root's
     const closed = e.type === "circle" || (e.type === "spline" && e.closed) || (e.type === "ellipse" && isFullEllipse(e)) || (e.type === "polyline" && e.closed);
     let out = "";
     if (e.color) out += ` stroke="${escapeXml(e.color)}"`;
@@ -160,6 +180,7 @@ export function entitiesToSvgDocument(entities: Entity[], opts: SvgExportOptions
     // units here, so the linetype's own pattern is the dasharray directly —
     // no LTSCALE (this function has no document/settings to read one from,
     // same limitation BYLAYER colour already has at this level).
+    if ("lineweight" in e && e.lineweight && e.lineweight > 0) out += ` stroke-width="${fmt(e.lineweight)}"`;
     if ("linetype" in e && e.linetype) {
       const pattern = builtinLinetype(e.linetype).pattern;
       if (pattern.length > 0) out += ` stroke-dasharray="${pattern.map((v) => fmt(Math.max(Math.abs(v), 0.1))).join(" ")}"`;
@@ -168,6 +189,7 @@ export function entitiesToSvgDocument(entities: Entity[], opts: SvgExportOptions
   };
 
   const groups: string[] = [];
+  let layerIndex = 0;
   for (const [layer, ents] of byLayer) {
     const body: string[] = [];
     for (const e of ents) {
@@ -221,14 +243,17 @@ export function entitiesToSvgDocument(entities: Entity[], opts: SvgExportOptions
         }
       }
     }
-    groups.push(`<g data-layer="${escapeXml(layer)}">${body.join("")}</g>`);
+    // An Inkscape-compatible layer (groupmode + label), plus Sketchor's own data-layer for exact re-import.
+    const colour = laser ? ` stroke="${LASER_LAYER_COLORS[layerIndex % LASER_LAYER_COLORS.length]}"` : "";
+    layerIndex++;
+    groups.push(`<g data-layer="${escapeXml(layer)}" inkscape:groupmode="layer" inkscape:label="${escapeXml(layer)}"${colour}>${body.join("")}</g>`);
   }
 
   const unit = opts.unit ?? "mm";
   const sizeOf = (mm: number): string => (unit === "in" ? `${fmt(mm / 25.4)}in` : unit === "mm" ? `${fmt(mm)}mm` : fmt(mm));
   return (
     `<?xml version="1.0" encoding="UTF-8"?>\n` +
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${sizeOf(width)}" height="${sizeOf(height)}" ` +
+    `<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" width="${sizeOf(width)}" height="${sizeOf(height)}" ` +
     `viewBox="0 0 ${fmt(width)} ${fmt(height)}" stroke="${stroke}" stroke-width="${fmt(strokeWidth)}" fill="none">\n` +
     `${groups.join("\n")}\n</svg>\n`
   );

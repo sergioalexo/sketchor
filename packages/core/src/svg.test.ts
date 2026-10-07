@@ -81,7 +81,7 @@ describe("entitiesToSvgDocument", () => {
       { ...line(), id: "l2", layer: "walls" },
     ]);
     expect([...text.matchAll(/data-layer="([^"]+)"/g)].map((m) => m[1])).toEqual(["walls", "holes"]);
-    expect(text.match(/<g data-layer="walls">.*?<\/g>/s)![0].match(/<line/g)).toHaveLength(2);
+    expect(text.match(/<g data-layer="walls"[^>]*>.*?<\/g>/s)![0].match(/<line/g)).toHaveLength(2);
   });
 
   it("escapes XML metacharacters in a layer name", () => {

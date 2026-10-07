@@ -33,12 +33,13 @@ import { reportError, track } from "../metrics/metrics";
  * download / hidden `<input type=file>` where the API is missing.
  */
 
-export type SaveFormat = "dxf" | "dxf-r12" | "svg";
+export type SaveFormat = "dxf" | "dxf-r12" | "svg" | "svg-laser";
 
 const SAVE_FORMAT: Record<SaveFormat, { mime: string; description: string }> = {
   dxf: { mime: "application/dxf", description: "DXF Drawing" },
   "dxf-r12": { mime: "application/dxf", description: "DXF R12 Drawing (CAM)" },
   svg: { mime: "image/svg+xml", description: "SVG Drawing" },
+  "svg-laser": { mime: "image/svg+xml", description: "SVG for laser / CAM (hairlines, one colour per layer)" },
 };
 
 /**
@@ -110,7 +111,7 @@ function serialize(format: SaveFormat): string {
   }
   // True physical size: inches only when the tab works in inches/feet.
   const displayUnit = useApp.getState().displayUnit;
-  return entitiesToSvgDocument(entities, { unit: displayUnit === "in" || displayUnit === "ft" ? "in" : "mm" });
+  return entitiesToSvgDocument(entities, { unit: displayUnit === "in" || displayUnit === "ft" ? "in" : "mm", mode: format === "svg-laser" ? "laser" : "document" });
 }
 
 /* ----------------------------- save targets ----------------------------- */
@@ -201,9 +202,9 @@ export type SaveMode = "save" | "save-as" | "save-copy";
  * generic `drawing.dxf`. Falls back to `drawing.<fmt>` for a tab that has
  * never been named (an untouched "Untitled-1").
  */
-/** The real file extension for a {@link SaveFormat} — "dxf" and "dxf-r12" are both plain `.dxf` files. */
+/** The real file extension for a {@link SaveFormat} — "dxf" and "dxf-r12" are both plain `.dxf` files, "svg" and "svg-laser" both `.svg`. */
 function fileExtension(format: SaveFormat): string {
-  return format === "dxf-r12" ? "dxf" : format;
+  return format === "dxf-r12" ? "dxf" : format === "svg-laser" ? "svg" : format;
 }
 
 function defaultSaveName(format: SaveFormat): string {

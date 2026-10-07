@@ -848,6 +848,15 @@ export function App() {
                   Save As SVG...
                 </button>
                 <button
+                  data-testid="save-as-svg-laser"
+                  onClick={() => {
+                    setShowSaveMenu(false);
+                    void saveDrawing("svg-laser", undefined, "save-as");
+                  }}
+                >
+                  Save As SVG for laser / CAM...
+                </button>
+                <button
                   data-testid="save-copy-dxf"
                   onClick={() => {
                     setShowSaveMenu(false);
@@ -873,6 +882,15 @@ export function App() {
                   }}
                 >
                   Save a Copy as SVG...
+                </button>
+                <button
+                  data-testid="save-copy-svg-laser"
+                  onClick={() => {
+                    setShowSaveMenu(false);
+                    void saveDrawing("svg-laser", undefined, "save-copy");
+                  }}
+                >
+                  Save a Copy as SVG for laser / CAM...
                 </button>
                 {listExporters().length > 0 && <div className="action-menu-sep" data-plugin-rev={pluginVersion} />}
                 {listExporters().map((exp) => (
