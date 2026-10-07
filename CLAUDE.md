@@ -61,6 +61,26 @@ exact edges; the Hatch tool (`tools/hatchTool.ts`, key H, panel
 `fill/HatchPanel.tsx`) is its only caller. Sketch code: `hatch H1 pattern
 ANSI31 scale 1 angle 0 boundary (x, y) … | …` (`loops N` for curved boundaries).
 
+## Blocks (`packages/core/src/blocks/`, plan §5)
+
+A `BlockDefinition` is a record of the `blocks` table (`types.ts`: base point,
+local `entities`, `attributeDefs`, `explodable`, …); an `InsertEntity` names it
+and carries `insert/scale{x,y}/rotation/attributes/array`. `evaluate.ts`
+(`evaluateInsert`) is the one place a placement is computed — translate ·
+rotate · scale · translate(-base), arrays along the rotated axes, nested inserts
+cycle-/depth-guarded, layer "0"/BYBLOCK inherited from the insert. **Registry
+methods only receive the entity**, so `kinds/insert.ts` resolves the block table
+from the *active document* (`context.ts`: `CommandBus` sets it on construct,
+execute, undo and redo; code on a bare `SketchDocument` wraps calls in
+`withBlocks(doc, fn)`) — a test that builds an insert without a bus must do the
+same or it evaluates to a marker cross. Editing a definition (`update-block`)
+changes `tablesRevision`, which invalidates every cached evaluation, so all
+instances update live. The block commands (`define-block`, `update-block`,
+`rename-block`, `delete-block`, `explode-insert`) are macros in `ops.ts` that
+expand into table/entity commands. Exporters don't write blocks yet (B-08): save
+and print pass entities through `flattenInserts`. Any new field that names a
+block must register a `registerEntityRefRewriter("blocks", …)`.
+
 ## Document tables and settings (`packages/core/src/tables.ts`)
 
 `SketchDocument` also holds named **tables** (`layers`, `blocks`, `dimStyles`,

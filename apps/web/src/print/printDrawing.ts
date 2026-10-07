@@ -1,4 +1,4 @@
-import { entitiesToSvgDocument } from "@sketchor/core";
+import { entitiesToSvgDocument, flattenInserts } from "@sketchor/core";
 import { doc, hiddenLayerSet, useApp } from "../state/store";
 import { activeSaveTarget } from "../io/drawingFile";
 import { escapeHtml, printHtml } from "./printHtml";
@@ -10,7 +10,7 @@ import { escapeHtml, printHtml } from "./printHtml";
  */
 export function printDrawing(): void {
   const hidden = hiddenLayerSet();
-  const entities = doc.all().filter((e) => !hidden.has(e.layer ?? "0"));
+  const entities = flattenInserts(doc, doc.all()).filter((e) => !hidden.has(e.layer ?? "0"));
   if (entities.length === 0) return;
 
   const svg = entitiesToSvgDocument(entities, { strokeColor: "#000000", padding: 8, unit: "none" });

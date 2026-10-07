@@ -8,6 +8,7 @@ import {
   dist,
   entityPoints,
   gripsOf,
+  insertContents,
   kindTessellate,
   layerOf,
   polylineSegments,
@@ -700,6 +701,16 @@ function drawEntity(
 ): void {
   ctx.strokeStyle = color;
   ctx.lineWidth = lineWidth;
+
+  if (entity.type === "insert") {
+    // B-01: draw what the block stands for; a sub-entity keeps its own colour unless the instance is highlighted.
+    const plain = color === (entity.color ?? COLORS.entity);
+    for (const part of insertContents(entity)) {
+      if (part.fill) drawHatch(ctx, view, part, part.fill);
+      drawEntity(ctx, view, part, plain ? (part.color ?? color) : color, lineWidth, part.linetype ?? linetypeName, ltscale);
+    }
+    return;
+  }
 
   if (entity.type === "hatch") {
     drawHatchEntity(ctx, view, entity, color, lineWidth);

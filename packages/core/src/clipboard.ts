@@ -4,6 +4,8 @@ import { boundsOf } from "./dxf";
 import { migrateDashedEntity, newEntityId, translated, type Entity, type EntityId } from "./entities";
 import type { Point } from "./geometry";
 import { newGroupId, type Group, type GroupId } from "./groups";
+import { referencedBlocks } from "./blocks/evaluate";
+import type { BlockDefinition } from "./blocks/types";
 import { parseCode, toCode, toEntity } from "./sketchtext";
 
 /**
@@ -20,6 +22,8 @@ export interface ClipboardPayload {
   entities: Entity[];
   /** Groups whose members are all in `entities` (nested groups included), so a copied group pastes as a group. */
   groups: Group[];
+  /** Definitions of the blocks the entities insert (nested ones included), so a paste into another drawing still shows them. */
+  blocks?: BlockDefinition[];
 }
 
 const MARK = "# sketchor ";
@@ -38,7 +42,8 @@ export function payloadFor(doc: SketchDocument, ids: readonly EntityId[]): Clipb
   const wanted = new Set(ids);
   const entities = doc.all().filter((e) => wanted.has(e.id));
   const groups = doc.groups().filter((g) => groupInside(doc, g, wanted, new Set()));
-  return { entities, groups };
+  const blocks = [...referencedBlocks(doc, entities)].map((n) => doc.getRecord("blocks", n) as BlockDefinition | undefined).filter((b): b is BlockDefinition => !!b);
+  return { entities, groups, ...(blocks.length > 0 ? { blocks } : {}) };
 }
 
 function groupInside(doc: SketchDocument, g: Group, wanted: Set<EntityId>, seen: Set<GroupId>): boolean {
@@ -62,6 +67,7 @@ export function parseClipboard(text: string): ClipboardPayload | null {
         return {
           entities: raw.entities.filter(isEntityLike).map(migrateDashedEntity),
           groups: Array.isArray(raw.groups) ? raw.groups.filter(isGroupLike) : [],
+          ...(Array.isArray(raw.blocks) ? { blocks: raw.blocks.filter((b): b is BlockDefinition => !!b && typeof b.name === "string" && Array.isArray(b.entities)) } : {}),
         };
       }
     } catch {
@@ -92,9 +98,11 @@ export function payloadBase(payload: ClipboardPayload): Point | null {
  * group ids, membership remapped), moved by `offset`. Names are dropped
  * so the sketch code hands out the next free ones. One batch = one undo.
  */
-export function pasteCommands(payload: ClipboardPayload, offset: Point): { commands: Command[]; ids: EntityId[] } {
+export function pasteCommands(payload: ClipboardPayload, offset: Point, into?: SketchDocument): { commands: Command[]; ids: EntityId[] } {
   const idMap = new Map<string, string>();
   const commands: Command[] = [];
+  // Blocks the destination lacks come along (same-name blocks already there win — pasting never redefines).
+  for (const b of payload.blocks ?? []) if (!into?.hasRecord("blocks", b.name)) commands.push({ type: "put-table-record", table: "blocks", record: b });
   const ids: EntityId[] = [];
   for (const e of payload.entities) {
     const id = newEntityId();

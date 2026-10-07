@@ -5,6 +5,9 @@ import type { Constraint, ConstraintId } from "./constraints";
 import { solveSketch, type SolveOptions, type SolveResult } from "./solver/solve";
 import type { Point } from "./geometry";
 import type { SketchDocument } from "./document";
+import { setActiveBlocks } from "./blocks/context";
+import { planDefineBlock, planDeleteBlock, planExplode, planRenameBlock, planUpdateBlock } from "./blocks/ops";
+import type { AttributeDef, BlockDefinition } from "./blocks/types";
 import { entityRefRewritersFor, recordRefRewritersFor, type DocSettings, type TableRecord } from "./tables";
 
 /**
@@ -43,6 +46,33 @@ export type Command =
   | { type: "rename-table-record"; table: string; from: string; to: string; rewrite?: boolean }
   /** Merges into the document settings; a key set to `null` (or `undefined`) is removed. */
   | { type: "set-settings"; patch: DocSettings }
+  /**
+   * B-02. AutoCAD's "convert to block": the selected entities become the body of a new
+   * `blocks` record (coordinates unchanged, anchored at `basePoint`). `convert` (default)
+   * removes them and adds one insert (`insertId`) at the base point; `retain` keeps them
+   * and adds no insert; `delete` removes them and adds no insert. Refused when the name is
+   * empty or taken, nothing is selected, or the body would contain the block itself.
+   */
+  | {
+      type: "define-block";
+      name: string;
+      basePoint: Point;
+      ids: EntityId[];
+      insertId: EntityId;
+      mode?: "convert" | "retain" | "delete";
+      description?: string;
+      explodable?: boolean;
+      scaleUniformly?: boolean;
+      attributeDefs?: AttributeDef[];
+    }
+  /** B-02. Replaces the given fields of a definition (usually `entities`) — every instance re-renders. Refused if it would make the block contain itself. */
+  | { type: "update-block"; name: string; changes: Partial<Omit<BlockDefinition, "name">> }
+  /** B-02. Renames a block and every insert (and nested insert) that names it, in one step. */
+  | { type: "rename-block"; from: string; to: string }
+  /** B-02. Refused while any insert or other definition references the block, unless `purge` (which removes those references too). */
+  | { type: "delete-block"; name: string; purge?: boolean }
+  /** B-02. Replaces an insert with the entities it stands for (one nesting level; attribute values become text). Refused for a non-explodable block. */
+  | { type: "explode-insert"; id: EntityId }
   | { type: "batch"; commands: Command[] };
 
 interface HistoryEntry {
@@ -62,7 +92,9 @@ export class CommandBus {
    */
   lastSolve: SolveResult | null = null;
 
-  constructor(readonly doc: SketchDocument) {}
+  constructor(readonly doc: SketchDocument) {
+    setActiveBlocks(doc);
+  }
 
   onChange(fn: () => void): () => void {
     this.listeners.add(fn);
@@ -74,6 +106,7 @@ export class CommandBus {
   }
 
   execute(command: Command): void {
+    setActiveBlocks(this.doc);
     const inverse = this.apply(command);
     // The solver runs as a middleware here (roadmap T-40): whatever the
     // command did, the constraints then have their say, and the moves
@@ -128,6 +161,7 @@ export class CommandBus {
   }
 
   undo(): void {
+    setActiveBlocks(this.doc);
     const entry = this.undoStack.pop();
     if (!entry) return;
     for (const inv of entry.inverse) this.apply(inv);
@@ -146,6 +180,7 @@ export class CommandBus {
   }
 
   redo(): void {
+    setActiveBlocks(this.doc);
     const entry = this.redoStack.pop();
     if (!entry) return;
     // Redo re-solves for the same reason execute does: the command alone
@@ -298,6 +333,23 @@ export class CommandBus {
         for (const key of Object.keys(command.patch)) undo[key] = before[key] ?? null; // absent → null → removed (survives JSON)
         doc._patchSettings(command.patch);
         return [{ type: "set-settings", patch: undo }];
+      }
+      case "define-block":
+      case "update-block":
+      case "rename-block":
+      case "delete-block":
+      case "explode-insert": {
+        const plan =
+          command.type === "define-block"
+            ? planDefineBlock(doc, command)
+            : command.type === "update-block"
+              ? planUpdateBlock(doc, command)
+              : command.type === "rename-block"
+                ? planRenameBlock(doc, command.from, command.to)
+                : command.type === "delete-block"
+                  ? planDeleteBlock(doc, command)
+                  : planExplode(doc, command.id);
+        return plan ? this.apply({ type: "batch", commands: plan }) : [];
       }
       case "batch": {
         const inverse: Command[] = [];

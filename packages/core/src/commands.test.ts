@@ -39,7 +39,7 @@ const polyline = (id: string): PolylineEntity => ({
 const constraint: Constraint = { id: "k1", type: "horizontal", entityId: "e1" };
 
 /** e1 (line), e2 (circle), e3 (polyline on layer "outline"); group g1 over e1+e2; constraint k1; layers outline + notes; settings insUnits 4. */
-function fixture(): { doc: SketchDocument; bus: CommandBus } {
+function fixture(withBlocks = false): { doc: SketchDocument; bus: CommandBus } {
   const doc = new SketchDocument();
   doc._put(line("e1", "L1"));
   doc._put(circle("e2"));
@@ -49,7 +49,15 @@ function fixture(): { doc: SketchDocument; bus: CommandBus } {
   doc._putRecord("layers", { name: "outline", visible: true });
   doc._putRecord("layers", { name: "notes", visible: false, locked: true });
   doc._patchSettings({ insUnits: 4 });
+  if (withBlocks) addBlocks(doc);
   return { doc, bus: new CommandBus(doc) };
+}
+
+/** B-02: a block "B1" (one line + an attribute) with an instance, and "B2" nesting B1. */
+function addBlocks(doc: SketchDocument): void {
+  doc._putRecord("blocks", { name: "B1", basePoint: { x: 0, y: 0 }, entities: [line("b1l")], attributeDefs: [{ tag: "T", at: { x: 0, y: 1 }, height: 1, rotation: 0, default: "x" }], explodable: true, scaleUniformly: false });
+  doc._putRecord("blocks", { name: "B2", basePoint: { x: 0, y: 0 }, entities: [{ id: "n1", type: "insert", block: "B1", insert: { x: 1, y: 1 }, scale: { x: 1, y: 1 }, rotation: 0, attributes: {} }], attributeDefs: [], explodable: true, scaleUniformly: false });
+  doc._put({ id: "i1", type: "insert", block: "B1", insert: { x: 20, y: 20 }, scale: { x: 2, y: 2 }, rotation: 0.5, attributes: {} });
 }
 
 /**
@@ -108,6 +116,13 @@ const CASES: { name: string; command: Command }[] = [
   { name: "delete-table-record", command: { type: "delete-table-record", table: "layers", name: "outline" } },
   { name: "rename-table-record (rewrites entities)", command: { type: "rename-table-record", table: "layers", from: "outline", to: "profile" } },
   { name: "rename-table-record (no rewrite)", command: { type: "rename-table-record", table: "layers", from: "outline", to: "profile", rewrite: false } },
+  { name: "define-block (convert)", command: { type: "define-block", name: "NEW", basePoint: { x: 1, y: 1 }, ids: ["e1", "e2"], insertId: "i9" } },
+  { name: "define-block (retain)", command: { type: "define-block", name: "NEW", basePoint: { x: 0, y: 0 }, ids: ["e1"], insertId: "i9", mode: "retain" } },
+  { name: "define-block (delete)", command: { type: "define-block", name: "NEW", basePoint: { x: 0, y: 0 }, ids: ["e1"], insertId: "i9", mode: "delete" } },
+  { name: "update-block", command: { type: "update-block", name: "B1", changes: { entities: [circle("c9")], description: "round" } } },
+  { name: "rename-block (rewrites inserts and nested inserts)", command: { type: "rename-block", from: "B1", to: "PART" } },
+  { name: "delete-block (purge)", command: { type: "delete-block", name: "B1", purge: true } },
+  { name: "explode-insert", command: { type: "explode-insert", id: "i1" } },
   { name: "set-settings", command: { type: "set-settings", patch: { insUnits: 1, ltscale: 2.5 } } },
   { name: "set-settings (remove a key)", command: { type: "set-settings", patch: { insUnits: null as unknown as undefined } } },
   {
@@ -126,7 +141,7 @@ const CASES: { name: string; command: Command }[] = [
 describe("CommandBus undo/redo round-trip", () => {
   for (const { name, command } of CASES) {
     it(`restores the document after undoing ${name}`, () => {
-      const { doc, bus } = fixture();
+      const { doc, bus } = fixture(true);
       const before = snapshot(doc);
 
       bus.execute(command);

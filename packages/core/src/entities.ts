@@ -429,6 +429,49 @@ export interface HatchEntity {
   transparency?: number;
 }
 
+/** A rectangular array stamped by one insert (DXF MINSERT); spacings run along the insert's own rotated axes. */
+export interface InsertArray {
+  cols: number;
+  rows: number;
+  colSpacing: number;
+  rowSpacing: number;
+}
+
+/**
+ * A placed instance of a block definition (B-01). `block` names a record of the
+ * `blocks` table; the instance is drawn by evaluating that definition under
+ * translate(insert) · rotate · scale · translate(-basePoint), so editing the
+ * definition updates every instance. Selected, moved and deleted as one entity.
+ */
+export interface InsertEntity {
+  id: EntityId;
+  type: "insert";
+  /** Human-readable handle used in the sketch code view (e.g. "I1"). */
+  name?: string;
+  /** Layer of the instance; layer-"0" content of the definition inherits it. */
+  layer?: string;
+  /** Inherited by definition entities whose colour is BYBLOCK. */
+  color?: string;
+  linetype?: string;
+  lineweight?: number;
+  construction?: boolean;
+  /** Never set: keeps `entity.fill` (a colour on closed shapes) readable on the whole union. */
+  fill?: undefined;
+  /** Name of the `blocks` record this instance shows. */
+  block: string;
+  /** Where the definition's base point lands. */
+  insert: Point;
+  /** Per-axis scale; a negative value mirrors. */
+  scale: { x: number; y: number };
+  /** Radians, counter-clockwise. */
+  rotation: number;
+  /** Attribute values by tag (B-05). */
+  attributes: Record<string, string>;
+  array?: InsertArray;
+  /** Parameter values of a dynamic block (Phase 6). */
+  params?: Record<string, number | string>;
+}
+
 export type Entity =
   | LineEntity
   | CircleEntity
@@ -437,6 +480,7 @@ export type Entity =
   | EllipseEntity
   | SplineEntity
   | HatchEntity
+  | InsertEntity
   | PolylineEntity
   | TextEntity
   | ImageEntity;

@@ -35,6 +35,7 @@ const pointsOf = (e: Entity): Point[] => {
   if (e.type === "text") return [e.at];
   if (e.type === "image") return [e.insert];
   if (e.type === "spline") return e.controlPoints;
+  if (e.type === "insert") return [e.insert];
   if (e.type === "hatch") return e.loops.flatMap((l) => l.edges.flatMap((g) => (g.type === "line" ? [g.a] : [])));
   return [e.center];
 };

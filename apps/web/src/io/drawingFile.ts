@@ -1,4 +1,4 @@
-import { decodeDxfBytes, entitiesToDxf, entitiesToDxf2018, entitiesToSvgDocument } from "@sketchor/core";
+import { decodeDxfBytes, entitiesToDxf, entitiesToDxf2018, entitiesToSvgDocument, flattenInserts } from "@sketchor/core";
 import { DWG_UNREADABLE, dwgToDxfText } from "../browser/dwgImport";
 import { isModelFile, loadModel } from "../model3d/stepImport";
 import { EPS_UNSUPPORTED, acceptList, allExtensions, formatOf } from "./formats";
@@ -99,7 +99,7 @@ const OPEN_TYPES: PickerType[] = [
 const OPEN_ACCEPT = acceptList();
 
 function serialize(format: SaveFormat): string {
-  const entities = doc.all();
+  const entities = flattenInserts(doc, doc.all());
   if (format === "dxf" || format === "dxf-r12") {
     const displayUnit = useApp.getState().displayUnit;
     // Stored coordinates are always millimeters — rescale to match the

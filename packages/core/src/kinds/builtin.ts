@@ -35,6 +35,7 @@ import { applyGrip, gripsOf, type Grip } from "../grips";
 import { pathOf } from "../intersect";
 import { pointInPolygon } from "../regions";
 import { flattenPolylineToPoints } from "../simplify";
+import { insertKind } from "./insert";
 import { DEFAULT_TESSELLATION_TOL, registerKind, type Affine, type EntityKind, type KindSnap } from "./registry";
 
 /**
@@ -392,6 +393,6 @@ const hatchKind: EntityKind<HatchEntity> = {
   },
 };
 
-for (const kind of [lineKind, circleKind, arcKind, pointKind, ellipseKind, splineKind, hatchKind, polylineKind, textKind, imageKind] as EntityKind<never>[]) {
+for (const kind of [lineKind, circleKind, arcKind, pointKind, ellipseKind, splineKind, hatchKind, insertKind, polylineKind, textKind, imageKind] as EntityKind<never>[]) {
   registerKind(kind as unknown as EntityKind<Entity>);
 }

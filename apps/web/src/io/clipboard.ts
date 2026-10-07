@@ -50,7 +50,7 @@ export async function pasteFromClipboard(at: Point | null, offset: Point = { x: 
   if (!payload) return [];
   const base = payloadBase(payload);
   const shift = at && base ? { x: at.x - base.x + offset.x, y: at.y - base.y + offset.y } : offset;
-  const { commands, ids } = pasteCommands(payload, shift);
+  const { commands, ids } = pasteCommands(payload, shift, doc);
   if (commands.length === 0) return [];
   bus.execute({ type: "batch", commands });
   useApp.getState().syncLayersFromDoc?.();

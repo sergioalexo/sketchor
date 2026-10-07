@@ -1,4 +1,5 @@
 import type { Entity, EntityId, HatchLoop, SplineEntity } from "./entities";
+import { insertLine, insertSameGeometry, parseInsertLine, type ParsedInsert } from "./blocks/insertCode";
 import { hatchLine, hatchSameGeometry, parseHatchLine, type ParsedHatch } from "./hatch/hatchCode";
 import { loopFromPoints } from "./hatch/loops";
 import { newEntityId } from "./entities";
@@ -85,7 +86,7 @@ export function assignNames(doc: SketchDocument): Map<EntityId, string> {
       used.add(e.name);
     }
   }
-  const counters: Record<Entity["type"], number> = { line: 1, circle: 1, arc: 1, point: 1, ellipse: 1, spline: 1, hatch: 1, polyline: 1, text: 1, image: 1 };
+  const counters: Record<Entity["type"], number> = { line: 1, circle: 1, arc: 1, point: 1, ellipse: 1, spline: 1, hatch: 1, insert: 1, polyline: 1, text: 1, image: 1 };
   for (const e of doc.all()) {
     if (names.has(e.id)) continue;
     const prefix = NAME_PREFIX[e.type];
@@ -98,7 +99,7 @@ export function assignNames(doc: SketchDocument): Map<EntityId, string> {
   return names;
 }
 
-const NAME_PREFIX: Record<Entity["type"], string> = { line: "L", circle: "C", arc: "A", point: "P", ellipse: "E", spline: "S", hatch: "H", polyline: "PL", text: "T", image: "IMG" };
+const NAME_PREFIX: Record<Entity["type"], string> = { line: "L", circle: "C", arc: "A", point: "P", ellipse: "E", spline: "S", hatch: "H", insert: "I", polyline: "PL", text: "T", image: "IMG" };
 
 /** Next free name for a newly drawn entity (used by the tools). */
 export function nextEntityName(doc: SketchDocument, type: Entity["type"]): string {
@@ -214,6 +215,8 @@ export function toCode(doc: SketchDocument): string {
       out.push(splineLine(name, e));
     } else if (e.type === "hatch") {
       out.push(hatchLine(name, e));
+    } else if (e.type === "insert") {
+      out.push(insertLine(name, e));
     } else if (e.type === "text") {
       out.push(
         `text ${name} at (${fmt(e.at.x)}, ${fmt(e.at.y)}) ${JSON.stringify(e.text)} h ${fmt(e.height)}` +
@@ -224,7 +227,7 @@ export function toCode(doc: SketchDocument): string {
         `image ${name} at (${fmt(e.insert.x)}, ${fmt(e.insert.y)}) ${fmt(e.width)}x${fmt(e.height)}` +
           (e.rotation ? ` rot ${fmt(toDeg(e.rotation))}` : ""),
       );
-    } else {
+    } else if (e.type === "polyline") {
       const pts = e.points.map((p) => `(${fmt(p.x)}, ${fmt(p.y)})`).join(" ");
       out.push(`polyline ${name} pts ${pts}${e.closed ? " closed" : ""}`);
     }
@@ -257,6 +260,7 @@ export type ParsedEntity =
     }
   | { type: "spline"; name: string; data: Omit<SplineEntity, "id" | "type" | "name" | "layer"> }
   | ParsedHatch
+  | ParsedInsert
   | { type: "polyline"; name: string; points: { x: number; y: number }[]; closed: boolean }
   | { type: "text"; name: string; at: { x: number; y: number }; text: string; height: number; rotation: number }
   | { type: "image"; name: string; insert: { x: number; y: number }; width: number; height: number; rotation: number };
@@ -349,6 +353,13 @@ export function parseCode(text: string): { entities: ParsedEntity[]; errors: Par
         continue;
       }
       parsed = built;
+    } else if (keyword === "insert") {
+      const built = parseInsertLine(row);
+      if (typeof built === "string") {
+        errors.push({ line: lineNo, message: built });
+        continue;
+      }
+      parsed = built;
     } else if (keyword === "hatch") {
       const built = parseHatchLine(row);
       if (typeof built === "string") {
@@ -409,7 +420,7 @@ export function parseCode(text: string): { entities: ParsedEntity[]; errors: Par
     }
 
     if (!parsed) {
-      const known = ["line", "circle", "arc", "point", "ellipse", "spline", "hatch", "polyline", "text", "image"];
+      const known = ["line", "circle", "arc", "point", "ellipse", "spline", "hatch", "insert", "polyline", "text", "image"];
       errors.push({
         line: lineNo,
         message: known.includes(keyword)
@@ -505,6 +516,7 @@ function sameGeometry(existing: Entity, parsed: ParsedEntity): boolean {
     );
   }
   if (existing.type === "hatch" && parsed.type === "hatch") return hatchSameGeometry(existing, parsed);
+  if (existing.type === "insert" && parsed.type === "insert") return insertSameGeometry(existing, parsed);
   if (existing.type === "point" && parsed.type === "point") {
     return Math.abs(existing.p.x - parsed.p.x) < EPS && Math.abs(existing.p.y - parsed.p.y) < EPS;
   }
@@ -549,6 +561,19 @@ function sameGeometry(existing: Entity, parsed: ParsedEntity): boolean {
 export function toEntity(parsed: ParsedEntity, id: EntityId, layer?: string, bulges?: number[], imageDataUrl?: string, hatchLoops?: HatchLoop[]): Entity {
   const layerProp = layer ? { layer } : {};
   switch (parsed.type) {
+    case "insert":
+      return {
+        id,
+        type: "insert",
+        name: parsed.name,
+        ...layerProp,
+        block: parsed.block,
+        insert: parsed.at,
+        scale: parsed.scale,
+        rotation: parsed.rotation,
+        attributes: {},
+        ...(parsed.array ? { array: parsed.array } : {}),
+      };
     case "hatch":
       return {
         id,
@@ -662,6 +687,11 @@ export function diffToCommands(doc: SketchDocument, parsed: ParsedEntity[]): Com
           existing.type === "image" ? existing.dataUrl : undefined,
           existing.type === "hatch" ? existing.loops : undefined,
         );
+        if (existing.type === "insert" && updated.type === "insert") {
+          // Code carries neither attribute values nor dynamic-block params: keep them.
+          updated.attributes = existing.attributes;
+          if (existing.params !== undefined) updated.params = existing.params;
+        }
         if (existing.type === "hatch" && updated.type === "hatch") {
           // Code carries neither a pattern's own line families nor association/background: keep them.
           const ex = existing.paint;

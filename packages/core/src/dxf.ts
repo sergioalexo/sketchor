@@ -681,6 +681,13 @@ function placeEntity(
       if (!t) warn("a block was inserted with non-uniform scale — a hatch inside it was left unscaled");
       return { ...(t ?? entity), id };
     }
+    case "insert": {
+      const a = cos * sx;
+      const b = sin * sx;
+      const c = -sin * sy;
+      const d = cos * sy;
+      return { ...(kindTransform(entity, [a, b, c, d, insertion.x - (a * base.x + c * base.y), insertion.y - (b * base.x + d * base.y)]) ?? entity), id };
+    }
     case "spline":
       return {
         ...entity,
