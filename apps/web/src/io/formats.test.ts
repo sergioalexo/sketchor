@@ -16,10 +16,12 @@ describe("format registry", () => {
     expect(formatOf("readme.txt")).toBeNull();
     expect(formatOf("noext")).toBeNull();
     expect(mimeOf("x.svg")).toBe("image/svg+xml");
+    expect(formatOf("Art.AI")?.kind).toBe("2d");
+    expect(formatOf("Art.eps")?.writable).toBe(false);
     expect(mimeOf("x.unknown")).toBe("application/dxf");
   });
   it("builds accept lists", () => {
-    expect(acceptList((f) => f.kind === "2d")).toBe(".dxf,.svg,.dwg");
+    expect(acceptList((f) => f.kind === "2d")).toBe(".dxf,.svg,.dwg,.eps,.ai");
   });
   it("tauri.conf.json fileAssociations equal the association-flagged formats", () => {
     const conf = JSON.parse(read("../../src-tauri/tauri.conf.json"));

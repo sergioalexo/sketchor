@@ -1,5 +1,6 @@
 import { importDxfText, importEntities, importSvgText, openIntoSession, useApp } from "../state/store";
 import { DWG_UNREADABLE, dwgToDxfText } from "../browser/dwgImport";
+import { EPS_UNSUPPORTED } from "../io/formats";
 import { decodeDxfBytes } from "@sketchor/core";
 import { bindDxfVersion, bindSavePath, openModelBytes } from "../io/drawingFile";
 
@@ -92,6 +93,13 @@ export function initDesktopFileOpen(): void {
     const svgText = payload.text;
     openIntoSession(payload.name, () => importSvgText(svgText));
     bindOpened(payload.path, payload.name);
+    revealFolder(payload.dir);
+  });
+
+  // F-01 (EPS importer) will parse the bytes; until then the tab opens empty with a warning.
+  tauri.event.listen("open-eps", ({ payload }) => {
+    if (!payload) return;
+    openIntoSession(payload.name, () => importEntities([], [EPS_UNSUPPORTED]));
     revealFolder(payload.dir);
   });
 

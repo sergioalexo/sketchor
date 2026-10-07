@@ -1,7 +1,7 @@
 import { decodeDxfBytes, entitiesToDxf, entitiesToDxf2018, entitiesToSvgDocument } from "@sketchor/core";
 import { DWG_UNREADABLE, dwgToDxfText } from "../browser/dwgImport";
 import { isModelFile, loadModel } from "../model3d/stepImport";
-import { acceptList, allExtensions, formatOf } from "./formats";
+import { EPS_UNSUPPORTED, acceptList, allExtensions, formatOf } from "./formats";
 import {
   doc,
   finishSessionSave,
@@ -327,6 +327,8 @@ export async function loadDrawingFile(name: string, file: File): Promise<void> {
   } else if (/\.svg$/i.test(name)) {
     const text = await file.text();
     openIntoSession(name, () => importSvgText(text));
+  } else if (/\.(eps|ai)$/i.test(name)) {
+    openIntoSession(name, () => importEntities([], [EPS_UNSUPPORTED])); // F-01 replaces this
   } else if (/\.dwg$/i.test(name)) {
     const text = await dwgToDxfText(await file.arrayBuffer());
     openIntoSession(name, () => (text ? importDxfText(text) : importEntities([], [DWG_UNREADABLE])));
@@ -379,7 +381,7 @@ export async function openDrawing(): Promise<void> {
  * the other and toggle its layer to spot what changed.
  */
 export async function overlayDrawingFile(name: string, file: File): Promise<{ count: number; warnings: string[]; layer: string }> {
-  const label = name.replace(/\.(dxf|svg|dwg)$/i, "");
+  const label = name.replace(/\.(dxf|svg|dwg|eps|ai)$/i, "");
   if (isModelFile(name)) {
     const warnings = ["3D models open in their own tab and can't be overlaid on a drawing"];
     useApp.getState().setFileWarnings(warnings);
@@ -388,6 +390,10 @@ export async function overlayDrawingFile(name: string, file: File): Promise<{ co
   if (/\.svg$/i.test(name)) {
     const text = await file.text();
     return overlaySvgText(text, label);
+  }
+  if (/\.(eps|ai)$/i.test(name)) {
+    useApp.getState().setFileWarnings([EPS_UNSUPPORTED]);
+    return { ...overlayEntities([], label), warnings: [EPS_UNSUPPORTED], layer: label };
   }
   if (/\.dwg$/i.test(name)) {
     const text = await dwgToDxfText(await file.arrayBuffer());

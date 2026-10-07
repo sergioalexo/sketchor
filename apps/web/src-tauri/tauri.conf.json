@@ -54,6 +54,24 @@
         "role": "Editor"
       },
       {
+        "ext": ["svg"],
+        "name": "SVG Drawing",
+        "description": "SVG vector drawing",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["eps"],
+        "name": "EPS Drawing",
+        "description": "Encapsulated PostScript drawing (import only)",
+        "role": "Viewer"
+      },
+      {
+        "ext": ["ai"],
+        "name": "Illustrator Drawing",
+        "description": "Adobe Illustrator drawing (import only)",
+        "role": "Viewer"
+      },
+      {
         "ext": ["dwg"],
         "name": "DWG Drawing",
         "description": "AutoCAD DWG drawing (import only)",

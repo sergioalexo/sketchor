@@ -42,6 +42,8 @@ fn emit_file(app: &AppHandle, path: &str) {
         ("open-svg", false)
     } else if lower.ends_with(".dwg") {
         ("open-dwg", true)
+    } else if lower.ends_with(".eps") || lower.ends_with(".ai") {
+        ("open-eps", true)
     } else if is_model_path(&lower) {
         ("open-model", true)
     } else {
@@ -84,7 +86,10 @@ fn first_drawing_arg(args: &[String]) -> Option<String> {
         .skip(1)
         .find(|a| {
             let l = a.to_lowercase();
-            l.ends_with(".dxf") || l.ends_with(".svg") || l.ends_with(".dwg") || is_model_path(&l)
+            l.ends_with(".dxf") || l.ends_with(".svg") || l.ends_with(".dwg")
+                || l.ends_with(".eps")
+                || l.ends_with(".ai")
+                || is_model_path(&l)
         })
         .cloned()
 }
