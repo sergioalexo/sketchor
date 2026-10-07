@@ -947,6 +947,8 @@ export function Viewport() {
         app.setTool("chamfer");
       } else if (matchesBinding(e, "tool.offset")) {
         app.setTool("offset");
+      } else if (matchesBinding(e, "tool.block")) {
+        app.setTool("block");
       } else if (matchesBinding(e, "tool.divide")) {
         app.setTool("divide");
       } else if (matchesBinding(e, "tool.align")) {
@@ -1203,6 +1205,7 @@ export function Viewport() {
       case "chamfer":
       case "offset":
       case "zoom":
+      case "block":
       case "divide":
       case "align":
       case "lengthen":

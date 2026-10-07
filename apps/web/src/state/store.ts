@@ -408,7 +408,8 @@ export type ToolId =
   | "align"
   | "lengthen"
   | "match"
-  | "stretch";
+  | "stretch"
+  | "block";
 
 export const TOOL_HINTS: Record<ToolId, string> = {
   select: "Click to select (Shift adds; click again to cycle what's underneath) - drag left-to-right to window-select, right-to-left to crossing-select - Alt-drag lassos, Ctrl+Alt-drag fences - drag to move - Del deletes - G groups - U ungroups - Shift+C toggles construction",
@@ -445,6 +446,7 @@ export const TOOL_HINTS: Record<ToolId, string> = {
   align: "Select, then click a source point and where it goes, a second source point and where it goes - the selection moves and rotates to match (Ctrl-click the last point to scale too)",
   lengthen: "Type +5 / -5 (change), 40 (new total length) or 150% - then click a line or arc near the end to change",
   match: "Click the source entity, then every entity that should take its layer, colour and construction flag",
+  block: "Select the objects first, name the block in the panel, then click its base point - the objects become one insert (or are kept / removed, per the panel)",
   stretch: "Drag a crossing box around the ends to move (two corners), then click a base point and a destination - endpoints inside the box move, the rest stay",
 };
 
@@ -718,6 +720,18 @@ export function selectableEntities(): Entity[] {
   return doc.all().filter((e) => isPickable(e, hidden, locked));
 }
 
+/** Create-block tool settings (B-03): the definition's name/options and what happens to the selected objects. */
+export interface BlockSettings {
+  name: string;
+  /** convert = replace the selection by one insert; retain = keep the objects, no insert; delete = remove them, no insert. */
+  mode: "convert" | "retain" | "delete";
+  description: string;
+  explodable: boolean;
+  scaleUniformly: boolean;
+}
+
+export const DEFAULT_BLOCK_SETTINGS: BlockSettings = { name: "", mode: "convert", description: "", explodable: true, scaleUniformly: false };
+
 /** Hatch tool settings: the paint, island style and how boundaries are found. */
 export interface HatchSettings {
   kind: "pattern" | "solid" | "gradient";
@@ -787,6 +801,9 @@ interface AppState {
   /** What the Hatch tool applies (H-04). */
   hatchSettings: HatchSettings;
   setHatchSettings: (patch: Partial<HatchSettings>) => void;
+  /** What the Create-block tool applies (B-03). */
+  blockSettings: BlockSettings;
+  setBlockSettings: (patch: Partial<BlockSettings>) => void;
   /** Cap height (world units / mm) for new text and dimension labels. */
   textHeight: number;
   setTextHeight: (h: number) => void;
@@ -914,6 +931,8 @@ export const useApp = create<AppState>((set, get) => ({
   setFillColor: (color) => set({ fillColor: color }),
   hatchSettings: DEFAULT_HATCH_SETTINGS,
   setHatchSettings: (patch) => set((s) => ({ hatchSettings: { ...s.hatchSettings, ...patch } })),
+  blockSettings: DEFAULT_BLOCK_SETTINGS,
+  setBlockSettings: (patch) => set((s) => ({ blockSettings: { ...s.blockSettings, ...patch } })),
   textHeight: 100,
   setTextHeight: (textHeight) => set({ textHeight: Math.max(1, textHeight) }),
   healIssues: [],

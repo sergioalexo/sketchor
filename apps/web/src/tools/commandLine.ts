@@ -109,6 +109,8 @@ export const TOOL_ALIASES: Record<string, ToolId> = {
   ma: "match",
   match: "match",
   div: "divide",
+  b: "block",
+  block: "block",
   divide: "divide",
   // select / view / measure
   se: "select",

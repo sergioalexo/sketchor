@@ -18,6 +18,7 @@ import { PropertiesPanel } from "./properties/PropertiesPanel";
 import { ConstraintPanel } from "./constraints/ConstraintPanel";
 import { PatternPanel } from "./pattern/PatternPanel";
 import { HatchPanel } from "./fill/HatchPanel";
+import { BlockPanel } from "./blocks/BlockPanel";
 import { TextPanel } from "./text/TextPanel";
 import { printDrawing } from "./print/printDrawing";
 import { PluginCommandPalette } from "./plugins/PluginCommandPalette";
@@ -394,6 +395,17 @@ const TOOLS: { id: ToolId; label: string; keyHint: string; icon: JSX.Element; di
       <svg viewBox="0 0 24 24" width="20" height="20">
         <path d="M4 20V8a4 4 0 014-4h12" {...S} />
         <path d="M9 20v-9a2 2 0 012-2h9" {...S} strokeDasharray="3 2" />
+      </svg>
+    ),
+  },
+  {
+    id: "block",
+    label: "Create block",
+    keyHint: "B",
+    icon: (
+      <svg viewBox="0 0 24 24" width="20" height="20">
+        <rect x="4" y="4" width="16" height="16" rx="1" {...S} strokeDasharray="3 2" />
+        <path d="M9 12h6M12 9v6" {...S} />
       </svg>
     ),
   },
@@ -1303,6 +1315,7 @@ export function App() {
                 <Viewport />
                 {tool === "straighten" && <StraightenPanel />}
                 {tool === "fill" && <HatchPanel />}
+                {tool === "block" && <BlockPanel />}
                 {(tool === "text" || tool === "dim") && <TextPanel />}
               </>
             )}

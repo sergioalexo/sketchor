@@ -163,3 +163,10 @@ registerRecordRefRewriter("blocks", "blocks", (record, from, to) => {
   if (!Array.isArray(def.entities) || !def.entities.some((e) => e.type === "insert" && e.block === from)) return null;
   return { ...def, entities: def.entities.map((e) => (e.type === "insert" && e.block === from ? { ...e, block: to } : e)) };
 });
+
+/** The first of BLOCK1, BLOCK2, ... (or `<base>N`) not already a block name. */
+export function uniqueBlockName(doc: SketchDocument, base = "BLOCK"): string {
+  let i = 1;
+  while (doc.hasRecord("blocks", `${base}${i}`)) i += 1;
+  return `${base}${i}`;
+}
