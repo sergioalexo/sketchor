@@ -263,6 +263,46 @@ function Geometry({ entity, unit }: { entity: Entity; unit: DisplayUnit }) {
         </Section>
       );
     }
+    case "hatch": {
+      const p = entity.paint;
+      return (
+        <Section title="Hatch">
+          <ReadRow label="Loops" value={String(entity.loops.length)} />
+          {p.kind === "pattern" ? (
+            <>
+              <Row label="Pattern">
+                <TextField
+                  value={p.name}
+                  testId="prop-hatch-pattern"
+                  onCommit={(v) => {
+                    const { def: _def, ...rest } = p;
+                    void _def;
+                    if (v) update({ ...entity, paint: { ...rest, name: v } });
+                  }}
+                />
+              </Row>
+              <NumberRow label="Scale" value={p.scale} testId="prop-hatch-scale" onCommit={(v) => v > 0 && update({ ...entity, paint: { ...p, scale: v } })} />
+              <NumberRow label="Angle" value={round(p.angle)} suffix="°" testId="prop-hatch-angle" onCommit={(v) => update({ ...entity, paint: { ...p, angle: v } })} />
+            </>
+          ) : p.kind === "solid" ? (
+            <ReadRow label="Solid colour" value={p.color} />
+          ) : (
+            <ReadRow label="Gradient" value={p.name} />
+          )}
+          <Row label="Islands">
+            <select
+              value={entity.style}
+              data-testid="prop-hatch-style"
+              onChange={(e) => update({ ...entity, style: e.target.value as typeof entity.style })}
+            >
+              <option value="normal">Normal</option>
+              <option value="outer">Outer</option>
+              <option value="ignore">Ignore</option>
+            </select>
+          </Row>
+        </Section>
+      );
+    }
     case "polyline":
       return <PolylineGeometry entity={entity} unit={unit} />;
     case "point":

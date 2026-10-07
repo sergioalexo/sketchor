@@ -1,4 +1,6 @@
-import type { Entity, EntityId, SplineEntity } from "./entities";
+import type { Entity, EntityId, HatchLoop, SplineEntity } from "./entities";
+import { hatchLine, hatchSameGeometry, parseHatchLine, type ParsedHatch } from "./hatch/hatchCode";
+import { loopFromPoints } from "./hatch/loops";
 import { newEntityId } from "./entities";
 import { isFullEllipse } from "./ellipse";
 import { clampedUniformKnots, interpolateNurbs, isValidNurbs } from "./nurbs";
@@ -83,7 +85,7 @@ export function assignNames(doc: SketchDocument): Map<EntityId, string> {
       used.add(e.name);
     }
   }
-  const counters: Record<Entity["type"], number> = { line: 1, circle: 1, arc: 1, point: 1, ellipse: 1, spline: 1, polyline: 1, text: 1, image: 1 };
+  const counters: Record<Entity["type"], number> = { line: 1, circle: 1, arc: 1, point: 1, ellipse: 1, spline: 1, hatch: 1, polyline: 1, text: 1, image: 1 };
   for (const e of doc.all()) {
     if (names.has(e.id)) continue;
     const prefix = NAME_PREFIX[e.type];
@@ -96,7 +98,7 @@ export function assignNames(doc: SketchDocument): Map<EntityId, string> {
   return names;
 }
 
-const NAME_PREFIX: Record<Entity["type"], string> = { line: "L", circle: "C", arc: "A", point: "P", ellipse: "E", spline: "S", polyline: "PL", text: "T", image: "IMG" };
+const NAME_PREFIX: Record<Entity["type"], string> = { line: "L", circle: "C", arc: "A", point: "P", ellipse: "E", spline: "S", hatch: "H", polyline: "PL", text: "T", image: "IMG" };
 
 /** Next free name for a newly drawn entity (used by the tools). */
 export function nextEntityName(doc: SketchDocument, type: Entity["type"]): string {
@@ -196,6 +198,8 @@ export function toCode(doc: SketchDocument): string {
       );
     } else if (e.type === "spline") {
       out.push(splineLine(name, e));
+    } else if (e.type === "hatch") {
+      out.push(hatchLine(name, e));
     } else if (e.type === "text") {
       out.push(
         `text ${name} at (${fmt(e.at.x)}, ${fmt(e.at.y)}) ${JSON.stringify(e.text)} h ${fmt(e.height)}` +
@@ -238,6 +242,7 @@ export type ParsedEntity =
       end: number;
     }
   | { type: "spline"; name: string; data: Omit<SplineEntity, "id" | "type" | "name" | "layer"> }
+  | ParsedHatch
   | { type: "polyline"; name: string; points: { x: number; y: number }[]; closed: boolean }
   | { type: "text"; name: string; at: { x: number; y: number }; text: string; height: number; rotation: number }
   | { type: "image"; name: string; insert: { x: number; y: number }; width: number; height: number; rotation: number };
@@ -330,6 +335,13 @@ export function parseCode(text: string): { entities: ParsedEntity[]; errors: Par
         continue;
       }
       parsed = built;
+    } else if (keyword === "hatch") {
+      const built = parseHatchLine(row);
+      if (typeof built === "string") {
+        errors.push({ line: lineNo, message: built });
+        continue;
+      }
+      parsed = built;
     } else if ((match = row.match(POINT_RE))) {
       parsed = { type: "point", name: match[1], p: { x: Number(match[2]), y: Number(match[3]) } };
     } else if ((match = row.match(TEXT_RE))) {
@@ -383,7 +395,7 @@ export function parseCode(text: string): { entities: ParsedEntity[]; errors: Par
     }
 
     if (!parsed) {
-      const known = ["line", "circle", "arc", "point", "ellipse", "spline", "polyline", "text", "image"];
+      const known = ["line", "circle", "arc", "point", "ellipse", "spline", "hatch", "polyline", "text", "image"];
       errors.push({
         line: lineNo,
         message: known.includes(keyword)
@@ -476,6 +488,7 @@ function sameGeometry(existing: Entity, parsed: ParsedEntity): boolean {
       Math.abs(existing.end - parsed.end) < EPS
     );
   }
+  if (existing.type === "hatch" && parsed.type === "hatch") return hatchSameGeometry(existing, parsed);
   if (existing.type === "point" && parsed.type === "point") {
     return Math.abs(existing.p.x - parsed.p.x) < EPS && Math.abs(existing.p.y - parsed.p.y) < EPS;
   }
@@ -517,9 +530,19 @@ function sameGeometry(existing: Entity, parsed: ParsedEntity): boolean {
  * existing image must carry its `dataUrl` forward from the entity being
  * replaced. Never called to *create* a new image (see diffToCommands).
  */
-export function toEntity(parsed: ParsedEntity, id: EntityId, layer?: string, bulges?: number[], imageDataUrl?: string): Entity {
+export function toEntity(parsed: ParsedEntity, id: EntityId, layer?: string, bulges?: number[], imageDataUrl?: string, hatchLoops?: HatchLoop[]): Entity {
   const layerProp = layer ? { layer } : {};
   switch (parsed.type) {
+    case "hatch":
+      return {
+        id,
+        type: "hatch",
+        name: parsed.name,
+        ...layerProp,
+        loops: parsed.boundary ? parsed.boundary.map(loopFromPoints) : (hatchLoops ?? []),
+        paint: parsed.paint,
+        style: parsed.style,
+      };
     case "line":
       return { id, type: "line", name: parsed.name, ...layerProp, a: parsed.a, b: parsed.b };
     case "circle":
@@ -621,7 +644,17 @@ export function diffToCommands(doc: SketchDocument, parsed: ParsedEntity[]): Com
           existing.layer,
           existing.type === "polyline" ? existing.bulges : undefined,
           existing.type === "image" ? existing.dataUrl : undefined,
+          existing.type === "hatch" ? existing.loops : undefined,
         );
+        if (existing.type === "hatch" && updated.type === "hatch") {
+          // Code carries neither a pattern's own line families nor association/background: keep them.
+          const ex = existing.paint;
+          if (ex.kind === "pattern" && updated.paint.kind === "pattern" && ex.name === updated.paint.name && ex.def) updated.paint.def = ex.def;
+          if (existing.associative !== undefined) updated.associative = existing.associative;
+          if (existing.sources) updated.sources = existing.sources;
+          if (existing.backgroundColor !== undefined) updated.backgroundColor = existing.backgroundColor;
+          if (existing.transparency !== undefined) updated.transparency = existing.transparency;
+        }
         // Sketch code has no word for colour, fill, linetype, lineweight,
         // construction, or a line's infinite flag — carry all of them over
         // from the entity being replaced, the same way layer/bulges/image
@@ -635,6 +668,8 @@ export function diffToCommands(doc: SketchDocument, parsed: ParsedEntity[]): Com
         if (existing.type === "line" && existing.infinite && updated.type === "line") updated.infinite = true;
         commands.push({ type: "update-entity", entity: updated });
       }
+    } else if (p.type === "hatch" && !p.boundary) {
+      // `loops N` describes curved boundaries code cannot author: nothing to create.
     } else if (p.type !== "image") {
       // An image can't be created from sketch code — it has no way to author
       // pixel data — so a new `image` line that doesn't match an existing

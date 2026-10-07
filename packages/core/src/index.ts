@@ -57,3 +57,4 @@ export * from "./filletCurves";
 export * from "./contrast";
 export * from "./themeAuthoring";
 export * from "./curveMeasure";
+export * from "./hatch/loops";

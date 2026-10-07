@@ -362,6 +362,67 @@ export function layerOf(entity: Entity): string {
 
 export const DEFAULT_LAYER = "0";
 
+/** One boundary edge of a hatch loop — the geometry fields of the matching entity, without id/layer/style. */
+export type HatchEdge =
+  | { type: "line"; a: Point; b: Point }
+  | { type: "arc"; center: Point; radius: number; startAngle: number; endAngle: number; ccw: boolean }
+  | { type: "ellipse"; center: Point; majorAxis: Point; ratio: number; start: number; end: number }
+  | { type: "spline"; degree: number; controlPoints: Point[]; knots: number[]; weights?: number[]; closed?: boolean };
+
+/** A closed boundary loop: edges in chain order (each edge may run either way; the tessellation joins them by proximity). */
+export interface HatchLoop {
+  edges: HatchEdge[];
+  /** DXF boundary-path flags: an outermost loop, or one derived from a boundary entity (informational). */
+  outer?: boolean;
+  derived?: boolean;
+}
+
+/** One line family of a hatch pattern, `.pat` convention (angle in degrees; origin/offset/dashes in pattern units, scaled by the hatch). */
+export interface PatternFamily {
+  angle: number;
+  origin: Point;
+  /** Step to the next parallel line, in the line's own frame (x along the line, y perpendicular). */
+  offset: Point;
+  /** Alternating dash lengths: positive = pen down, negative = gap, 0 = dot. Empty = continuous. */
+  dashes: number[];
+}
+
+/** How a hatch is painted. A pattern is named (library / `hatchPatterns` table) and may carry its own `def` so a pattern Sketchor lacks still renders. */
+export type HatchPaint =
+  | { kind: "pattern"; name: string; scale: number; angle: number; origin?: Point; double?: boolean; def?: PatternFamily[] }
+  | { kind: "solid"; color: string }
+  | { kind: "gradient"; name: string; colors: [string, string?]; angle: number; centered?: boolean; shift?: number };
+
+/**
+ * A hatched region (H-01): boundary loops plus a paint. Named `paint`, not
+ * `fill`, because generic code reads `entity.fill` as a colour string on closed shapes.
+ */
+export interface HatchEntity {
+  id: EntityId;
+  type: "hatch";
+  /** Human-readable handle used in the sketch code view (e.g. "H1"). */
+  name?: string;
+  layer?: string;
+  /** Pattern line / outline colour. Absent = the theme's default entity colour. */
+  color?: string;
+  linetype?: string;
+  lineweight?: number;
+  construction?: boolean;
+  /** Never set: keeps `entity.fill` (a colour on closed shapes) readable on the whole union. */
+  fill?: undefined;
+  loops: HatchLoop[];
+  paint: HatchPaint;
+  /** Island handling: normal = alternate (even-odd), outer = only the outermost area, ignore = outer boundary only. */
+  style: "normal" | "outer" | "ignore";
+  /** Follows its boundary entities (H-05). */
+  associative?: boolean;
+  /** Boundary entity ids, when associative. */
+  sources?: EntityId[];
+  backgroundColor?: string;
+  /** 0..1, 0 = opaque. */
+  transparency?: number;
+}
+
 export type Entity =
   | LineEntity
   | CircleEntity
@@ -369,6 +430,7 @@ export type Entity =
   | PointEntity
   | EllipseEntity
   | SplineEntity
+  | HatchEntity
   | PolylineEntity
   | TextEntity
   | ImageEntity;

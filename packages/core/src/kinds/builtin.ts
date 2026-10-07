@@ -4,6 +4,7 @@ import type {
   CircleEntity,
   EllipseEntity,
   Entity,
+  HatchEntity,
   ImageEntity,
   LineEntity,
   PointEntity,
@@ -24,6 +25,7 @@ import {
   tessellateEllipse,
   transformEllipse,
 } from "../ellipse";
+import { hatchBounds, hatchContains, hatchPolygons, transformLoop } from "../hatch/loops";
 import { applySplineGrip, splineGrips, splineSnaps, splineTransform } from "../spline";
 import { distToNurbs, nurbsBounds, tessellateNurbs } from "../nurbs";
 import { imageCorners, polylineSegments, textCorners } from "../entities";
@@ -33,7 +35,7 @@ import { applyGrip, gripsOf, type Grip } from "../grips";
 import { pathOf } from "../intersect";
 import { pointInPolygon } from "../regions";
 import { flattenPolylineToPoints } from "../simplify";
-import { registerKind, type Affine, type EntityKind, type KindSnap } from "./registry";
+import { DEFAULT_TESSELLATION_TOL, registerKind, type Affine, type EntityKind, type KindSnap } from "./registry";
 
 /**
  * The seven built-in kinds, registered by moving in what used to be a
@@ -350,6 +352,46 @@ const imageKind: EntityKind<ImageEntity> = {
   hitDistance: (e, p) => (pointInPolygon(p, imageCorners(e)) ? 0 : Infinity),
 };
 
-for (const kind of [lineKind, circleKind, arcKind, pointKind, ellipseKind, splineKind, polylineKind, textKind, imageKind] as EntityKind<never>[]) {
+const DEG = 180 / Math.PI;
+
+/** H-01: the boundary loops are the stroke; the pattern/solid paint is the hatch engine's job (hatch/fillLines.ts). */
+const hatchKind: EntityKind<HatchEntity> = {
+  type: "hatch",
+  tessellate: (e, tol) => hatchPolygons(e, tol).map((poly) => [...poly, poly[0]]),
+  bounds: (e) => hatchBounds(e),
+  transform: (e, m) => {
+    const loops = [];
+    for (const l of e.loops) {
+      const t = transformLoop(l, m);
+      if (!t) return null;
+      loops.push(t);
+    }
+    const s = similarity(m);
+    const turn = (deg: number): number => (s ? (s.mirrored ? s.rotation * DEG - deg : deg + s.rotation * DEG) : deg);
+    let paint = e.paint;
+    if (paint.kind === "pattern") {
+      if (!s) return null;
+      paint = {
+        ...paint,
+        scale: paint.scale * s.scale,
+        angle: turn(paint.angle),
+        ...(paint.origin ? { origin: mapPoint(m, paint.origin) } : {}),
+      };
+    } else if (paint.kind === "gradient") paint = { ...paint, angle: turn(paint.angle) };
+    return { ...e, loops, paint };
+  },
+  // A hatch is an area, not a stroke: it isn't a trim/intersection target.
+  path: () => null,
+  hitDistance: (e, p) => {
+    if (hatchContains(e, p)) return 0;
+    let best = Infinity;
+    for (const poly of hatchPolygons(e, DEFAULT_TESSELLATION_TOL)) {
+      for (let i = 0; i < poly.length; i++) best = Math.min(best, distToSegment(p, poly[i], poly[(i + 1) % poly.length]));
+    }
+    return best;
+  },
+};
+
+for (const kind of [lineKind, circleKind, arcKind, pointKind, ellipseKind, splineKind, hatchKind, polylineKind, textKind, imageKind] as EntityKind<never>[]) {
   registerKind(kind as unknown as EntityKind<Entity>);
 }

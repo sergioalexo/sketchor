@@ -1,7 +1,7 @@
 import type { Entity, SplineEntity } from "./entities";
 import { imageCorners, newEntityId, polylineSegments, textCorners, transformed } from "./entities";
 import type { Point } from "./geometry";
-import { kindBounds, kindTessellate } from "./kinds/registry";
+import { kindBounds, kindTessellate, kindTransform } from "./kinds/registry";
 import { arcExtentPoints, arcPointAt, arcSweep, bulgeToArc, dist } from "./geometry";
 import { aciToHex } from "./aci";
 import { transformEllipse } from "./ellipse";
@@ -655,6 +655,15 @@ function placeEntity(
       const d = cos * sy;
       const g = transformEllipse(entity, [a, b, c, d, insertion.x - (a * base.x + c * base.y), insertion.y - (b * base.x + d * base.y)]);
       return g ? { ...entity, ...g, id } : { ...entity, id };
+    }
+    case "hatch": {
+      const a = cos * sx;
+      const b = sin * sx;
+      const c = -sin * sy;
+      const d = cos * sy;
+      const t = kindTransform(entity, [a, b, c, d, insertion.x - (a * base.x + c * base.y), insertion.y - (b * base.x + d * base.y)]);
+      if (!t) warn("a block was inserted with non-uniform scale — a hatch inside it was left unscaled");
+      return { ...(t ?? entity), id };
     }
     case "spline":
       return {

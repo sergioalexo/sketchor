@@ -20,6 +20,7 @@ const TYPE_LABELS: Record<Entity["type"], string> = {
   arc: "Arcs",
   ellipse: "Ellipses",
   spline: "Splines",
+  hatch: "Hatches",
   polyline: "Polylines",
   point: "Points",
   text: "Text",
