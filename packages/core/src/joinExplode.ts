@@ -2,7 +2,9 @@ import type { Command } from "./commands";
 import type { ArcEntity, Entity, LineEntity, PolylineEntity } from "./entities";
 import { newEntityId, polylineSegments } from "./entities";
 import { arcPointAt, bulgeToArc, dist, type Point } from "./geometry";
-import { curveEnd, curveStart, entityFromPath, pathOf, type Curve } from "./intersect";
+import { curveEnd, curveStart, entityFromPath, exactPathOf, joinContiguous, pathOf, type Curve, type XCurve } from "./intersect";
+import { isFullEllipse, tessellateEllipse } from "./ellipse";
+import type { NurbsData } from "./nurbs";
 
 /**
  * Join and explode (roadmap T-22). Join chains lines, arcs and polylines
@@ -23,15 +25,32 @@ const JOIN_TOL = 1e-6;
  * what each replaced.
  */
 export function joinEntities(entities: Entity[], tolerance = JOIN_TOL): { polyline: PolylineEntity; replaced: string[] }[] {
-  const pieces: { id: string; curves: Curve[]; source: Entity }[] = [];
+  return chainEntities(entities, tolerance, false).map((c) => ({ polyline: c.entity as PolylineEntity, replaced: c.replaced }));
+}
+
+/**
+ * Like {@link joinEntities}, but ellipses and splines take part and keep
+ * their exactness: a chain of end-to-end splines of one degree becomes one
+ * spline, and a chain that mixes curve kinds falls back to a polyline of
+ * chords (a polyline cannot hold a true ellipse or NURBS).
+ */
+export function joinEntitiesExact(entities: Entity[], tolerance = JOIN_TOL): { entity: Entity; replaced: string[] }[] {
+  return chainEntities(entities, tolerance, true);
+}
+
+function chainEntities(entities: Entity[], tolerance: number, exact: boolean): { entity: Entity; replaced: string[] }[] {
+  const pieces: { id: string; curves: XCurve[]; source: Entity }[] = [];
   for (const e of entities) {
-    if (e.type !== "line" && e.type !== "arc" && e.type !== "polyline") continue;
+    const curved = e.type === "ellipse" || e.type === "spline";
+    if (e.type !== "line" && e.type !== "arc" && e.type !== "polyline" && !curved) continue;
     if (e.type === "polyline" && e.closed) continue; // a closed loop can't chain further
-    const path = pathOf(e);
+    if (e.type === "ellipse" && isFullEllipse(e)) continue; // a full ellipse is a loop
+    if (e.type === "spline" && e.closed) continue;
+    const path = exact ? exactPathOf(e) : pathOf(e);
     if (path && path.curves.length > 0) pieces.push({ id: e.id, curves: path.curves, source: e });
   }
   const used = new Set<number>();
-  const out: { polyline: PolylineEntity; replaced: string[] }[] = [];
+  const out: { entity: Entity; replaced: string[] }[] = [];
   for (let i = 0; i < pieces.length; i++) {
     if (used.has(i)) continue;
     used.add(i);
@@ -61,23 +80,45 @@ export function joinEntities(entities: Entity[], tolerance = JOIN_TOL): { polyli
     }
     if (replaced.length < 2) continue;
     const closed = dist(curveStart(chain[0]), curveEnd(chain[chain.length - 1])) < tolerance;
-    const built = entityFromPath({ curves: chain, closed }, pieces[i].source, newEntityId());
+    const merged = exact ? joinContiguous(chain, closed) : chain;
+    const built = entityFromPath({ curves: merged, closed }, pieces[i].source, newEntityId());
     if (!built) continue;
-    const polyline: PolylineEntity =
-      built.type === "polyline"
+    const entity: Entity =
+      built.type === "spline" || built.type === "ellipse"
         ? built
-        : // Two collinear lines join into one line by entityFromPath; keep it as a polyline for consistency.
-          fromSingle(built);
-    out.push({ polyline, replaced });
+        : built.type === "polyline"
+          ? built
+          : // Two collinear lines join into one line by entityFromPath; keep it as a polyline for consistency.
+            fromSingle(built);
+    out.push({ entity, replaced });
   }
   return out;
 }
 
-function reversed(curves: Curve[]): Curve[] {
-  return [...curves].reverse().map((c) => {
-    if (c.kind === "segment") return { kind: "segment", a: c.b, b: c.a };
-    return { ...c, startAngle: c.endAngle, endAngle: c.startAngle, ccw: !c.ccw };
+function reversed(curves: XCurve[]): XCurve[] {
+  return [...curves].reverse().flatMap((c): XCurve[] => {
+    if (c.kind === "segment") return [{ kind: "segment", a: c.b, b: c.a }];
+    // An ellipse is always stored counter-clockwise, so a reversed one has no exact form: its chords stand in.
+    if (c.kind === "ellipse") {
+      const pts = tessellateEllipse(c.e, 0.01);
+      const out: XCurve[] = [];
+      for (let i = pts.length - 1; i > 0; i--) out.push({ kind: "segment", a: pts[i], b: pts[i - 1] });
+      return out;
+    }
+    if (c.kind === "nurbs") return [{ kind: "nurbs", s: reverseNurbs(c.s) }];
+    return [{ ...c, startAngle: c.endAngle, endAngle: c.startAngle, ccw: !c.ccw }];
   });
+}
+
+function reverseNurbs(s: NurbsData): NurbsData {
+  const lo = s.knots[0];
+  const hi = s.knots[s.knots.length - 1];
+  return {
+    degree: s.degree,
+    controlPoints: [...s.controlPoints].reverse(),
+    knots: [...s.knots].reverse().map((k) => lo + hi - k),
+    ...(s.weights ? { weights: [...s.weights].reverse() } : {}),
+  };
 }
 
 function fromSingle(e: Entity): PolylineEntity {
@@ -120,12 +161,12 @@ export function explodePolyline(pl: PolylineEntity): (LineEntity | ArcEntity)[] 
 
 /** Commands for joining a selection: one batch replacing every chained entity with its polyline. Empty when nothing chains. */
 export function joinCommands(entities: Entity[]): Command[] {
-  const chains = joinEntities(entities);
+  const chains = joinEntitiesExact(entities);
   if (chains.length === 0) return [];
   const commands: Command[] = [];
   for (const c of chains) {
     commands.push({ type: "delete-entities", ids: c.replaced });
-    commands.push({ type: "add-entity", entity: c.polyline });
+    commands.push({ type: "add-entity", entity: c.entity });
   }
   return commands;
 }

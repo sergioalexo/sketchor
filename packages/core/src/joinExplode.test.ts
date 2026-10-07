@@ -4,7 +4,10 @@ import { SketchDocument } from "./document";
 import type { ArcEntity, Entity, LineEntity, PolylineEntity } from "./entities";
 import { polylineSegments } from "./entities";
 import { bulgeToArc, dist } from "./geometry";
-import { explodeCommands, explodePolyline, joinCommands, joinEntities, pointsAlong } from "./joinExplode";
+import { explodeCommands, explodePolyline, joinCommands, joinEntities, joinEntitiesExact, pointsAlong } from "./joinExplode";
+import type { SplineEntity } from "./entities";
+import { nurbsEval } from "./nurbs";
+import "./kinds/builtin";
 
 /**
  * Join turns a DXF's loose lines and arcs into the one closed contour a
@@ -96,5 +99,44 @@ describe("pointsAlong", () => {
     for (const p of around) expect(Math.hypot(p.x, p.y)).toBeCloseTo(10, 9);
     const spaced = pointsAlong(line("l", 0, 0, 10, 0), { spacing: 3 });
     expect(spaced.map((p) => p.x)).toEqual([3, 6, 9]);
+  });
+});
+
+describe("joinEntitiesExact (curves)", () => {
+  const spline = (id: string, pts: [number, number][]): SplineEntity => ({
+    id,
+    type: "spline",
+    degree: 3,
+    controlPoints: pts.map(([x, y]) => ({ x, y })),
+    knots: [0, 0, 0, 0, 1, 1, 1, 1],
+    closed: false,
+  });
+
+  it("merges end-to-end splines into one spline, whichever way round the second was drawn", () => {
+    const a = spline("a", [[0, 0], [1, 2], [2, 2], [3, 0]]);
+    const b = spline("b", [[6, 0], [5, 2], [4, 2], [3, 0]]); // drawn towards the joint
+    const chains = joinEntitiesExact([a, b]);
+    expect(chains).toHaveLength(1);
+    const e = chains[0].entity as SplineEntity;
+    expect(e.type).toBe("spline");
+    const lo = e.knots[e.degree];
+    const hi = e.knots[e.controlPoints.length];
+    const start = nurbsEval(e, lo).point;
+    const end = nurbsEval(e, hi).point;
+    expect(dist(start, { x: 0, y: 0 })).toBeLessThan(1e-9);
+    expect(dist(end, { x: 6, y: 0 })).toBeLessThan(1e-9);
+  });
+
+  it("falls back to a polyline of chords when a spline meets a line", () => {
+    const a = spline("a", [[0, 0], [1, 2], [2, 2], [3, 0]]);
+    const chains = joinEntitiesExact([a, line("l", 3, 0, 8, 0)]);
+    expect(chains).toHaveLength(1);
+    expect(chains[0].entity.type).toBe("polyline");
+  });
+
+  it("the plain joinEntities still returns a polyline for curve chains", () => {
+    const a = spline("a", [[0, 0], [1, 2], [2, 2], [3, 0]]);
+    const chains = joinEntities([a, line("l", 3, 0, 8, 0)]);
+    expect(chains[0].polyline.type).toBe("polyline");
   });
 });

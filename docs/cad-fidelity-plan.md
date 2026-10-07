@@ -77,7 +77,7 @@ Tick `[x]` and add a progress-log row as items land. Order = recommended executi
 - [x] C-05 Ellipse tool (isometric-circle mode still open)
 - [x] C-06 Spline tools (fit points / CVs) — typed tolerance + end tangents deferred
 - [~] C-07 Spline/ellipse editing (grips, SPLINEDIT actions, convert) — done: fit/CV grips, properties-panel actions, polyline↔spline; open: end-tangent handles, canvas click add/remove point, Show-CVs toggle, command-line aliases
-- [~] C-08 Every tool handles curves — done: exact `ellipse`/`nurbs` curves in `intersect.ts` for trim/split/extend (`exactPathOf`), fillet between any line/arc/circle/ellipse/spline pair (`filletCurves.ts`), intersection snap; offset done (spline refit); open: join still sees segment chains via `pathOf`, area/measure, nest, G-code
+- [~] C-08 Every tool handles curves — done: exact `ellipse`/`nurbs` curves in `intersect.ts` for trim/split/extend (`exactPathOf`), fillet between any line/arc/circle/ellipse/spline pair (`filletCurves.ts`), intersection snap; offset done (spline refit); join done (`joinEntitiesExact`: splines merge into one spline, mixed chains become chord polylines; plain `joinEntities` unchanged for nest/G-code); open: area/measure, nest, G-code
 - [~] C-09 Constraints on curves — done: ellipse/spline solver params, point-on-ellipse, axis horizontal/vertical, concentric, coincident to ends; open: point-on-spline / tangents (foot parameter), equal axis, grip drag-solve
 
 **4 · SVG + EPS complete**
