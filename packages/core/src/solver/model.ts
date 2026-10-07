@@ -31,6 +31,8 @@ export interface SketchModel {
   /** Parameters held still: a fixed entity's, and a drag's anchor. */
   frozen: Set<number>;
   entities: Map<EntityId, Entity>;
+  /** Auxiliary unknowns past the entity parameters: constraint id -> index in `values` (a foot parameter, see footCurves.ts). */
+  aux?: Map<string, number>;
 }
 
 /** How many parameters each entity kind contributes. */

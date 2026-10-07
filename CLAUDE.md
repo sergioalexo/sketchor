@@ -367,6 +367,13 @@ exports only `solveSketch` so the engine stays replaceable.
   approach and the wrong one — it leaves every constraint slightly
   violated in proportion to how hard the user pulls.
 
+- **Foot parameters** (`footCurves.ts`, C-09): a constraint with no closed
+  form (point on a spline, an ellipse/spline tangent to a line/circle) gets one
+  extra unknown `t` — the contact point's curve parameter — appended after the
+  entity parameters (`SketchModel.aux`, started at the nearest contact each
+  solve, never written back). A new curve kind joins by adding a `curveEval`
+  case (point + derivative as `Num`s); `solve.ts` calls `addFootParams` once.
+
 **Creating them** (T-41) is selection-driven, as in Onshape: select the
 geometry, then press the constraint. `constraintBuilder.ts` (pure, tested)
 decides what applies — `constraintOptions(selection)` for which buttons

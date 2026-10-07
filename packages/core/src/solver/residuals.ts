@@ -1,4 +1,5 @@
 import type { Constraint, ConstraintId } from "../constraints";
+import { curveEval, footOf } from "./footCurves";
 import { centerOf, directionOf, pointOf, radiusOf, type SketchModel } from "./model";
 import {
   add,
@@ -76,6 +77,32 @@ function ellipseResidual(model: SketchModel, p: Vec, id: string): Num | null {
 }
 
 /**
+ * Tangency of an ellipse or spline to a line, circle or arc through the
+ * constraint's foot parameter `t` (the point of contact): the curve's
+ * point P(t) is on the other shape, and the curve's direction there is
+ * along the line / perpendicular to the radius. Null when this pair has no foot.
+ */
+function footTangent(model: SketchModel, c: Extract<Constraint, { type: "tangent" }>, row: (r: Num) => Row): Row[] | null {
+  const t = footOf(model, c);
+  if (!t) return null;
+  const aIsCurve = model.entities.get(c.a)?.type === "ellipse" || model.entities.get(c.a)?.type === "spline";
+  const curveId = aIsCurve ? c.a : c.b;
+  const otherId = aIsCurve ? c.b : c.a;
+  const ev = curveEval(model, curveId, t);
+  if (!ev) return [];
+  const center = centerOf(model, otherId);
+  const radius = radiusOf(model, otherId);
+  if (center && radius) {
+    const rv = vsub(ev.p, center);
+    return [row(sub(distanceNum(ev.p, center), radius)), row(cosBetween(ev.d, rv))];
+  }
+  const d = directionOf(model, otherId);
+  const at = pointOf(model, { entityId: otherId, point: "a" });
+  if (!d || !at) return [];
+  return [row(pointToLine(ev.p, at, d)), row(sinBetween(ev.d, d))];
+}
+
+/**
  * The equations one constraint contributes, or `[]` when it references
  * geometry the solver can't move (a constraint on a text label, or on an
  * entity that has since been deleted). A constraint that produces no rows
@@ -142,6 +169,8 @@ export function rowsFor(model: SketchModel, c: Constraint): Row[] {
       return [];
     }
     case "tangent": {
+      const foot = footTangent(model, c, row);
+      if (foot) return foot;
       const ca = centerOf(model, c.a);
       const ra = radiusOf(model, c.a);
       const cb = centerOf(model, c.b);
@@ -203,6 +232,12 @@ export function rowsFor(model: SketchModel, c: Constraint): Row[] {
     case "point-on-curve": {
       const p = pointOf(model, c.point);
       if (!p) return [];
+      if (model.entities.get(c.entityId)?.type === "spline") {
+        // A spline has no closed form: the foot parameter t makes P(t) = p.
+        const t = footOf(model, c);
+        const ev = t ? curveEval(model, c.entityId, t) : null;
+        return ev ? [row(sub(ev.p.x, p.x)), row(sub(ev.p.y, p.y))] : [];
+      }
       if (model.entities.get(c.entityId)?.type === "ellipse") {
         const ellipse = ellipseResidual(model, p, c.entityId);
         return ellipse ? [row(ellipse)] : [];

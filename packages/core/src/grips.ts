@@ -134,6 +134,17 @@ export function gripPointRef(entity: Entity, grip: Grip): PointRef | null {
       if (grip.index === 0) return ref("a");
       return grip.index === entity.points.length - 1 ? ref("b") : null;
     }
+    case "ellipse": {
+      // The centre, and the major-axis end when it is the parameter-0 point (what `a` names).
+      // Arc-end grips re-angle the arc, which the solver does not own, so they stay plain edits.
+      if (grip.kind === "center") return ref("center");
+      const atZero = Math.abs(Math.sin(entity.start / 2)) < 1e-9;
+      return grip.kind === "quadrant" && grip.index === 0 && atZero ? ref("a") : null;
+    }
+    case "spline":
+      // Control-point grips only: with fit points the grips re-interpolate, which is not a point the solver moves.
+      if (entity.fitPoints || grip.kind !== "vertex") return null;
+      return { entityId: entity.id, point: "vertex", index: grip.index };
     case "text":
     case "image":
       return null;

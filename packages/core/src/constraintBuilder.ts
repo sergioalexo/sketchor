@@ -55,13 +55,13 @@ export const CONSTRAINT_HINTS: Record<ConstraintKind, string> = {
   vertical: "One or more lines",
   parallel: "Two or more lines",
   perpendicular: "Two lines",
-  tangent: "A circle or arc, and a line, circle or arc",
+  tangent: "A circle or arc, and a line, circle or arc (an ellipse or spline can be tangent to a line, circle or arc)",
   concentric: "Two or more circles or arcs",
   collinear: "Two or more lines",
-  equal: "Two or more lines (length), or circles and arcs (radius)",
+  equal: "Two or more lines (length), circles and arcs (radius), or ellipses (major axis)",
   midpoint: "A point and a line",
   symmetric: "Two points and a line to mirror them about",
-  "point-on-curve": "A point and a line, circle, arc or ellipse",
+  "point-on-curve": "A point and a line, circle, arc, ellipse or spline",
   radius: "A circle or arc — locks its current radius",
   distance: "Two entities — locks the current distance between their nearest ends",
   angle: "Two lines — locks the current angle between them",
@@ -75,6 +75,10 @@ const hasAxis = (e: Entity) => e.type === "line" || e.type === "ellipse";
 /** Something a point can lie on, or that has a centre another curve can share. */
 const isOval = (e: Entity) => isCurve(e) || e.type === "ellipse";
 const linelike = (e: Entity) => e.type === "line" || e.type === "polyline";
+/** An ellipse's major axis turns like a line for parallel/perpendicular. */
+const axislike = (e: Entity) => linelike(e) || e.type === "ellipse";
+/** Ellipse and spline are tangent through a foot parameter (solver/footCurves.ts). */
+const footcurve = (e: Entity) => e.type === "ellipse" || e.type === "spline";
 
 /** The points of an entity a constraint can attach to, nearest-pair matching included. */
 export function attachPoints(entity: Entity): { ref: PointRef; at: Point }[] {
@@ -184,13 +188,13 @@ export function buildConstraints(kind: ConstraintKind, selection: readonly Entit
       return { constraints: axes.map((l) => ({ id: ctx.newId(), type: kind, entityId: l.id })) };
     }
     case "parallel": {
-      const usable = sel.filter(linelike);
+      const usable = sel.filter(axislike);
       const bad = need(usable.length >= 2 && usable.length === sel.length);
       if (bad) return bad;
       return { constraints: chain(usable, ctx, (a, b, id) => ({ id, type: "parallel", a, b })) };
     }
     case "perpendicular": {
-      const usable = sel.filter(linelike);
+      const usable = sel.filter(axislike);
       const bad = need(usable.length === 2 && sel.length === 2);
       if (bad) return bad;
       return { constraints: [{ id: ctx.newId(), type: "perpendicular", a: usable[0].id, b: usable[1].id }] };
@@ -208,7 +212,8 @@ export function buildConstraints(kind: ConstraintKind, selection: readonly Entit
       return { constraints: chain(ovals, ctx, (a, b, id) => ({ id, type: "concentric", a, b })) };
     }
     case "tangent": {
-      const bad = need(sel.length === 2 && curves.length >= 1 && sel.every((e) => isCurve(e) || linelike(e)));
+      const withFoot = sel.length === 2 && sel.some(footcurve) && sel.some((e) => isCurve(e) || e.type === "line");
+      const bad = need(withFoot || (sel.length === 2 && curves.length >= 1 && sel.every((e) => isCurve(e) || linelike(e))));
       if (bad) return bad;
       return { constraints: [{ id: ctx.newId(), type: "tangent", a: sel[0].id, b: sel[1].id }] };
     }
@@ -217,9 +222,12 @@ export function buildConstraints(kind: ConstraintKind, selection: readonly Entit
       // would be comparing a length with a radius, which means nothing.
       const allLines = lines.length === sel.length && lines.length >= 2;
       const allCurves = curves.length === sel.length && curves.length >= 2;
-      const bad = need(allLines || allCurves);
+      // Ellipses: equal major axis (the semi-major length).
+      const ellipses = sel.filter((e) => e.type === "ellipse");
+      const allEllipses = ellipses.length === sel.length && ellipses.length >= 2;
+      const bad = need(allLines || allCurves || allEllipses);
       if (bad) return bad;
-      return { constraints: chain(allLines ? lines : curves, ctx, (a, b, id) => ({ id, type: "equal", a, b })) };
+      return { constraints: chain(allLines ? lines : allEllipses ? ellipses : curves, ctx, (a, b, id) => ({ id, type: "equal", a, b })) };
     }
     case "coincident": {
       const bad = need(sel.length === 2);
@@ -248,7 +256,7 @@ export function buildConstraints(kind: ConstraintKind, selection: readonly Entit
       return { constraints: [{ id: ctx.newId(), type: "symmetric", a, b, axis: axis!.id }] };
     }
     case "point-on-curve": {
-      const curve = sel.find((e) => isOval(e) || linelike(e));
+      const curve = sel.find((e) => isOval(e) || linelike(e) || e.type === "spline");
       const other = sel.find((e) => e !== curve);
       const bad = need(sel.length === 2 && !!curve && !!other && attachPoints(other!).length > 0);
       if (bad) return bad;

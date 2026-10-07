@@ -2,6 +2,7 @@ import type { Constraint, ConstraintId, PointRef } from "../constraints";
 import type { Entity, EntityId } from "../entities";
 import type { Point } from "../geometry";
 import { applyModel, buildModel, freeIndices, freezeEntity, pointOf, type SketchModel } from "./model";
+import { addFootParams } from "./footCurves";
 import { allRows, type Row } from "./residuals";
 import { konst, sub, type Num } from "./num";
 
@@ -83,6 +84,7 @@ export function solveSketch(
   const tolerance = options.tolerance ?? DEFAULT_TOLERANCE;
   const maxIterations = options.maxIterations ?? DEFAULT_MAX_ITERATIONS;
   const model = buildModel(entities);
+  addFootParams(model, constraints);
   for (const c of constraints) if (c.type === "fix") freezeEntity(model, c.entityId);
   for (const id of options.fixed ?? []) freezeEntity(model, id);
 
