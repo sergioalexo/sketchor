@@ -525,7 +525,11 @@ describe("parseSvgText: document structure", () => {
   });
 
   it("walks into unknown elements for nested drawable content", () => {
-    expect(parseSvgText(svgOf('<defs><line x1="0" y1="0" x2="1" y2="0"/></defs>')).entities).toHaveLength(1);
+    expect(parseSvgText(svgOf('<a><switch><line x1="0" y1="0" x2="1" y2="0"/></switch></a>')).entities).toHaveLength(1);
+  });
+
+  it("does not draw <defs> content directly (only a <use> does)", () => {
+    expect(parseSvgText(svgOf('<defs><line x1="0" y1="0" x2="1" y2="0"/></defs>')).entities).toHaveLength(0);
   });
 
   it("reports malformed XML instead of throwing", () => {

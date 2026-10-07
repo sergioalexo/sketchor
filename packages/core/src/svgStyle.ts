@@ -11,9 +11,9 @@ import { BUILTIN_LINETYPES } from "./linetypes";
 export type Declarations = Record<string, string>;
 
 /** The properties the importer maps; everything else in a style is ignored. */
-export const STYLE_PROPS = ["stroke", "fill", "stroke-width", "stroke-dasharray", "display", "visibility", "opacity", "color", "fill-opacity", "stroke-opacity"] as const;
+export const STYLE_PROPS = ["stroke", "fill", "stroke-width", "stroke-dasharray", "display", "visibility", "opacity", "color", "fill-opacity", "stroke-opacity", "font-size", "text-anchor", "font-family"] as const;
 /** Inherited through `<g>` (display and opacity are not). */
-export const INHERITED_PROPS = new Set(["stroke", "fill", "stroke-width", "stroke-dasharray", "visibility", "color"]);
+export const INHERITED_PROPS = new Set(["stroke", "fill", "stroke-width", "stroke-dasharray", "visibility", "color", "font-size", "text-anchor", "font-family"]);
 
 /** `a:b; c:d` → `{a:"b", c:"d"}` (lower-cased names, `!important` stripped, tolerant of junk). */
 export function parseDeclarations(text: string): Declarations {
@@ -155,4 +155,14 @@ export function nearestLinetype(dashMm: number[]): string {
     }
   }
   return best;
+}
+
+/** A CSS `font-size` in user units (px = unitless; pt/mm/cm/in converted at 96 dpi, `em` against 16); null when unusable. */
+export function parseFontSize(value: string | undefined): number | null {
+  if (!value) return null;
+  const m = /^\s*([+-]?(?:\d+\.?\d*|\.\d+))\s*(px|pt|pc|mm|cm|in|em|rem)?\s*$/i.exec(value);
+  if (!m) return null;
+  const k = { "": 1, px: 1, pt: 96 / 72, pc: 16, mm: 96 / 25.4, cm: 96 / 2.54, in: 96, em: 16, rem: 16 }[(m[2] ?? "").toLowerCase() as "px"];
+  const v = parseFloat(m[1]) * k;
+  return v > 0 ? v : null;
 }

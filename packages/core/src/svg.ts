@@ -1,5 +1,5 @@
-import type { ArcEntity, CircleEntity, EllipseEntity, Entity, SplineEntity, ImageEntity, LineEntity, PolylineEntity } from "./entities";
-import { layerOf, newEntityId, polylineSegments } from "./entities";
+import type { TextEntity, ArcEntity, CircleEntity, EllipseEntity, Entity, SplineEntity, ImageEntity, LineEntity, PolylineEntity } from "./entities";
+import { layerOf, newEntityId, polylineSegments, textWidth } from "./entities";
 import type { Point } from "./geometry";
 import { arcPointAt, arcSweep, bulgeToArc, dist } from "./geometry";
 import { boundsOf } from "./dxf";
@@ -7,7 +7,7 @@ import { builtinLinetype } from "./linetypes";
 import { kindTessellate } from "./kinds/registry";
 import { bezierPieces, tessellateNurbs } from "./nurbs";
 import type { Declarations, StyleRule } from "./svgStyle";
-import { INHERITED_PROPS, STYLE_PROPS, isBlack, nearestLinetype, paintColor, parseDashArray, parseDeclarations, parseStyleSheet, parseUserLength } from "./svgStyle";
+import { INHERITED_PROPS, STYLE_PROPS, isBlack, nearestLinetype, paintColor, parseDashArray, parseDeclarations, parseFontSize, parseStyleSheet, parseUserLength } from "./svgStyle";
 import { ellipsePointAt, ellipseSweep, isFullEllipse, transformEllipse } from "./ellipse";
 
 /**
@@ -702,10 +702,26 @@ export function parseSvgText(text: string): SvgImportResult {
     const v = el.getAttribute(name);
     return v === null ? fallback : parseFloat(v) || fallback;
   };
+  // Layers: Sketchor's own data-layer, Inkscape layer groups (label, else id),
+  // and — only in an Adobe Illustrator file — each top-level <g id>.
+  const illustrator = /Adobe Illustrator/i.test(text.slice(0, 4000));
+  const decodeId = (id: string): string => id.replace(/_x([0-9A-Fa-f]{2,4})_/g, (_, h: string) => String.fromCharCode(parseInt(h, 16)));
   const layerOf = (el: Element): string | undefined => {
-    const cls = el.getAttribute("data-layer") || el.closest("[data-layer]")?.getAttribute("data-layer");
-    return cls ?? undefined;
+    for (let a: Element | null = el; a; a = a.parentElement) {
+      const dl = a.getAttribute("data-layer");
+      if (dl !== null) return dl;
+      if (a.tagName.toLowerCase() === "g") {
+        if (a.getAttribute("inkscape:groupmode") === "layer") return a.getAttribute("inkscape:label") || a.getAttribute("id") || undefined;
+        if (illustrator && a.parentElement === doc.documentElement && a.getAttribute("id")) return decodeId(a.getAttribute("id")!);
+      }
+    }
+    return undefined;
   };
+  const byId = new Map<string, Element>();
+  for (const e of Array.from(doc.getElementsByTagName("*"))) {
+    const id = e.getAttribute("id");
+    if (id && !byId.has(id)) byId.set(id, e);
+  }
 
   // SV-03: <style> sheets, ordered by specificity then source order (the
   // browser's own Element.matches does the selector matching).
@@ -744,7 +760,74 @@ export function parseSvgText(text: string): SvgImportResult {
   };
 
   let hiddenCount = 0;
-  const LEAF_TAGS = new Set(["line", "circle", "ellipse", "rect", "image", "polyline", "polygon", "path"]);
+  const LEAF_TAGS = new Set(["line", "circle", "ellipse", "rect", "image", "polyline", "polygon", "path", "text"]);
+  // Never drawn directly: <use> pulls from them (or they carry paint servers / effects we do not model).
+  const NOT_RENDERED = new Set(["defs", "symbol", "clippath", "mask", "marker", "pattern", "lineargradient", "radialgradient", "style", "title", "desc", "metadata", "script", "filter", "foreignobject"]);
+  let effectCount = 0;
+  let useCount = 0;
+  const useStack = new Set<Element>();
+
+  const firstNum = (el: Element, a: string): number | null => {
+    const v = el.getAttribute(a);
+    if (!v) return null;
+    const n = parseFloat(v.trim().split(/[\s,]+/)[0]);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  /** <text>/<tspan> → one TextEntity per line (a tspan with its own x/y/dy starts a line). */
+  const emitText = (el: Element, m: Mat, cs: Declarations, layer: string | undefined): void => {
+    const h = (parseFontSize(cs["font-size"]) ?? 16) * matScale(m);
+    if (!(h > 0)) return;
+    const anchor = cs["text-anchor"];
+    const lines: { x: number; y: number; text: string }[] = [];
+    let cur: { x: number; y: number; text: string } | null = null;
+    let penX = (firstNum(el, "x") ?? 0) + (firstNum(el, "dx") ?? 0);
+    let penY = (firstNum(el, "y") ?? 0) + (firstNum(el, "dy") ?? 0);
+    const visit = (node: Element, depth: number): void => {
+      if (depth > 32) return;
+      for (const n of Array.from(node.childNodes)) {
+        if (n.nodeType === 3 || n.nodeType === 4) {
+          if (!cur) {
+            cur = { x: penX, y: penY, text: "" };
+            lines.push(cur);
+          }
+          cur.text += n.nodeValue ?? "";
+        } else if (n.nodeType === 1) {
+          const t = n as Element;
+          if (computeStyle(t, cs).display === "none") continue;
+          const x = firstNum(t, "x");
+          const y = firstNum(t, "y");
+          const dy = firstNum(t, "dy");
+          if (x !== null || y !== null || dy !== null) {
+            penX = x ?? cur?.x ?? penX;
+            penY = y ?? (cur?.y ?? penY) + (dy ?? 0);
+            cur = null;
+          }
+          visit(t, depth + 1);
+        }
+      }
+    };
+    visit(el, 0);
+    const rotation = -Math.atan2(m[1], m[0]) || 0;
+    const fill = paintColor(cs.fill, cs.color);
+    for (const line of lines) {
+      const t = line.text.replace(/\s+/g, " ").trim();
+      if (!t) continue;
+      const w = textWidth(t, h);
+      const shift = anchor === "middle" ? w / 2 : anchor === "end" ? w : 0;
+      const p = fromSvgPoint(applyMat(m, line.x, line.y));
+      entities.push({
+        id: newEntityId(),
+        type: "text",
+        ...(layer ? { layer } : {}),
+        ...(typeof fill === "string" && !isBlack(fill) ? { color: fill } : {}),
+        at: { x: p.x - shift * Math.cos(rotation), y: p.y - shift * Math.sin(rotation) },
+        text: t,
+        height: h,
+        rotation,
+      } as TextEntity);
+    }
+  };
 
   /** Stroke → colour, fill → fill (closed shapes), dasharray → nearest linetype, stroke-width → lineweight (mm). */
   const applyStyle = (from: number, st: Declarations, m: Mat): void => {
@@ -770,12 +853,17 @@ export function parseSvgText(text: string): SvgImportResult {
     }
   };
 
-  const walk = (el: Element, parentMat: Mat, parentStyle: Declarations): void => {
-    for (const child of Array.from(el.children)) {
-      const m = multiply(parentMat, parseTransform(child.getAttribute("transform")));
-      const layer = layerOf(child);
+  const walk = (el: Element, parentMat: Mat, parentStyle: Declarations, forced?: string | null): void => walkList(Array.from(el.children), parentMat, parentStyle, forced);
+
+  /** `forced`: a layer imposed by a <use> (null = the default layer); undefined = read it off each element's ancestors. */
+  const walkList = (children: Element[], parentMat: Mat, parentStyle: Declarations, forced?: string | null): void => {
+    for (const child of children) {
       const tag = child.tagName.toLowerCase();
+      if (NOT_RENDERED.has(tag)) continue;
+      const m = multiply(parentMat, parseTransform(child.getAttribute("transform")));
+      const layer = forced !== undefined ? (forced ?? undefined) : layerOf(child);
       const cs = computeStyle(child, parentStyle);
+      if (/(^|;)\s*(clip-path|mask|filter)\s*:\s*(?!none)/.test(child.getAttribute("style") ?? "") || ["clip-path", "mask", "filter"].some((a) => (child.getAttribute(a) ?? "none") !== "none")) effectCount++;
       const leaf = LEAF_TAGS.has(tag);
       if (cs.display === "none") {
         if (leaf || tag === "g") hiddenCount++;
@@ -922,14 +1010,56 @@ export function parseSvgText(text: string): SvgImportResult {
           if (d) parsePathD(d, m, layer, entities, (msg) => warnings.push(msg));
           break;
         }
+        case "text":
+          emitText(child, m, cs, layer);
+          break;
+        case "use": {
+          const href = child.getAttribute("href") ?? child.getAttribute("xlink:href");
+          const target = href && href.startsWith("#") ? byId.get(href.slice(1)) : undefined;
+          if (!target) {
+            warnings.push("a <use> referencing a missing or external element was skipped");
+            break;
+          }
+          if (useStack.has(target)) {
+            warnings.push("a <use> that references itself (a cycle) was skipped");
+            break;
+          }
+          if (++useCount > 20000) {
+            warnings.push("too many <use> instances — the rest were skipped");
+            break;
+          }
+          let um = multiply(m, [1, 0, 0, 1, numAttr(child, "x"), numAttr(child, "y")]);
+          useStack.add(target);
+          try {
+            const ttag = target.tagName.toLowerCase();
+            if (ttag === "symbol" || ttag === "svg") {
+              // Expanded as geometry for now; real blocks need B-01.
+              const vb = (target.getAttribute("viewBox") ?? "").trim().split(/[\s,]+/).map(Number);
+              if (vb.length === 4 && vb.every(Number.isFinite) && vb[2] > 0 && vb[3] > 0) {
+                const uw = parseUserLength(child.getAttribute("width") ?? target.getAttribute("width") ?? undefined);
+                const uh = parseUserLength(child.getAttribute("height") ?? target.getAttribute("height") ?? undefined);
+                const sc = uw && uh ? Math.min(uw / vb[2], uh / vb[3]) : 1;
+                const ox = uw ? (uw - vb[2] * sc) / 2 : 0;
+                const oy = uh ? (uh - vb[3] * sc) / 2 : 0;
+                um = multiply(um, [sc, 0, 0, sc, ox - vb[0] * sc, oy - vb[1] * sc]);
+              }
+              walk(target, um, computeStyle(target, cs), layer ?? null);
+            } else {
+              walkList([target], um, cs, layer ?? null);
+            }
+          } finally {
+            useStack.delete(target);
+          }
+          break;
+        }
         case "g":
         case "svg":
-          walk(child, m, cs);
+          walk(child, m, cs, forced);
           break;
         default:
-          // Unknown element (text, defs, style, ...): skip it, but still
-          // walk its children in case a group nests further drawable content.
-          walk(child, m, cs);
+          // Unknown element (<a>, <switch>, ...): not drawn itself, but its
+          // children may be — walk them.
+          walk(child, m, cs, forced);
       }
       if (leaf && entities.length > before) applyStyle(before, cs, m);
     }
@@ -937,6 +1067,7 @@ export function parseSvgText(text: string): SvgImportResult {
 
   const viewport = svgViewport(doc.documentElement);
   walk(doc.documentElement, viewport.mat, computeStyle(doc.documentElement, {}));
+  if (effectCount) warnings.push(`${effectCount} element${effectCount === 1 ? "" : "s"} with clip-path, mask or filter were imported without that effect`);
   if (hiddenCount) warnings.push(`${hiddenCount} hidden or invisible element${hiddenCount === 1 ? "" : "s"} (display:none, visibility:hidden, or no stroke and no fill) skipped`);
   return { entities, warnings: [...new Set(warnings)], units: viewport.units };
 }
