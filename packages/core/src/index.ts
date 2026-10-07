@@ -61,3 +61,4 @@ export * from "./hatch/loops";
 export * from "./hatch/pat";
 export * from "./hatch/fillLines";
 export * from "./hatch/registry";
+export * from "./hatch/library";

@@ -20,6 +20,8 @@ export interface PatternDef {
   families: PatternFamily[];
   /** Library grouping (ISO, ANSI, GOST, Geometric, …); absent for an imported pattern. */
   category?: string;
+  /** Sensible hatch scale for a drawing in millimetres / inches (patterns are authored in mm; an inch drawing needs 1/25.4 of that). */
+  defaultScale?: { mm: number; inch: number };
 }
 
 export interface PatParseResult {
