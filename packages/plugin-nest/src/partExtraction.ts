@@ -1,4 +1,4 @@
-import { curveEnd, curveStart, dist, joinEntities, pathOf, type Entity } from "@sketchor/core";
+import { curveEnd, curveStart, curvesToPolylines, dist, joinEntities, pathOf, type Entity } from "@sketchor/core";
 import { area as polygonArea, polygonContainsPolygon } from "./geometry";
 import { DEFAULT_CHORD_TOLERANCE, flattenCircle, flattenClosedPolyline } from "./flatten";
 import type { Point } from "./types";
@@ -74,7 +74,8 @@ export function extractPartsWithDiagnostics(
   opts: { chordTolerance?: number; joinTolerance?: number } = {},
 ): ExtractResult {
   const chordTol = opts.chordTolerance ?? DEFAULT_CHORD_TOLERANCE;
-  const selected = entities.filter((e) => selectedIds.has(e.id));
+  // C-08: ellipses/splines become arc-fitted polylines (0.01 mm) so they close, chain and nest like any other outline.
+  const selected = curvesToPolylines(entities.filter((e) => selectedIds.has(e.id)), Math.min(chordTol, 0.01));
   const { regions, openChains } = gatherRegions(selected, chordTol, opts.joinTolerance);
   if (regions.length === 0) return { parts: [], openChains };
 

@@ -33,6 +33,7 @@ import {
   newEntityId,
   nextEntityName,
   polylineLength,
+  entityLength,
   textCorners,
   linearDimension,
   newGroupId,
@@ -1299,9 +1300,9 @@ export function Viewport() {
           break;
         }
 
-        if (e.altKey && (hitEntity?.type === "line" || hitEntity?.type === "polyline")) {
+        if (e.altKey && (hitEntity?.type === "line" || hitEntity?.type === "polyline" || hitEntity?.type === "ellipse" || hitEntity?.type === "spline")) {
           const len =
-            hitEntity.type === "line" ? dist(hitEntity.a, hitEntity.b) : polylineLength(hitEntity);
+            hitEntity.type === "line" ? dist(hitEntity.a, hitEntity.b) : hitEntity.type === "polyline" ? polylineLength(hitEntity) : (entityLength(hitEntity) ?? 0);
           const current = app.measurement;
           if (current?.kind === "length") {
             if (!current.ids.includes(hitEntity.id)) {

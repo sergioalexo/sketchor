@@ -1,6 +1,7 @@
 import {
   curveEnd,
   curveLength,
+  curvesToPolylines,
   curveStart,
   joinEntities,
   offsetPath,
@@ -220,7 +221,13 @@ export function buildCutPlan(placements: GcodePlacement[], opts: ToolpathOptions
   }
 
   const built: Built[] = [];
-  for (const placement of placements) {
+  for (const rawPlacement of placements) {
+    // C-08: an ellipse/spline boundary is cut as lines and fitted G2/G3 arcs (0.01 mm), not thousands of G1 chords.
+    const placement = {
+      ...rawPlacement,
+      outerEntities: curvesToPolylines(rawPlacement.outerEntities, 0.01),
+      holeEntities: curvesToPolylines(rawPlacement.holeEntities, 0.01),
+    };
     const outerLoop = assembleLoop(placement.outerEntities);
     if ("error" in outerLoop) {
       warnings.push(`part #${placement.number}: outer profile ${outerLoop.error} — skipped`);

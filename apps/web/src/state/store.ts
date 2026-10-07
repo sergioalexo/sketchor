@@ -39,6 +39,7 @@ import {
   parseSvgText,
   patternCommands,
   polylineLength,
+  entityLength,
   polylineSegments,
   reduceToHalfTurn,
   scanForCrossings,
@@ -662,6 +663,11 @@ export function entityMeasurement(entity: Entity): MeasureResult | null {
         radius: entity.radius,
         arcLength: entity.radius * arcSweep(entity.startAngle, entity.endAngle, entity.ccw),
       };
+    case "ellipse":
+    case "spline": {
+      const total = entityLength(entity);
+      return total === null ? null : { kind: "length", ids: [entity.id], total };
+    }
     default:
       return null;
   }

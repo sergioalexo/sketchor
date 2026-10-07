@@ -1,6 +1,7 @@
 import type { Entity, EntityId } from "./entities";
 import { polylineSegments } from "./entities";
 import { arcPointAt, arcSweep, bulgeToArc, dist, type Point } from "./geometry";
+import { curveEntityPoints, entityArea } from "./curveMeasure";
 
 /**
  * Finds simple closed loops in a drawing — circles (trivially, on their
@@ -61,6 +62,10 @@ function edgesOf(entities: Entity[]): EdgeRef[] {
         path.push(arcPointAt(e.center, e.radius, t));
       }
       edges.push({ entityId: e.id, a: path[0], b: path[path.length - 1], path });
+    } else if (e.type === "ellipse" || e.type === "spline") {
+      // An open ellipse arc / spline is one edge (tessellated); a closed one is its own region.
+      const flat = curveEntityPoints(e, 0.005);
+      if (flat && !flat.closed) edges.push({ entityId: e.id, a: flat.points[0], b: flat.points[flat.points.length - 1], path: flat.points });
     } else if (e.type === "polyline" && !e.closed) {
       // An open polyline contributes one edge per segment, so its two loose
       // ends can still join up with other lines/arcs into a closed loop.
@@ -176,6 +181,12 @@ export function findClosedRegions(entities: Entity[], tolerance = 1e-3): ClosedR
   for (const e of entities) {
     if (e.type === "circle") regions.push(circleRegion(e.id, e.center, e.radius));
     else if (e.type === "polyline" && e.closed) regions.push(polylineRegion(e));
+    else if (e.type === "ellipse" || e.type === "spline") {
+      // The outline is tessellated for fill and point-in-region tests, the area is exact (Green's theorem).
+      const flat = curveEntityPoints(e, 0.005);
+      const area = flat?.closed ? entityArea(e) : null;
+      if (flat && area !== null && area > 1e-9) regions.push({ entityIds: [e.id], points: flat.points, area });
+    }
   }
 
   const edges = edgesOf(entities);

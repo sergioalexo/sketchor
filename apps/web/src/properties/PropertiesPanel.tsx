@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Command, Entity, PolylineEntity, SplineEntity } from "@sketchor/core";
-import { arcPointAt, arcSweep, bulgeToArc, BUILTIN_LINETYPES, dist, ellipseSweep, nurbsDomain, nurbsPointAt, findClosedRegions, isFullEllipse, layerOf, polylineLength, addSplinePoint, polylineToSpline, rebuildSpline, removeSplinePoint, splineToControlPoints, splineToPolyline } from "@sketchor/core";
+import { entityArea, entityLength, arcPointAt, arcSweep, bulgeToArc, BUILTIN_LINETYPES, dist, ellipseSweep, nurbsDomain, nurbsPointAt, findClosedRegions, isFullEllipse, layerOf, polylineLength, addSplinePoint, polylineToSpline, rebuildSpline, removeSplinePoint, splineToControlPoints, splineToPolyline } from "@sketchor/core";
 import { bus, doc, useApp } from "../state/store";
 import { parseLength } from "../tools/typedInput";
 import { factorFromMm, formatArea, formatLength, type DisplayUnit } from "../units";
@@ -238,6 +238,8 @@ function Geometry({ entity, unit }: { entity: Entity; unit: DisplayUnit }) {
               <ReadRow label="Sweep" value={`${round(deg(ellipseSweep(entity)))}°`} />
             </>
           )}
+          <ReadRow label={full ? "Perimeter" : "Length"} value={formatLength(entityLength(entity) ?? 0, unit)} />
+          {full && <ReadRow label="Area" value={formatArea(entityArea(entity) ?? 0, unit)} />}
         </Section>
       );
     }
@@ -250,6 +252,8 @@ function Geometry({ entity, unit }: { entity: Entity; unit: DisplayUnit }) {
           <ReadRow label="Control points" value={String(entity.controlPoints.length)} />
           <ReadRow label="Fit points" value={entity.fitPoints ? String(entity.fitPoints.length) : "none (edited by control points)"} />
           <ReadRow label="Kind" value={rational ? "rational (NURBS)" : "non-rational"} />
+          <ReadRow label="Length" value={formatLength(entityLength(entity) ?? 0, unit)} />
+          {entityArea(entity) !== null && <ReadRow label="Area" value={formatArea(entityArea(entity) ?? 0, unit)} />}
           <ReadRow label="Start point" value={fmtPoint(nurbsPointAt(entity, lo), unit)} />
           <ReadRow label="End point" value={fmtPoint(nurbsPointAt(entity, hi), unit)} />
           <Row label="Closed">

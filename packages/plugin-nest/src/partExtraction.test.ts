@@ -168,3 +168,21 @@ describe("extractPartsWithDiagnostics — open chains (NF-03)", () => {
     expect(openChains).toHaveLength(0);
   });
 });
+
+describe("C-08: ellipses and splines are parts", () => {
+  const ell = (id: string, rx: number, ry: number): Entity => ({ id, type: "ellipse", center: { x: 0, y: 0 }, majorAxis: { x: rx, y: 0 }, ratio: ry / rx, start: 0, end: Math.PI * 2 });
+  it("a full ellipse is one part with a tessellated outline of the right area", () => {
+    const parts = extractParts([ell("e", 10, 5)], new Set(["e"]));
+    expect(parts).toHaveLength(1);
+    let a = 0;
+    const o = parts[0].outer;
+    for (let i = 0; i < o.length; i++) a += o[i].x * o[(i + 1) % o.length].y - o[(i + 1) % o.length].x * o[i].y;
+    expect(Math.abs(Math.abs(a / 2) - Math.PI * 50)).toBeLessThan(2); // within the 0.05 mm chord tolerance
+  });
+  it("an ellipse inside a rectangle becomes its hole", () => {
+    const parts = extractParts([rectPolyline("r", -20, -20, 40, 40), ell("e", 10, 5)], new Set(["r", "e"]));
+    expect(parts).toHaveLength(1);
+    expect(parts[0].holes).toHaveLength(1);
+    expect(parts[0].holeSourceIds[0]).toEqual(["e"]);
+  });
+});

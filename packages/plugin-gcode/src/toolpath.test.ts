@@ -169,3 +169,14 @@ describe("buildCutPlan — lead-in", () => {
     expect(distFromCenter).toBeLessThan(10);
   });
 });
+
+describe("buildCutPlan — C-08 ellipses", () => {
+  it("cuts an elliptical hole as a closed loop of few lines and arcs", () => {
+    const hole: Entity = { id: "h", type: "ellipse", center: { x: 50, y: 50 }, majorAxis: { x: 10, y: 0 }, ratio: 0.5, start: 0, end: Math.PI * 2 };
+    const plan = buildCutPlan([{ id: "p", number: 1, outerEntities: rectLines("o", 0, 0, 100, 100), holeEntities: [hole] }]);
+    expect(plan.warnings).toEqual([]);
+    const holeFeature = plan.features.find((f) => f.role === "hole")!;
+    expect(holeFeature.loop.length).toBeGreaterThan(2);
+    expect(holeFeature.loop.length).toBeLessThan(150);
+  });
+});
