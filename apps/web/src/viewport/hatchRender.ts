@@ -102,10 +102,10 @@ export function drawHatchEntity(ctx: CanvasRenderingContext2D, view: View, h: Ha
     }
   }
   // The boundary is geometry the user drew separately; the hatch itself only outlines when picked or hovered.
-  if (lineWidth >= 2) {
+  if (lineWidth >= 2 || h.boundaryLost) {
     ctx.globalAlpha = alpha;
-    ctx.strokeStyle = color;
-    ctx.lineWidth = lineWidth;
+    ctx.strokeStyle = h.boundaryLost ? "#e5484d" : color;
+    ctx.lineWidth = h.boundaryLost ? Math.max(lineWidth, 1.5) : lineWidth;
     ctx.setLineDash([4, 3]);
     ctx.beginPath();
     for (const poly of hatchPolygons(h, 0.5 / view.scale)) {

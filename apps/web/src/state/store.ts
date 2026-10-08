@@ -745,6 +745,8 @@ export interface HatchSettings {
   style: "normal" | "outer" | "ignore";
   /** HPGAPTOL: endpoints this close count as joined (world units). */
   gapTol: number;
+  /** New hatches follow their boundary entities (H-05). */
+  associative: boolean;
   /** Click inside a region, pick boundary objects, or copy the paint of an existing hatch. */
   mode: "point" | "objects" | "match";
 }
@@ -760,6 +762,7 @@ export const DEFAULT_HATCH_SETTINGS: HatchSettings = {
   gradientAngle: 0,
   style: "normal",
   gapTol: 0,
+  associative: true,
   mode: "point",
 };
 

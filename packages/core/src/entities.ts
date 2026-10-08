@@ -424,6 +424,8 @@ export interface HatchEntity {
   associative?: boolean;
   /** Boundary entity ids, when associative. */
   sources?: EntityId[];
+  /** An associative hatch whose boundary could no longer be formed keeps its last loops and is flagged (H-05). */
+  boundaryLost?: boolean;
   backgroundColor?: string;
   /** 0..1, 0 = opaque. */
   transparency?: number;

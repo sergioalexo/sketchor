@@ -2,6 +2,7 @@ import type { Entity, EntityId } from "./entities";
 import { transformed, translated } from "./entities";
 import type { GroupId } from "./groups";
 import type { Constraint, ConstraintId } from "./constraints";
+import { associationState, reassociate } from "./hatch/associate";
 import { solveSketch, type SolveOptions, type SolveResult } from "./solver/solve";
 import type { Point } from "./geometry";
 import type { SketchDocument } from "./document";
@@ -107,14 +108,23 @@ export class CommandBus {
 
   execute(command: Command): void {
     setActiveBlocks(this.doc);
+    const assoc = associationState(this.doc);
     const inverse = this.apply(command);
     // The solver runs as a middleware here (roadmap T-40): whatever the
     // command did, the constraints then have their say, and the moves
     // they cause join the *same* undo entry. Anything else would make
     // Ctrl+Z leave a sketch that satisfies nothing.
-    this.undoStack.push({ command, inverse: [...this.solveAfterCommand(), ...inverse] });
+    this.undoStack.push({ command, inverse: [...this.afterApply(assoc), ...inverse] });
     this.redoStack = [];
     this.emit();
+  }
+
+  /** Middleware after a command: the solver, then H-05 associative hatches following their boundary. Returns the inverse commands. */
+  private afterApply(assoc: ReturnType<typeof associationState>): Command[] {
+    const solved = this.solveAfterCommand();
+    const followed: Command[] = [];
+    for (const entity of reassociate(this.doc, assoc)) followed.unshift(...this.apply({ type: "update-entity", entity }));
+    return [...followed, ...solved];
   }
 
   /**
@@ -185,8 +195,9 @@ export class CommandBus {
     if (!entry) return;
     // Redo re-solves for the same reason execute does: the command alone
     // doesn't describe where the constraints then put the geometry.
+    const assoc = associationState(this.doc);
     const inverse = this.apply(entry.command);
-    entry.inverse = [...this.solveAfterCommand(), ...inverse];
+    entry.inverse = [...this.afterApply(assoc), ...inverse];
     this.undoStack.push(entry);
     this.emit();
   }

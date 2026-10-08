@@ -168,8 +168,8 @@ export function HatchPanel() {
           Gap tolerance{" "}
           <input type="number" min={0} step="any" value={s.gapTol} style={{ width: 60 }} data-testid="hatch-gap" onChange={(e) => set({ gapTol: Math.max(0, Number(e.target.value) || 0) })} />
         </label>
-        <label title="Hatches that follow their boundary arrive with H-05">
-          <input type="checkbox" disabled /> Associative
+        <label title="The hatch follows its boundary objects when they change">
+          <input type="checkbox" checked={s.associative} data-testid="hatch-assoc" onChange={(e) => set({ associative: e.target.checked })} /> Associative
         </label>
       </div>
       <div className="fill-row">

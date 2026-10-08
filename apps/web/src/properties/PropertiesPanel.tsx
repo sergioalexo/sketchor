@@ -269,6 +269,9 @@ function Geometry({ entity, unit }: { entity: Entity; unit: DisplayUnit }) {
       return (
         <Section title="Hatch">
           <ReadRow label="Loops" value={String(entity.loops.length)} />
+          {entity.sources && entity.sources.length > 0 && (
+            <ReadRow label="Boundary" value={entity.boundaryLost ? "lost (open)" : entity.associative ? "associative" : "not associative"} />
+          )}
           {p.kind === "pattern" ? (
             <>
               <Row label="Pattern">

@@ -73,6 +73,7 @@ export class HatchTool implements Tool {
       paint: paintFromSettings(s),
       style: s.style,
       ...(sources.length ? { sources } : {}),
+      ...(sources.length && s.associative ? { associative: true } : {}),
     } as HatchEntity;
   }
 
