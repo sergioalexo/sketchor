@@ -1,10 +1,11 @@
-import type { ArcEntity, CircleEntity, EllipseEntity, Entity, SplineEntity, ImageEntity, LineEntity, PointEntity, PolylineEntity, TextEntity } from "../entities";
+import type { HatchEntity, ArcEntity, CircleEntity, EllipseEntity, Entity, SplineEntity, ImageEntity, LineEntity, PointEntity, PolylineEntity, TextEntity } from "../entities";
 import { imageCorners, layerOf } from "../entities";
 import { dist } from "../geometry";
 import { ellipseSweep, isFullEllipse } from "../ellipse";
 import { kindTessellate } from "../kinds/registry";
 import { aciToHex, hexToRgb, nearestAci } from "../aci";
 import { n, pair } from "./write";
+import { hatchDxfPairs, type OutPair } from "../hatch/hatchDxf";
 
 const RAD_TO_DEG = 180 / Math.PI;
 
@@ -210,6 +211,14 @@ export function imageEntity2018(e: ImageEntity, handle: string, owner: string, n
   return box + label;
 }
 
+export function hatchEntity2018(e: HatchEntity, handle: string, owner: string): string {
+  const { head, body } = hatchDxfPairs(e);
+  const fmt = ([code, v, kind]: OutPair): string => `${code}\n${kind === "f" ? n(v as number) : kind === "i" ? String(Math.round(v as number)) : v}\n`;
+  // A solid fill takes the entity colour in DXF, so the paint colour travels there.
+  const headOwner: HatchEntity = e.paint.kind === "solid" ? { ...e, color: e.paint.color } : e;
+  return `0\nHATCH\n` + entityHead(handle, owner, headOwner) + head.map(fmt).join("") + `100\nAcDbHatch\n` + body.map(fmt).join("") + nameXdata(e.name);
+}
+
 /**
  * One entity as AC1032 record(s). `nextHandle`/`owner` let a multi-record
  * entity (image) or a kind outside the built-in seven (tessellated to
@@ -236,6 +245,8 @@ export function entityDxf2018(e: Entity, handle: string, owner: string, nextHand
       return textEntity2018(e, handle, owner);
     case "image":
       return imageEntity2018(e, handle, owner, nextHandle);
+    case "hatch":
+      return hatchEntity2018(e, handle, owner);
     default:
       // A kind outside the built-in seven (kinds/registry.ts): write its
       // tessellation as polylines, same fallback as the R12 writer.

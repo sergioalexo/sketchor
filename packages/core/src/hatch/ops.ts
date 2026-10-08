@@ -51,26 +51,30 @@ export function recreateBoundaryCommands(h: HatchEntity): { commands: Command[];
 /** Largest number of strokes "Explode" will write; beyond it the hatch is refused rather than flooding the document. */
 export const EXPLODE_LIMIT = 50_000;
 
+/** The pattern strokes of a hatch as line / point entities, or the boundary for a solid or gradient. Null when the pattern is too dense or unknown. */
+export function explodeHatchEntities(h: HatchEntity): Entity[] | null {
+  if (h.paint.kind !== "pattern") return hatchBoundaryEntities(h);
+  const f = hatchFill(h);
+  if (f.truncated || f.unknownPattern || f.segments.length / 4 + f.dots.length / 2 > EXPLODE_LIMIT) return null;
+  const entities: Entity[] = [];
+  const c = common(h);
+  for (let i = 0; i < f.segments.length; i += 4) {
+    entities.push({ id: newEntityId(), type: "line", ...c, a: { x: f.segments[i], y: f.segments[i + 1] }, b: { x: f.segments[i + 2], y: f.segments[i + 3] } });
+  }
+  for (let i = 0; i < f.dots.length; i += 2) {
+    entities.push({ id: newEntityId(), type: "point", ...(h.layer ? { layer: h.layer } : {}), ...(h.color ? { color: h.color } : {}), p: { x: f.dots[i], y: f.dots[i + 1] } });
+  }
+  return entities;
+}
+
 /**
  * Explodes a hatch: the pattern becomes grouped line (and point) entities, the
  * hatch is removed. A solid/gradient hatch has no lines, so it becomes its
  * boundary. Returns null when the pattern is too dense or unknown.
  */
 export function explodeHatchCommands(h: HatchEntity): Command[] | null {
-  let entities: Entity[];
-  if (h.paint.kind !== "pattern") entities = hatchBoundaryEntities(h);
-  else {
-    const f = hatchFill(h);
-    if (f.truncated || f.unknownPattern || f.segments.length / 4 + f.dots.length / 2 > EXPLODE_LIMIT) return null;
-    entities = [];
-    const c = common(h);
-    for (let i = 0; i < f.segments.length; i += 4) {
-      entities.push({ id: newEntityId(), type: "line", ...c, a: { x: f.segments[i], y: f.segments[i + 1] }, b: { x: f.segments[i + 2], y: f.segments[i + 3] } });
-    }
-    for (let i = 0; i < f.dots.length; i += 2) {
-      entities.push({ id: newEntityId(), type: "point", ...(h.layer ? { layer: h.layer } : {}), ...(h.color ? { color: h.color } : {}), p: { x: f.dots[i], y: f.dots[i + 1] } });
-    }
-  }
+  const entities = explodeHatchEntities(h);
+  if (!entities) return null;
   const commands: Command[] = [{ type: "delete-entities", ids: [h.id] }];
   for (const entity of entities) commands.push({ type: "add-entity", entity });
   if (entities.length > 1) commands.push({ type: "group-entities", groupId: newGroupId(), ids: entities.map((e) => e.id), name: h.name ? `${h.name} exploded` : undefined });

@@ -526,14 +526,14 @@ describe("import report and warnings", () => {
     const text = entitiesOnly(
       rec("LINE", [[10, 0], [20, 0], [11, 1], [21, 1]]) +
         rec("LINE", [[10, 0], [20, 0], [11, 2], [21, 2]]) +
-        rec("HATCH", [[10, 0]]) +
-        rec("HATCH", [[10, 1]]) +
+        rec("LEADER", [[10, 0]]) +
+        rec("LEADER", [[10, 1]]) +
         rec("DIMENSION", [[10, 0]]),
     );
     const { report } = parse(text);
     expect(report.parsed).toEqual([{ type: "LINE", count: 2 }]);
     expect(report.skipped).toEqual([
-      { type: "HATCH", count: 2 },
+      { type: "LEADER", count: 2 },
       { type: "DIMENSION", count: 1 },
     ]);
   });
@@ -565,8 +565,8 @@ describe("import report and warnings", () => {
   });
 
   it("reports each unsupported type once however many records there were", () => {
-    const text = entitiesOnly(rec("HATCH", []) + rec("HATCH", []) + rec("HATCH", []));
-    expect(parse(text).warnings).toEqual(["unsupported entity: HATCH"]);
+    const text = entitiesOnly(rec("DIMENSION", []) + rec("DIMENSION", []) + rec("DIMENSION", []));
+    expect(parse(text).warnings).toEqual(["unsupported entity: DIMENSION"]);
   });
 });
 

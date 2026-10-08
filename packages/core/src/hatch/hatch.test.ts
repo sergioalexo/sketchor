@@ -182,12 +182,14 @@ describe("hatch persistence", () => {
     expect(SketchDocument.fromJSON(docWith(h).toJSON()).get("h")).toEqual(h);
   });
 
-  it("DXF 2018 export falls back to the boundary outline (a real HATCH writer is H-09) and does not throw", () => {
+  it("DXF 2018 export writes a real HATCH that reads back with the same boundary extent (H-09)", () => {
     const text = entitiesToDxf2018([hatch()]);
+    expect(text).toContain("AcDbHatch");
     const back = parseDxf(text).entities;
-    expect(back.length).toBeGreaterThan(0);
-    const xs = back.flatMap((e) => (e.type === "polyline" ? e.points.map((p) => p.x) : e.type === "line" ? [e.a.x, e.b.x] : []));
-    expect(Math.min(...xs)).toBeCloseTo(0, 6);
-    expect(Math.max(...xs)).toBeCloseTo(10, 6);
+    expect(back.length).toBe(1);
+    expect(back[0].type).toBe("hatch");
+    const b = kindBounds(back[0])!;
+    expect(b.minX).toBeCloseTo(0, 6);
+    expect(b.maxX).toBeCloseTo(10, 6);
   });
 });

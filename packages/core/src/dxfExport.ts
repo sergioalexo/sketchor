@@ -1,3 +1,4 @@
+import { explodeHatchEntities } from "./hatch/ops";
 import type { ArcEntity, CircleEntity, Entity, ImageEntity, LineEntity, PointEntity, PolylineEntity, TextEntity } from "./entities";
 import { imageCorners, layerOf, transformed } from "./entities";
 import { dist } from "./geometry";
@@ -191,6 +192,26 @@ function imageEntity(e: ImageEntity): string {
   return box + label;
 }
 
+function tessellatedDxf(e: Entity): string {
+  // A kind outside the built-in seven (kinds/registry.ts): R12 has no such entity, so write its tessellation as polylines.
+  return kindTessellate(e as Entity, 0.01)
+    .filter((run) => run.length >= 2)
+    .map((run) => {
+      const closed = run.length > 2 && dist(run[0], run[run.length - 1]) < 1e-9;
+      return polylineEntity({
+        id: (e as Entity).id,
+        type: "polyline",
+        layer: (e as Entity).layer,
+        color: (e as Entity).color,
+        linetype: (e as Entity).linetype,
+        lineweight: (e as Entity).lineweight,
+        points: closed ? run.slice(0, -1) : run,
+        closed,
+      });
+    })
+    .join("");
+}
+
 function entityDxf(e: Entity): string {
   switch (e.type) {
     case "line":
@@ -207,24 +228,16 @@ function entityDxf(e: Entity): string {
       return textEntity(e);
     case "image":
       return imageEntity(e);
+    case "hatch": {
+      // R12 has no HATCH: a pattern becomes its lines (H-09); a solid or gradient keeps the boundary outline below.
+      if (e.paint.kind === "pattern") {
+        const lines = explodeHatchEntities(e);
+        if (lines) return lines.map(entityDxf).join("");
+      }
+      return tessellatedDxf(e);
+    }
     default:
-      // A kind outside the built-in seven (kinds/registry.ts): R12 has no such entity, so write its tessellation as polylines.
-      return kindTessellate(e as Entity, 0.01)
-        .filter((run) => run.length >= 2)
-        .map((run) => {
-          const closed = run.length > 2 && dist(run[0], run[run.length - 1]) < 1e-9;
-          return polylineEntity({
-            id: (e as Entity).id,
-            type: "polyline",
-            layer: (e as Entity).layer,
-            color: (e as Entity).color,
-            linetype: (e as Entity).linetype,
-            lineweight: (e as Entity).lineweight,
-            points: closed ? run.slice(0, -1) : run,
-            closed,
-          });
-        })
-        .join("");
+      return tessellatedDxf(e);
   }
 }
 

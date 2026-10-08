@@ -1,3 +1,4 @@
+import { parseDxfHatch } from "./hatch/hatchDxf";
 import type { Entity, InsertEntity, SplineEntity } from "./entities";
 import type { AttributeDef, BlockDefinition } from "./blocks/types";
 import { blockWouldCycle } from "./blocks/evaluate";
@@ -758,6 +759,10 @@ interface ConvertContext {
    * it was placed on.
    */
   insertLayer?: string;
+  /** HATCH sources (330 handles) to resolve once every entity has its handle: hatch entity id -> handles. */
+  hatchSources?: Map<string, string[]>;
+  /** Top-level entity handle (group 5) -> entity id, for the hatch sources above. */
+  handleToId?: Map<string, string>;
 }
 
 /**
@@ -862,6 +867,26 @@ function convertRecords(raws: RawEntity[], ctx: ConvertContext): Entity[] {
         const spline = splineFromRaw(raw);
         if (spline) entities.push({ id: newEntityId(), type: "spline", layer, ...spline });
         else polyline(splinePoints(raw), entities, layer);
+        break;
+      }
+      case "HATCH": {
+        const parsed = parseDxfHatch(raw.pairs, warnings);
+        if (!parsed) {
+          warnings.push("a HATCH without a readable boundary was skipped");
+          break;
+        }
+        const id = newEntityId();
+        const paint = parsed.paint.kind === "solid" ? { kind: "solid" as const, color: rawColor(raw) ?? "#9aa4b2" } : parsed.paint;
+        entities.push({
+          id,
+          type: "hatch",
+          layer,
+          loops: parsed.loops,
+          paint,
+          style: parsed.style,
+          ...(parsed.transparency !== undefined ? { transparency: parsed.transparency } : {}),
+        });
+        if (parsed.associative && ctx.hatchSources) ctx.hatchSources.set(id, parsed.sourceHandles);
         break;
       }
       case "TEXT":
@@ -971,6 +996,8 @@ function convertRecords(raws: RawEntity[], ctx: ConvertContext): Entity[] {
     // INSERT can expand into several — none of these belong unambiguously to
     // just one of them, so all are dropped there, same as the name).
     if (entities.length === beforeCount + 1) {
+      const handle = str(raw, 5, "");
+      if (handle && ctx.handleToId && ctx.depth === 0) ctx.handleToId.set(handle.toUpperCase(), entities[entities.length - 1].id);
       const name = sketchorXdataName(raw);
       if (name) entities[entities.length - 1].name = name;
       const color = rawColor(raw);
@@ -1000,7 +1027,20 @@ export function parseDxf(text: string, options: DxfParseOptions = {}): DxfParseR
   const blocks = collectBlocks(allPairs);
   const keep = (options.blocks ?? "keep") === "keep";
 
-  const entities = scaleToMm(convertRecords(raws, { blocks, warnings, depth: 0, stack: new Set(), keep }), insUnits);
+  const hatchSources = new Map<string, string[]>();
+  const handleToId = new Map<string, string>();
+  const converted = convertRecords(raws, { blocks, warnings, depth: 0, stack: new Set(), keep, hatchSources, handleToId });
+  // H-09: an associative HATCH follows its boundary objects only when every one of them came through as an entity.
+  for (const e of converted) {
+    const handles = e.type === "hatch" ? hatchSources.get(e.id) : undefined;
+    if (!handles || e.type !== "hatch") continue;
+    const ids = handles.map((h) => handleToId.get(h.toUpperCase()));
+    if (ids.length > 0 && ids.every((x): x is string => !!x)) {
+      e.associative = true;
+      e.sources = ids;
+    }
+  }
+  const entities = scaleToMm(converted, insUnits);
   const blockDefs = keep ? buildBlockDefinitions(blocks, { blocks, warnings, depth: 0, stack: new Set(), keep }, insUnits) : [];
 
   return {
@@ -1070,6 +1110,7 @@ const SUPPORTED_TYPES = new Set([
   "POLYLINE",
   "POINT",
   "INSERT",
+  "HATCH",
 ]);
 
 /** Tallies raw DXF entity types into parsed/skipped buckets for the import report. */
