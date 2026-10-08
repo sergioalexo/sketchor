@@ -21,6 +21,7 @@ import { HatchPanel } from "./fill/HatchPanel";
 import { BlockPanel } from "./blocks/BlockPanel";
 import { BlockEditBar } from "./blocks/BlockEditBar";
 import { InsertPanel } from "./blocks/InsertPanel";
+import { BlockLibraryPanel } from "./blocks/BlockLibraryPanel";
 import { AttdefPanel } from "./blocks/AttdefPanel";
 import { AttEditDialog } from "./blocks/AttEditDialog";
 import { TextPanel } from "./text/TextPanel";
@@ -591,6 +592,7 @@ export function App() {
   const [showLayers, setShowLayers] = useState(true);
   const [showProps, setShowProps] = useState(false);
   const [showConstraints, setShowConstraints] = useState(false);
+  const [showBlocks, setShowBlocks] = useState(false);
   const [showDiag, setShowDiag] = useState(false);
   const [showDup, setShowDup] = useState(false);
   const [showPattern, setShowPattern] = useState(false);
@@ -661,6 +663,9 @@ export function App() {
       } else if (matchesBinding(e, "app.toggleConstraints")) {
         e.preventDefault();
         setShowConstraints((v) => !v);
+      } else if (matchesBinding(e, "app.toggleBlocks")) {
+        e.preventDefault();
+        setShowBlocks((v) => !v);
       } else if (matchesBinding(e, "app.toggleLayers")) {
         e.preventDefault();
         setShowLayers((v) => !v);
@@ -1030,6 +1035,18 @@ export function App() {
             </svg>
           </button>
           <button
+            className={`action ${showBlocks ? "toggled" : ""}`}
+            title={withKey("Toggle block library panel - blocks in this drawing and your saved library - right-click to add a shortcut", "app.toggleBlocks")}
+            data-testid="toggle-blocks"
+            onClick={() => setShowBlocks((v) => !v)}
+            onContextMenu={rebind("app.toggleBlocks")}
+          >
+            <svg viewBox="0 0 24 24" width="18" height="18">
+              <rect x="4" y="4" width="16" height="16" rx="1.5" stroke="currentColor" strokeWidth="1.8" fill="none" strokeDasharray="3 2" />
+              <path d="M9 12h6M12 9v6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+            </svg>
+          </button>
+          <button
             className={`action ${showConstraints ? "toggled" : ""}`}
             title={withKey(
               "Toggle constraints panel — apply a constraint to the selection, and see what the sketch already has — right-click to add a shortcut",
@@ -1364,6 +1381,7 @@ export function App() {
         {showCode && <CodePanel />}
         {showProps && !modelTab && <PropertiesPanel onClose={() => setShowProps(false)} />}
         {showConstraints && !modelTab && <ConstraintPanel onClose={() => setShowConstraints(false)} />}
+        {showBlocks && !modelTab && <BlockLibraryPanel onClose={() => setShowBlocks(false)} />}
         {/* Rightmost panel: layers for a drawing, the assembly structure for a model. */}
         {showLayers &&
           (modelTab && activeSession?.model ? (

@@ -92,6 +92,7 @@ export const ACTIONS: ActionDef[] = [
   { id: "app.toggleProperties", label: "Toggle properties panel", group: "App" },
   { id: "app.toggleCode", label: "Toggle sketch code panel", group: "App" },
   { id: "app.toggleConstraints", label: "Toggle constraints panel", group: "App" },
+  { id: "app.toggleBlocks", label: "Toggle block library panel", group: "App" },
   { id: "mouse.addToSelection", label: "Add to selection on click", group: "Mouse" },
   { id: "mouse.freeMove", label: "Disable snapping while dragging", group: "Mouse" },
 ];
@@ -194,6 +195,7 @@ export const DEFAULT_BINDINGS: Record<string, string> = {
   "app.toggleProperties": "ctrl+1",
   "app.toggleCode": "",
   "app.toggleConstraints": "ctrl+2",
+  "app.toggleBlocks": "ctrl+3",
   "mouse.addToSelection": "shift",
   "mouse.freeMove": "ctrl",
 };

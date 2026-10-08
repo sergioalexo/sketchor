@@ -53,6 +53,7 @@ export const TRACKED_BUTTONS: Record<string, string> = {
   "toggle-layers": "app.toggleLayers",
   "toggle-properties": "app.toggleProperties",
   "toggle-constraints": "app.toggleConstraints",
+  "toggle-blocks": "app.toggleBlocks",
   "toggle-code": "app.toggleCode",
   "toggle-diagnostics": "app.toggleDiagnostics",
   "toggle-duplicates": "app.toggleDuplicates",
