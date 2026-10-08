@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { PALETTE, PATTERN_CATEGORIES, fillToHatch, lookupPattern, newEntityId, registeredPatterns, type Command, type HatchEntity } from "@sketchor/core";
+import { GRADIENT_NAMES, PALETTE, PATTERN_CATEGORIES, fillToHatch, lookupPattern, newEntityId, registeredPatterns, type Command, type HatchEntity } from "@sketchor/core";
 import { bus, doc, useApp, type HatchSettings } from "../state/store";
 import { paintFromSettings } from "../tools/hatchTool";
 import { PatternSwatch } from "./PatternSwatch";
@@ -113,11 +113,40 @@ export function HatchPanel() {
           <Swatch s={s} />
           <input type="color" value={s.gradientColors[0]} data-testid="hatch-grad-1" onChange={(e) => set({ gradientColors: [e.target.value, s.gradientColors[1]] })} />
           <input type="color" value={s.gradientColors[1]} data-testid="hatch-grad-2" onChange={(e) => set({ gradientColors: [s.gradientColors[0], e.target.value] })} />
+          <select value={s.gradientName} data-testid="hatch-grad-name" onChange={(e) => set({ gradientName: e.target.value })}>
+            {GRADIENT_NAMES.map((n) => (
+              <option key={n} value={n}>
+                {n.charAt(0) + n.slice(1).toLowerCase()}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+      {s.kind === "gradient" && (
+        <div className="fill-row">
           <label>
-            Angle <input type="number" step="any" value={s.gradientAngle} style={{ width: 60 }} onChange={(e) => set({ gradientAngle: Number(e.target.value) || 0 })} />°
+            Angle <input type="number" step="any" value={s.gradientAngle} style={{ width: 60 }} data-testid="hatch-grad-angle" onChange={(e) => set({ gradientAngle: Number(e.target.value) || 0 })} />°
+          </label>
+          <label title="Off: the highlight moves by the shift amount">
+            <input type="checkbox" checked={s.gradientCentered} data-testid="hatch-grad-centered" onChange={(e) => set({ gradientCentered: e.target.checked })} /> Centered
+          </label>
+          <label>
+            Shift <input type="number" step={0.1} min={-1} max={1} disabled={s.gradientCentered} value={s.gradientShift} style={{ width: 55 }} onChange={(e) => set({ gradientShift: Math.max(-1, Math.min(1, Number(e.target.value) || 0)) })} />
           </label>
         </div>
       )}
+      <div className="fill-row">
+        <label title="0 = opaque, 100 = invisible">
+          Transparency{" "}
+          <input type="number" min={0} max={100} step={5} value={Math.round(s.transparency * 100)} style={{ width: 55 }} data-testid="hatch-transparency" onChange={(e) => set({ transparency: Math.max(0, Math.min(1, (Number(e.target.value) || 0) / 100)) })} />%
+        </label>
+        {s.kind === "pattern" && (
+          <label title="Colour filled behind the pattern lines">
+            <input type="checkbox" checked={s.backgroundColor !== ""} data-testid="hatch-bg-on" onChange={(e) => set({ backgroundColor: e.target.checked ? "#ffffcc" : "" })} /> Background{" "}
+            <input type="color" value={s.backgroundColor || "#ffffcc"} disabled={s.backgroundColor === ""} data-testid="hatch-bg" onChange={(e) => set({ backgroundColor: e.target.value })} />
+          </label>
+        )}
+      </div>
       <div className="fill-row">
         <label>
           Islands{" "}

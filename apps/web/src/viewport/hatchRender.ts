@@ -1,5 +1,5 @@
 import type { HatchEntity } from "@sketchor/core";
-import { hatchFillCached, hatchPolygons, paintedPolygons } from "@sketchor/core";
+import { gradientSpec, hatchFillCached, hatchPolygons, paintedPolygons } from "@sketchor/core";
 import { worldToScreen, type View } from "./view";
 
 /**
@@ -56,15 +56,22 @@ export function drawHatchEntity(ctx: CanvasRenderingContext2D, view: View, h: Ha
       maxY = Math.max(maxY, q.y);
     }
     if (Number.isFinite(minX)) {
-      const a = (p.angle * Math.PI) / 180;
-      const c = worldToScreen(view, { x: (minX + maxX) / 2, y: (minY + maxY) / 2 });
-      const half = (Math.abs(Math.cos(a)) * (maxX - minX) + Math.abs(Math.sin(a)) * (maxY - minY)) * view.scale * 0.5;
-      const dx = Math.cos(a) * half;
-      const dy = -Math.sin(a) * half;
-      const g = ctx.createLinearGradient(c.x - dx, c.y - dy, c.x + dx, c.y + dy);
-      g.addColorStop(0, p.colors[0]);
-      g.addColorStop(1, p.colors[1] ?? "#ffffff");
-      ctx.fillStyle = g;
+      const spec = gradientSpec(p, { minX, minY, maxX, maxY });
+      if (spec) {
+        const P = (x: number, y: number) => worldToScreen(view, { x, y });
+        let g: CanvasGradient;
+        if (spec.kind === "linear") {
+          const a = P(spec.x1, spec.y1);
+          const b = P(spec.x2, spec.y2);
+          g = ctx.createLinearGradient(a.x, a.y, b.x, b.y);
+        } else {
+          const c = P(spec.cx, spec.cy);
+          const f = P(spec.fx, spec.fy);
+          g = ctx.createRadialGradient(f.x, f.y, 0, c.x, c.y, spec.r * view.scale);
+        }
+        for (const st of spec.stops) g.addColorStop(st.t, st.color);
+        ctx.fillStyle = g;
+      }
       regionPath(ctx, view, h);
       ctx.fill("evenodd");
     }

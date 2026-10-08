@@ -759,6 +759,12 @@ export interface HatchSettings {
   gradientName: string;
   gradientColors: [string, string];
   gradientAngle: number;
+  gradientCentered: boolean;
+  gradientShift: number;
+  /** 0 (opaque) .. 1 (invisible). */
+  transparency: number;
+  /** Fill behind a pattern; empty = none. */
+  backgroundColor: string;
   style: "normal" | "outer" | "ignore";
   /** HPGAPTOL: endpoints this close count as joined (world units). */
   gapTol: number;
@@ -777,6 +783,10 @@ export const DEFAULT_HATCH_SETTINGS: HatchSettings = {
   gradientName: "LINEAR",
   gradientColors: ["#2f6fdb", "#ffffff"],
   gradientAngle: 0,
+  gradientCentered: true,
+  gradientShift: 0.3,
+  transparency: 0,
+  backgroundColor: "",
   style: "normal",
   gapTol: 0,
   associative: true,

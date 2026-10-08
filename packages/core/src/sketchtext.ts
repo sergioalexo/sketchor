@@ -696,6 +696,10 @@ export function diffToCommands(doc: SketchDocument, parsed: ParsedEntity[]): Com
           // Code carries neither a pattern's own line families nor association/background: keep them.
           const ex = existing.paint;
           if (ex.kind === "pattern" && updated.paint.kind === "pattern" && ex.name === updated.paint.name && ex.def) updated.paint.def = ex.def;
+          if (ex.kind === "gradient" && updated.paint.kind === "gradient") {
+            if (ex.centered !== undefined) updated.paint.centered = ex.centered;
+            if (ex.shift !== undefined) updated.paint.shift = ex.shift;
+          }
           if (existing.associative !== undefined) updated.associative = existing.associative;
           if (existing.sources) updated.sources = existing.sources;
           if (existing.boundaryLost) updated.boundaryLost = existing.boundaryLost;

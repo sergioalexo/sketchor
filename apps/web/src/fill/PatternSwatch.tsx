@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { hatchFill, loopFromPoints, lookupPattern, type HatchPaint, type PatternFamily } from "@sketchor/core";
+import { gradientSpec, hatchFill, loopFromPoints, lookupPattern, type HatchPaint, type PatternFamily } from "@sketchor/core";
 
 /**
  * A small canvas showing a hatch paint, drawn by the same engine as the
@@ -22,9 +22,10 @@ export function PatternSwatch({ paint, families, width = 96, height = 56 }: { pa
       return;
     }
     if (paint.kind === "gradient") {
-      const g = ctx.createLinearGradient(0, 0, W, 0);
-      g.addColorStop(0, paint.colors[0]);
-      g.addColorStop(1, paint.colors[1] ?? "#fff");
+      const spec = gradientSpec(paint, { minX: 0, minY: 0, maxX: W, maxY: H });
+      if (!spec) return;
+      const g = spec.kind === "linear" ? ctx.createLinearGradient(spec.x1, H - spec.y1, spec.x2, H - spec.y2) : ctx.createRadialGradient(spec.fx, H - spec.fy, 0, spec.cx, H - spec.cy, spec.r);
+      for (const st of spec.stops) g.addColorStop(st.t, st.color);
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, W, H);
       return;

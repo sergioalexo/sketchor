@@ -17,16 +17,16 @@ import { layerProp, type Pick, type Tool, type ToolContext } from "./tool";
 
 export function paintFromSettings(s: HatchSettings): HatchPaint {
   if (s.kind === "solid") return { kind: "solid", color: s.solidColor };
-  if (s.kind === "gradient") return { kind: "gradient", name: s.gradientName, colors: [s.gradientColors[0], s.gradientColors[1]], angle: s.gradientAngle };
+  if (s.kind === "gradient") return { kind: "gradient", name: s.gradientName, colors: [s.gradientColors[0], s.gradientColors[1]], angle: s.gradientAngle, centered: s.gradientCentered, shift: s.gradientShift };
   return { kind: "pattern", name: s.pattern, scale: s.scale, angle: s.angle };
 }
 
 /** Panel settings that reproduce an existing hatch's paint. */
 export function settingsFromHatch(h: HatchEntity): Partial<HatchSettings> {
   const p = h.paint;
-  const base = { style: h.style };
+  const base = { style: h.style, transparency: h.transparency ?? 0, backgroundColor: h.backgroundColor ?? "" };
   if (p.kind === "solid") return { ...base, kind: "solid", solidColor: p.color };
-  if (p.kind === "gradient") return { ...base, kind: "gradient", gradientName: p.name, gradientColors: [p.colors[0], p.colors[1] ?? "#ffffff"], gradientAngle: p.angle };
+  if (p.kind === "gradient") return { ...base, kind: "gradient", gradientName: p.name, gradientColors: [p.colors[0], p.colors[1] ?? "#ffffff"], gradientAngle: p.angle, gradientCentered: p.centered !== false, gradientShift: p.shift ?? 0.3 };
   return { ...base, kind: "pattern", pattern: p.name, scale: p.scale, angle: p.angle };
 }
 
@@ -72,6 +72,8 @@ export class HatchTool implements Tool {
       loops,
       paint: paintFromSettings(s),
       style: s.style,
+      ...(s.transparency > 0 ? { transparency: s.transparency } : {}),
+      ...(s.backgroundColor && s.kind === "pattern" ? { backgroundColor: s.backgroundColor } : {}),
       ...(sources.length ? { sources } : {}),
       ...(sources.length && s.associative ? { associative: true } : {}),
     } as HatchEntity;

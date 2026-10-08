@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import type { Command, Entity, PolylineEntity, SplineEntity } from "@sketchor/core";
-import { entityArea, entityLength, arcPointAt, arcSweep, bulgeToArc, BUILTIN_LINETYPES, dist, ellipseSweep, nurbsDomain, nurbsPointAt, findClosedRegions, isFullEllipse, layerOf, polylineLength, addSplinePoint, polylineToSpline, rebuildSpline, refitSpline, removeSplinePoint, splineToControlPoints, splineToPolyline } from "@sketchor/core";
+import type { Command, Entity, HatchEntity, PolylineEntity, SplineEntity } from "@sketchor/core";
+import { GRADIENT_NAMES, entityArea, entityLength, arcPointAt, arcSweep, bulgeToArc, BUILTIN_LINETYPES, dist, ellipseSweep, nurbsDomain, nurbsPointAt, findClosedRegions, isFullEllipse, layerOf, polylineLength, addSplinePoint, polylineToSpline, rebuildSpline, refitSpline, removeSplinePoint, splineToControlPoints, splineToPolyline } from "@sketchor/core";
 import { bus, doc, useApp } from "../state/store";
 import { parseLength } from "../tools/typedInput";
 import { factorFromMm, formatArea, formatLength, type DisplayUnit } from "../units";
@@ -291,7 +291,30 @@ function Geometry({ entity, unit }: { entity: Entity; unit: DisplayUnit }) {
           ) : p.kind === "solid" ? (
             <ReadRow label="Solid colour" value={p.color} />
           ) : (
-            <ReadRow label="Gradient" value={p.name} />
+            <>
+              <Row label="Gradient">
+                <select value={p.name.toUpperCase()} data-testid="prop-hatch-gradient" onChange={(e) => update({ ...entity, paint: { ...p, name: e.target.value } })}>
+                  {GRADIENT_NAMES.map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </Row>
+              <NumberRow label="Angle" value={round(p.angle)} suffix="°" testId="prop-hatch-grad-angle" onCommit={(v) => update({ ...entity, paint: { ...p, angle: v } })} />
+              <Row label="Colour 1">
+                <TextField value={p.colors[0]} testId="prop-hatch-grad-c1" onCommit={(v) => v && update({ ...entity, paint: { ...p, colors: [v, p.colors[1]] } })} />
+              </Row>
+              <Row label="Colour 2">
+                <TextField value={p.colors[1] ?? ""} testId="prop-hatch-grad-c2" onCommit={(v) => update({ ...entity, paint: { ...p, colors: v ? [p.colors[0], v] : [p.colors[0]] } })} />
+              </Row>
+            </>
+          )}
+          <NumberRow label="Transparency" value={Math.round((entity.transparency ?? 0) * 100)} suffix="%" testId="prop-hatch-transparency" onCommit={(v) => update(withTransparency(entity, Math.max(0, Math.min(100, v)) / 100))} />
+          {p.kind === "pattern" && (
+            <Row label="Background">
+              <TextField value={entity.backgroundColor ?? ""} testId="prop-hatch-bg" onCommit={(v) => update(withBackground(entity, v))} />
+            </Row>
           )}
           <Row label="Islands">
             <select
@@ -681,4 +704,16 @@ function PointRow({ label, p, unit, onCommit, testId }: { label: string; p: { x:
 
 function fmtPoint(p: { x: number; y: number }, unit: DisplayUnit): string {
   return `${formatLength(p.x, unit)}, ${formatLength(p.y, unit)}`;
+}
+
+function withTransparency(h: HatchEntity, t: number): HatchEntity {
+  const { transparency: _t, ...rest } = h;
+  void _t;
+  return t > 0 ? { ...rest, transparency: t } : rest;
+}
+
+function withBackground(h: HatchEntity, color: string): HatchEntity {
+  const { backgroundColor: _b, ...rest } = h;
+  void _b;
+  return color ? { ...rest, backgroundColor: color } : rest;
 }
