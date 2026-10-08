@@ -77,8 +77,14 @@ same or it evaluates to a marker cross. Editing a definition (`update-block`)
 changes `tablesRevision`, which invalidates every cached evaluation, so all
 instances update live. The block commands (`define-block`, `update-block`,
 `rename-block`, `delete-block`, `explode-insert`) are macros in `ops.ts` that
-expand into table/entity commands. Exporters don't write blocks yet (B-08): save
-and print pass entities through `flattenInserts`. Any new field that names a
+expand into table/entity commands. Writers take the definitions as an option
+(`entitiesToDxf2018({blocks})`, `entitiesToDxf(..., blocks)`, SVG
+`{blocks}` → `<symbol>`/`<use>`); `io/drawingFile.ts serialize()` keeps blocks for
+DXF 2018 and plain SVG, while R12, laser SVG and print still pass entities
+through `flattenInserts`. `parseDxf` keeps BLOCKS/INSERT by default
+(`{blocks:"explode"}` for callers with no block host: thumbnails, overlays);
+a unit rescale must use `scaleEntityKeepingInserts` + `scaleBlockDefinition`,
+never `transformed` on an insert (its scale is a ratio). Any new field that names a
 block must register a `registerEntityRefRewriter("blocks", …)`.
 
 **Block editor (B-04):** editing a definition opens a `DocSession` with

@@ -28,7 +28,7 @@ export function insertMatrix(insert: Pick<InsertEntity, "insert" | "scale" | "ro
   return [a, b, c, d, tx - (a * basePoint.x + c * basePoint.y), ty - (b * basePoint.x + d * basePoint.y)];
 }
 
-const mapPoint = (m: Affine, p: Point): Point => ({ x: m[0] * p.x + m[2] * p.y + m[4], y: m[1] * p.x + m[3] * p.y + m[5] });
+export const mapPoint = (m: Affine, p: Point): Point => ({ x: m[0] * p.x + m[2] * p.y + m[4], y: m[1] * p.x + m[3] * p.y + m[5] });
 
 /** The entity under `m`, whatever that takes: a circle/arc under uneven scale becomes an ellipse, anything else unrepresentable falls back to its outline. */
 export function applyAffine(e: Entity, m: Affine): Entity {

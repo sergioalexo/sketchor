@@ -9,6 +9,8 @@ import { kindTessellate } from "./kinds/registry";
 import { bezierPieces, tessellateNurbs } from "./nurbs";
 import type { Declarations, StyleRule } from "./svgStyle";
 import { INHERITED_PROPS, STYLE_PROPS, isBlack, nearestLinetype, paintColor, parseDashArray, parseDeclarations, parseFontSize, parseStyleSheet, parseUserLength } from "./svgStyle";
+import type { BlockDefinition } from "./blocks/types";
+import { attributeTexts, evaluateInsert, insertMatrix } from "./blocks/evaluate";
 import { ellipsePointAt, ellipseSweep, isFullEllipse, transformEllipse } from "./ellipse";
 
 /**
@@ -30,6 +32,11 @@ function escapeXml(s: string): string {
 /* -------------------------------- export -------------------------------- */
 
 export interface SvgExportOptions {
+  /**
+   * B-08: block definitions (mm). Inserts naming one are written as a `<use>` of a shared `<symbol>` instead of being
+   * expanded — lossless and far smaller for repeated parts. Without it, callers pass inserts through `flattenInserts`.
+   */
+  blocks?: readonly BlockDefinition[];
   /** World-unit margin added around the drawing's bounds. */
   padding?: number;
   strokeColor?: string;
@@ -152,7 +159,10 @@ export function entitiesToSvgDocument(entities: Entity[], opts: SvgExportOptions
   const strokeWidth = laser ? 0.01 : (opts.strokeWidth ?? Math.max(0.2, padding / 20));
   const fillOpacity = opts.fillOpacity ?? 0.3;
 
-  const b = boundsOf(entities) ?? { minX: 0, minY: 0, maxX: 100, maxY: 100 };
+  const blockDefs = new Map((opts.blocks ?? []).map((d) => [d.name, d] as const));
+  const host = { getRecord: (_t: string, name: string) => blockDefs.get(name), tablesRevision: 0 };
+  const flatForBounds = blockDefs.size === 0 ? entities : entities.flatMap((e) => (e.type === "insert" ? evaluateInsert(host, e) : [e]));
+  const b = boundsOf(flatForBounds) ?? { minX: 0, minY: 0, maxX: 100, maxY: 100 };
   const minX = b.minX - padding;
   const minY = b.minY - padding;
   const width = Math.max(b.maxX - b.minX + padding * 2, 1e-6);
@@ -191,9 +201,9 @@ export function entitiesToSvgDocument(entities: Entity[], opts: SvgExportOptions
 
   // H-09: hatches. A pattern is explicit strokes (already clipped to the region), a solid a flat even-odd
   // path, a gradient a real <linearGradient>/<radialGradient>; transparency is group opacity.
-  const defs: string[] = [];
+  const gradDefs: string[] = [];
   let gradientIndex = 0;
-  const hatchSvg = (h: HatchEntity): string => {
+  const hatchSvg = (h: HatchEntity, toSvg: (p: Point) => Point): string => {
     const art = hatchArt(h);
     const col = h.color ? escapeXml(h.color) : stroke;
     if (!art) return "";
@@ -210,11 +220,11 @@ export function entitiesToSvgDocument(entities: Entity[], opts: SvgExportOptions
       if (s.kind === "linear") {
         const p1 = toSvg({ x: s.x1, y: s.y1 });
         const p2 = toSvg({ x: s.x2, y: s.y2 });
-        defs.push(`<linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="${fmt(p1.x)}" y1="${fmt(p1.y)}" x2="${fmt(p2.x)}" y2="${fmt(p2.y)}">${stops}</linearGradient>`);
+        gradDefs.push(`<linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="${fmt(p1.x)}" y1="${fmt(p1.y)}" x2="${fmt(p2.x)}" y2="${fmt(p2.y)}">${stops}</linearGradient>`);
       } else {
         const c = toSvg({ x: s.cx, y: s.cy });
         const f = toSvg({ x: s.fx, y: s.fy });
-        defs.push(`<radialGradient id="${id}" gradientUnits="userSpaceOnUse" cx="${fmt(c.x)}" cy="${fmt(c.y)}" r="${fmt(s.r)}" fx="${fmt(f.x)}" fy="${fmt(f.y)}">${stops}</radialGradient>`);
+        gradDefs.push(`<radialGradient id="${id}" gradientUnits="userSpaceOnUse" cx="${fmt(c.x)}" cy="${fmt(c.y)}" r="${fmt(s.r)}" fx="${fmt(f.x)}" fy="${fmt(f.y)}">${stops}</radialGradient>`);
       }
       parts.push(`<path d="${d}" fill="url(#${id})" fill-rule="evenodd" stroke="none"/>`);
     } else if (a.kind === "tint") {
@@ -240,11 +250,28 @@ export function entitiesToSvgDocument(entities: Entity[], opts: SvgExportOptions
     return parts.length > 1 || opacity ? `<g${opacity}>${parts.join("")}</g>` : parts.join("");
   };
 
-  const groups: string[] = [];
-  let layerIndex = 0;
-  for (const [layer, ents] of byLayer) {
-    const body: string[] = [];
-    for (const e of ents) {
+  const usedBlocks = new Set<string>();
+  // Draws one entity (in the coordinate frame `toSvg` maps to) into `body`; shared by the layer groups and the block symbols.
+  const emitEntity = (e: Entity, toSvg: (p: Point) => Point, body: string[], useSymbols: boolean): void => {
+    if (e.type === "insert") {
+      const def = blockDefs.get(e.block);
+      if (!def) return;
+      usedBlocks.add(def.name);
+      const arr = e.array;
+      const cols = Math.max(1, Math.round(arr?.cols ?? 1));
+      const rows = Math.max(1, Math.round(arr?.rows ?? 1));
+      for (let c = 0; c < cols; c++) {
+        for (let r = 0; r < rows; r++) {
+          const m = insertMatrix(e, def.basePoint, c * (arr?.colSpacing ?? 0), r * (arr?.rowSpacing ?? 0));
+          // symbol space is world space with Y negated; the use maps it to SVG space
+          const t = useSymbols ? [m[0], -m[1], -m[2], m[3], m[4] - minX, minY + height - m[5]] : [m[0], -m[1], -m[2], m[3], m[4], -m[5]];
+          body.push(`<use href="#blk-${escapeXml(def.name)}" transform="matrix(${t.map(fmt).join(" ")})"/>`);
+        }
+      }
+      let n = 0;
+      for (const t of attributeTexts(host, e, () => `attr-${n++}`)) emitEntity(t, toSvg, body, useSymbols);
+      return;
+    }
       if (e.type === "line") {
         const a = toSvg(e.a);
         const c = toSvg(e.b);
@@ -284,7 +311,7 @@ export function entitiesToSvgDocument(entities: Entity[], opts: SvgExportOptions
       } else if (e.type === "polyline") {
         body.push(`<path d="${polylinePathD(e, toSvg)}"${paint(e)}/>`);
       } else if (e.type === "hatch") {
-        body.push(hatchSvg(e));
+        body.push(hatchSvg(e, toSvg));
       } else {
         // A kind outside the built-in seven (kinds/registry.ts): its tessellation, one path per run.
         for (const run of kindTessellate(e, 0.01)) {
@@ -296,11 +323,38 @@ export function entitiesToSvgDocument(entities: Entity[], opts: SvgExportOptions
           body.push(`<path d="${d.join(" ")}"${paint(e as Entity)}/>`);
         }
       }
-    }
+    
+  };
+
+  const groups: string[] = [];
+  let layerIndex = 0;
+  for (const [layer, ents] of byLayer) {
+    const body: string[] = [];
+    for (const e of ents) emitEntity(e, toSvg, body, true);
     // An Inkscape-compatible layer (groupmode + label), plus Sketchor's own data-layer for exact re-import.
     const colour = laser ? ` stroke="${LASER_LAYER_COLORS[layerIndex % LASER_LAYER_COLORS.length]}"` : "";
     layerIndex++;
     groups.push(`<g data-layer="${escapeXml(layer)}" inkscape:groupmode="layer" inkscape:label="${escapeXml(layer)}"${colour}>${body.join("")}</g>`);
+  }
+
+  // One <symbol> per block actually used (nested blocks discovered while drawing the symbols are queued too).
+  const symbolDefs: string[] = [];
+  const done = new Set<string>();
+  const flipY = (p: Point): Point => ({ x: p.x, y: -p.y });
+  for (let progress = true; progress; ) {
+    progress = false;
+    for (const name of [...usedBlocks]) {
+      if (done.has(name)) continue;
+      done.add(name);
+      progress = true;
+      const body: string[] = [];
+      for (const e of blockDefs.get(name)!.entities) {
+        if (e.type === "line" && e.infinite) continue;
+        if (laser && (e.type === "text" || e.type === "point" || e.type === "hatch" || ("construction" in e && e.construction))) continue;
+        emitEntity(e, flipY, body, false);
+      }
+      symbolDefs.push(`<symbol id="blk-${escapeXml(name)}" overflow="visible">${body.join("")}</symbol>`);
+    }
   }
 
   const unit = opts.unit ?? "mm";
@@ -309,7 +363,7 @@ export function entitiesToSvgDocument(entities: Entity[], opts: SvgExportOptions
     `<?xml version="1.0" encoding="UTF-8"?>\n` +
     `<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" width="${sizeOf(width)}" height="${sizeOf(height)}" ` +
     `viewBox="0 0 ${fmt(width)} ${fmt(height)}" stroke="${stroke}" stroke-width="${fmt(strokeWidth)}" fill="none">\n` +
-    (defs.length > 0 ? `<defs>${defs.join("")}</defs>\n` : "") +
+    ((gradDefs.length + symbolDefs.length) > 0 ? `<defs>${[...gradDefs, ...symbolDefs].join("")}</defs>\n` : "") +
     `${groups.join("\n")}\n</svg>\n`
   );
 }

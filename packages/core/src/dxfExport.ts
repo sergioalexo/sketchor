@@ -1,6 +1,9 @@
 import { explodeHatchEntities } from "./hatch/ops";
-import type { ArcEntity, CircleEntity, Entity, ImageEntity, LineEntity, PointEntity, PolylineEntity, TextEntity } from "./entities";
-import { imageCorners, layerOf, transformed } from "./entities";
+import type { ArcEntity, CircleEntity, Entity, ImageEntity, InsertEntity, LineEntity, PointEntity, PolylineEntity, TextEntity } from "./entities";
+import { imageCorners, layerOf } from "./entities";
+import type { BlockDefinition } from "./blocks/types";
+import { attribFlags, insertAttribRecords } from "./blocks/attributes";
+import { scaleBlockDefinition, scaleEntityKeepingInserts } from "./dxf";
 import { dist } from "./geometry";
 import { boundsOf } from "./dxf";
 import { kindTessellate } from "./kinds/registry";
@@ -8,8 +11,6 @@ import { nearestAci } from "./aci";
 import { escapeDxfText } from "./dxfText";
 import { unitsAndExtentsHeader } from "./dxfw/write";
 import { CONTINUOUS, builtinLinetype } from "./linetypes";
-
-const ORIGIN = { x: 0, y: 0 };
 
 /**
  * Writes a minimal but broadly-compatible ASCII DXF (AC1009 / R12), the
@@ -212,6 +213,53 @@ function tessellatedDxf(e: Entity): string {
     .join("");
 }
 
+/** B-08: an R12 INSERT (no handles), with ATTRIB records and SEQEND when the block has non-constant attributes. */
+function insertR12(e: InsertEntity, def: BlockDefinition): string {
+  const attribs = insertAttribRecords(def, e);
+  const arr = e.array && (e.array.cols > 1 || e.array.rows > 1) ? e.array : null;
+  let out =
+    `0\nINSERT\n` +
+    pair(8, layerOf(e)) +
+    colorGroup(e) +
+    linetypeGroups(e) +
+    (attribs.length > 0 ? `66\n1\n` : "") +
+    pair(2, e.block) +
+    pair(10, e.insert.x) + pair(20, e.insert.y) + pair(30, 0) +
+    pair(41, e.scale.x) + pair(42, e.scale.y) + pair(43, 1) +
+    pair(50, e.rotation * RAD_TO_DEG) +
+    (arr ? `70\n${Math.round(arr.cols)}\n71\n${Math.round(arr.rows)}\n` + pair(44, arr.colSpacing) + pair(45, arr.rowSpacing) : "");
+  for (const a of attribs) {
+    out +=
+      `0\nATTRIB\n` +
+      pair(8, layerOf(e)) +
+      pair(10, a.at.x) + pair(20, a.at.y) + pair(30, 0) +
+      pair(40, a.height) +
+      pair(1, a.value) +
+      pair(50, a.rotation * RAD_TO_DEG) +
+      pair(2, a.tag) +
+      `70\n${a.flags}\n`;
+  }
+  if (attribs.length > 0) out += `0\nSEQEND\n` + pair(8, layerOf(e));
+  return out;
+}
+
+function blockR12(d: BlockDefinition, write: (e: Entity) => string): string {
+  const attdefs = d.attributeDefs
+    .map(
+      (a) =>
+        `0\nATTDEF\n` + pair(8, "0") + pair(10, a.at.x) + pair(20, a.at.y) + pair(30, 0) + pair(40, a.height) + pair(1, a.default ?? "") + pair(50, a.rotation * RAD_TO_DEG) +
+        pair(3, a.prompt ?? a.tag) + pair(2, a.tag) + `70\n${attribFlags(a)}\n`,
+    )
+    .join("");
+  return (
+    `0\nBLOCK\n` + pair(8, "0") + pair(2, d.name) + `70\n${d.attributeDefs.length > 0 ? 2 : 0}\n` +
+    pair(10, d.basePoint.x) + pair(20, d.basePoint.y) + pair(30, 0) + pair(3, d.name) +
+    d.entities.map(write).join("") +
+    attdefs +
+    `0\nENDBLK\n` + pair(8, "0")
+  );
+}
+
 function entityDxf(e: Entity): string {
   switch (e.type) {
     case "line":
@@ -252,11 +300,14 @@ function entityDxf(e: Entity): string {
  * under an inches tag would silently produce a file 25.4x the wrong size.
  * Defaults to 1 (no rescaling, i.e. the file's numbers stay millimeters).
  */
-export function entitiesToDxf(entities: Entity[], insUnits = 0, scale = 1): string {
-  const scaled = scale !== 1 ? entities.map((e) => transformed(e, ORIGIN, 0, 0, 0, scale)) : entities;
-  const layers = [...new Set(scaled.map((e) => layerOf(e)))];
+export function entitiesToDxf(entities: Entity[], insUnits = 0, scale = 1, blocks: readonly BlockDefinition[] = []): string {
+  const scaled = scale !== 1 ? entities.map((e) => scaleEntityKeepingInserts(e, scale)) : entities;
+  const blockDefs = blocks.map((d) => (scale !== 1 ? scaleBlockDefinition(d, scale) : d));
+  const defByName = new Map(blockDefs.map((d) => [d.name, d]));
+  const everyEntity = [...scaled, ...blockDefs.flatMap((d) => d.entities)];
+  const layers = [...new Set(everyEntity.map((e) => layerOf(e)))];
   if (layers.length === 0) layers.push("0");
-  const linetypes = [...new Set(scaled.map((e) => e.linetype).filter((l): l is string => !!l))];
+  const linetypes = [...new Set(everyEntity.map((e) => e.linetype).filter((l): l is string => !!l))];
   const bounds = boundsOf(scaled.filter((e) => !(e.type === "line" && e.infinite))) ?? { minX: 0, minY: 0, maxX: 0, maxY: 0 };
 
   const header =
@@ -269,7 +320,13 @@ export function entitiesToDxf(entities: Entity[], insUnits = 0, scale = 1): stri
 
   // Infinite construction lines are drawing aids, not geometry: they stay out of the file.
   const exported = scaled.filter((e) => !(e.type === "line" && e.infinite));
-  const entitiesSection = `0\nSECTION\n2\nENTITIES\n${exported.map(entityDxf).join("")}0\nENDSEC\n`;
+  const write = (e: Entity): string => {
+    if (e.type !== "insert") return entityDxf(e);
+    const def = defByName.get(e.block);
+    return def ? insertR12(e, def) : ""; // an insert of an unknown block draws nothing
+  };
+  const blocksSection = blockDefs.length === 0 ? "" : `0\nSECTION\n2\nBLOCKS\n${blockDefs.map((d) => blockR12(d, write)).join("")}0\nENDSEC\n`;
+  const entitiesSection = `0\nSECTION\n2\nENTITIES\n${exported.map(write).join("")}0\nENDSEC\n`;
 
-  return `${header}${tables}${entitiesSection}0\nEOF\n`;
+  return `${header}${tables}${blocksSection}${entitiesSection}0\nEOF\n`;
 }

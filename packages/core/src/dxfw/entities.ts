@@ -40,7 +40,7 @@ function linetypeGroups(e: Entity): string {
  * common head every AC1032 entity record opens with, before its
  * subclass-specific groups.
  */
-function entityHead(handle: string, owner: string, e: Entity): string {
+export function entityHead(handle: string, owner: string, e: Entity): string {
   return `5\n${handle}\n330\n${owner}\n100\nAcDbEntity\n8\n${layerOf(e)}\n${colorGroups(e)}${linetypeGroups(e)}`;
 }
 

@@ -1,12 +1,13 @@
 import type { Entity } from "../entities";
-import { layerOf, transformed } from "../entities";
+import { layerOf } from "../entities";
+import type { BlockDefinition } from "../blocks/types";
+import { scaleBlockDefinition, scaleEntityKeepingInserts } from "../dxf";
+import { blockDefinitions2018, insertEntity2018, planBlockHandles, type BlockHandles } from "./blocks";
 import { boundsOf } from "../dxf";
 import { CONTINUOUS, builtinLinetype } from "../linetypes";
 import { HandleAllocator } from "./handles";
 import { entityDxf2018 } from "./entities";
 import { n, pair, unitsAndExtentsHeader } from "./write";
-
-const ORIGIN = { x: 0, y: 0 };
 
 /**
  * X-01: a modern DXF writer (AC1032 — "DXF 2018"), alongside the R12 writer
@@ -62,16 +63,18 @@ interface Plan {
   h: Record<HandleKey, string>;
   layerHandles: Map<string, string>;
   linetypeHandles: Map<string, string>;
+  blocks: Map<string, BlockHandles>;
 }
 
-function buildPlan(layers: string[], linetypes: readonly string[]): Plan {
+function buildPlan(layers: string[], linetypes: readonly string[], blockDefs: readonly BlockDefinition[]): Plan {
   const alloc = new HandleAllocator();
   const h = {} as Record<HandleKey, string>;
   for (const key of STANDARD_HANDLES) h[key] = alloc.alloc();
   const layerHandles = new Map(layers.map((name) => [name, alloc.alloc()] as const));
   const ltypeNames = [CONTINUOUS, ...linetypes.filter((l) => l !== CONTINUOUS)];
   const linetypeHandles = new Map(ltypeNames.map((name) => [name, alloc.alloc()] as const));
-  return { alloc, h, layerHandles, linetypeHandles };
+  const blocks = planBlockHandles(blockDefs, () => alloc.alloc());
+  return { alloc, h, layerHandles, linetypeHandles, blocks };
 }
 
 function table(name: string, handle: string, entries: string[], extraHeader = ""): string {
@@ -145,7 +148,7 @@ function header(insUnits: number, bounds: { minX: number; minY: number; maxX: nu
   );
 }
 
-function tablesSection(plan: Plan, layers: string[]): string {
+function tablesSection(plan: Plan, layers: string[], blockDefs: readonly BlockDefinition[]): string {
   const { h, layerHandles, linetypeHandles } = plan;
   const layerEntries = layers.map((name) => layerEntry(layerHandles.get(name)!, h.layerTable, name));
   const ltypeEntries = [...linetypeHandles].map(([name, handle]) => ltypeEntry(handle, h.ltypeTable, name));
@@ -165,6 +168,7 @@ function tablesSection(plan: Plan, layers: string[]): string {
     table("BLOCK_RECORD", h.blockRecordTable, [
       blockRecordEntry(h.modelSpaceBlockRecord, h.blockRecordTable, "*Model_Space"),
       blockRecordEntry(h.paperSpaceBlockRecord, h.blockRecordTable, "*Paper_Space"),
+      ...blockDefs.map((d) => blockRecordEntry(plan.blocks.get(d.name)!.record, h.blockRecordTable, d.name)),
     ]) +
     `0\nENDSEC\n`
   );
@@ -178,12 +182,13 @@ function blockBeginEnd(beginH: string, endH: string, recordH: string, name: stri
   );
 }
 
-function blocksSection(plan: Plan): string {
+function blocksSection(plan: Plan, userBlocks: string): string {
   const { h } = plan;
   return (
     `0\nSECTION\n2\nBLOCKS\n` +
     blockBeginEnd(h.modelSpaceBlockBegin, h.modelSpaceBlockEnd, h.modelSpaceBlockRecord, "*Model_Space") +
     blockBeginEnd(h.paperSpaceBlockBegin, h.paperSpaceBlockEnd, h.paperSpaceBlockRecord, "*Paper_Space") +
+    userBlocks +
     `0\nENDSEC\n`
   );
 }
@@ -221,6 +226,8 @@ export interface DxfWriteOptions2018 {
   insUnits?: number;
   /** Factor applied to every coordinate/radius before writing — see `entitiesToDxf`'s doc in dxfExport.ts. Default 1. */
   scale?: number;
+  /** B-08: the drawing's block definitions (mm, like the entities). Inserts naming one are written as INSERTs; without them (or for an unknown name) inserts are the caller's to flatten. */
+  blocks?: readonly BlockDefinition[];
 }
 
 /**
@@ -231,27 +238,37 @@ export interface DxfWriteOptions2018 {
  */
 export function entitiesToDxf2018(entities: Entity[], options: DxfWriteOptions2018 = {}): string {
   const { insUnits = 0, scale = 1 } = options;
-  const scaled = scale !== 1 ? entities.map((e) => transformed(e, ORIGIN, 0, 0, 0, scale)) : entities;
-  const layers = [...new Set(scaled.map((e) => layerOf(e)))];
+  const blockDefs = (options.blocks ?? []).map((d) => (scale !== 1 ? scaleBlockDefinition(d, scale) : d));
+  const defByName = new Map(blockDefs.map((d) => [d.name, d]));
+  const scaled = scale !== 1 ? entities.map((e) => scaleEntityKeepingInserts(e, scale)) : entities;
+  const everyEntity = [...scaled, ...blockDefs.flatMap((d) => d.entities)];
+  const layers = [...new Set(everyEntity.map((e) => layerOf(e)))];
   if (layers.length === 0) layers.push("0");
-  const linetypes = [...new Set(scaled.map((e) => e.linetype).filter((l): l is string => !!l))];
+  const linetypes = [...new Set(everyEntity.map((e) => e.linetype).filter((l): l is string => !!l))];
   const bounds = boundsOf(scaled.filter((e) => !(e.type === "line" && e.infinite))) ?? { minX: 0, minY: 0, maxX: 0, maxY: 0 };
 
-  const plan = buildPlan(layers, linetypes);
+  const plan = buildPlan(layers, linetypes, blockDefs);
+  const next = () => plan.alloc.alloc();
+  const write = (e: Entity, owner: string): string => {
+    if (e.type === "insert") {
+      const def = defByName.get(e.block);
+      return def ? insertEntity2018(e, def, next(), owner, next) : ""; // an insert of an unknown block draws nothing
+    }
+    return entityDxf2018(e, next(), owner, next);
+  };
+  const userBlocks = blockDefinitions2018(blockDefs, plan.blocks, next, write);
 
   // Infinite construction lines are drawing aids, not geometry: they stay out of the file (same rule as R12).
   const exported = scaled.filter((e) => !(e.type === "line" && e.infinite));
-  const entitiesText = exported
-    .map((e) => entityDxf2018(e, plan.alloc.alloc(), plan.h.modelSpaceBlockRecord, () => plan.alloc.alloc()))
-    .join("");
+  const entitiesText = exported.map((e) => write(e, plan.h.modelSpaceBlockRecord)).join("");
 
   const objects = objectsSection(plan);
 
   return (
     header(insUnits, bounds, plan.alloc.seed()) +
     `0\nSECTION\n2\nCLASSES\n0\nENDSEC\n` +
-    tablesSection(plan, layers) +
-    blocksSection(plan) +
+    tablesSection(plan, layers, blockDefs) +
+    blocksSection(plan, userBlocks) +
     `0\nSECTION\n2\nENTITIES\n${entitiesText}0\nENDSEC\n` +
     objects +
     `0\nEOF\n`

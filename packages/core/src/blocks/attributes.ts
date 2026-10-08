@@ -1,7 +1,8 @@
 import type { SketchDocument } from "../document";
 import type { InsertEntity } from "../entities";
-import { attributeValue, getBlock } from "./evaluate";
-import type { AttributeDef } from "./types";
+import { attributeValue, getBlock, insertMatrix, mapPoint } from "./evaluate";
+import type { Point } from "../geometry";
+import type { AttributeDef, BlockDefinition } from "./types";
 
 /**
  * B-05: attribute extraction (title blocks, parts lists). One row per insert
@@ -80,4 +81,30 @@ export function withAttributeValues(insert: InsertEntity, values: Record<string,
 /** Attribute defs a user may edit on an instance (constant ones are fixed by the definition). */
 export function editableAttributes(doc: SketchDocument, insert: InsertEntity): AttributeDef[] {
   return ((getBlock(doc, insert.block)?.attributeDefs ?? []) as AttributeDef[]).filter((a) => !a.flags?.constant);
+}
+
+/** One attribute as a file writer needs it: the value an instance shows, at its world position (first array cell). */
+export interface AttribRecord {
+  tag: string;
+  value: string;
+  at: Point;
+  height: number;
+  rotation: number;
+  /** DXF group 70 bits: 1 invisible, 2 constant, 4 verify, 8 preset. */
+  flags: number;
+}
+
+export function attribFlags(a: AttributeDef): number {
+  const f = a.flags ?? {};
+  return (f.invisible ? 1 : 0) | (f.constant ? 2 : 0) | (f.verify ? 4 : 0) | (f.preset ? 8 : 0);
+}
+
+/** The ATTRIB records an INSERT of `def` carries. Constant attributes live only in the definition (no ATTRIB). */
+export function insertAttribRecords(def: BlockDefinition, insert: InsertEntity): AttribRecord[] {
+  const m = insertMatrix(insert, def.basePoint);
+  const rot = Math.atan2(m[1], m[0]);
+  const k = Math.hypot(m[2], m[3]);
+  return def.attributeDefs
+    .filter((a) => !a.flags?.constant)
+    .map((a) => ({ tag: a.tag, value: attributeValue(a, insert), at: mapPoint(m, a.at), height: a.height * k, rotation: a.rotation + rot, flags: attribFlags(a) }));
 }

@@ -1,4 +1,4 @@
-import { decodeDxfBytes, entitiesToDxf, entitiesToDxf2018, entitiesToSvgDocument, flattenInserts } from "@sketchor/core";
+import { type BlockDefinition, decodeDxfBytes, entitiesToDxf, entitiesToDxf2018, entitiesToSvgDocument, flattenInserts } from "@sketchor/core";
 import { DWG_UNREADABLE, dwgToDxfText } from "../browser/dwgImport";
 import { isModelFile, loadModel } from "../model3d/stepImport";
 import { EPS_UNSUPPORTED, acceptList, allExtensions, formatOf } from "./formats";
@@ -100,19 +100,23 @@ const OPEN_TYPES: PickerType[] = [
 const OPEN_ACCEPT = acceptList();
 
 function serialize(format: SaveFormat): string {
-  const entities = flattenInserts(doc, doc.all());
+  // B-08: real blocks go to AC1032 DXF and plain SVG. R12 is what CAM/laser shops read, and laser SVG is read by software that
+  // does not follow <use>, so those two stay flat (a "keep blocks" switch for R12 is still to come).
+  const blocks = doc.records("blocks") as BlockDefinition[];
+  const r12 = format === "dxf-r12" || (format === "dxf" && dxfSourceVersions.get(activeSessionId()) === "r12");
+  const keepBlocks = blocks.length > 0 && !r12 && format !== "svg-laser";
+  const entities = keepBlocks ? doc.all() : flattenInserts(doc, doc.all());
   if (format === "dxf" || format === "dxf-r12") {
     const displayUnit = useApp.getState().displayUnit;
     // Stored coordinates are always millimeters — rescale to match the
     // declared unit so the file's numbers represent real-world size.
     const insUnits = displayUnitToDxfCode(displayUnit);
     const scale = factorFromMm(displayUnit);
-    const r12 = format === "dxf-r12" || dxfSourceVersions.get(activeSessionId()) === "r12";
-    return r12 ? entitiesToDxf(entities, insUnits, scale) : entitiesToDxf2018(entities, { insUnits, scale });
+    return r12 ? entitiesToDxf(entities, insUnits, scale) : entitiesToDxf2018(entities, { insUnits, scale, ...(keepBlocks ? { blocks } : {}) });
   }
   // True physical size: inches only when the tab works in inches/feet.
   const displayUnit = useApp.getState().displayUnit;
-  return entitiesToSvgDocument(entities, { unit: displayUnit === "in" || displayUnit === "ft" ? "in" : "mm", mode: format === "svg-laser" ? "laser" : "document" });
+  return entitiesToSvgDocument(entities, { unit: displayUnit === "in" || displayUnit === "ft" ? "in" : "mm", mode: format === "svg-laser" ? "laser" : "document", ...(keepBlocks ? { blocks } : {}) });
 }
 
 /* ----------------------------- save targets ----------------------------- */
