@@ -1,4 +1,5 @@
 import { settingsFromHatch } from "../tools/hatchTool";
+import { hatchesTinted } from "./hatchRender";
 import { useEffect, useRef, useState } from "react";
 import type { BoxSelectMode, ClosedRegion, Command, Entity, EntityId, Point, TextEntity } from "@sketchor/core";
 import {
@@ -458,6 +459,7 @@ export function Viewport() {
             }
           : null,
     });
+    useApp.getState().setHatchTinted(hatchesTinted());
   };
 
   /** What a framework tool may touch (see ../tools/tool.ts). Stable for the component's life. */

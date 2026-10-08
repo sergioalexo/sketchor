@@ -723,6 +723,7 @@ export function App() {
   const activeSessionId = useApp((s) => s.activeSessionId);
   const activeSession = getSessions().find((s) => s.id === activeSessionId);
   // A STEP/IGES tab swaps the drawing canvas for the 3D viewer (see model3d/).
+  const hatchTinted = useApp((s) => s.hatchTinted);
   const modelTab = isModelSession(activeSession);
   // Attribute fields ({{filename}}) read the file name of the drawing being worked on (a block-editor tab uses its drawing's).
   const fileNameForFields = activeSession?.blockEdit ? getSessions().find((s) => s.id === activeSession.blockEdit?.parentId)?.name : activeSession?.name;
@@ -1401,6 +1402,11 @@ export function App() {
           {cursor ? `${formatLength(cursor.x, displayUnit)}, ${formatLength(cursor.y, displayUnit)}` : "--, --"}
         </span>
         <span>{Math.round(zoom * 100)}%</span>
+        {hatchTinted && (
+          <span data-testid="hatch-tinted" title="Hatch lines closer than a few pixels (or too many to draw) are shown as an average tone; zoom in to see the pattern">
+            Hatch shown as tint
+          </span>
+        )}
         <select
           className="unit-select"
           data-testid="unit-select"

@@ -22,7 +22,7 @@ import type { MeasureResult } from "../state/store";
 import { gridStep, worldToScreen, type View } from "./view";
 import type { Snap } from "./snapping";
 import { getCachedImage } from "./imageCache";
-import { drawHatchEntity } from "./hatchRender";
+import { beginHatchFrame, drawHatchEntity } from "./hatchRender";
 
 /** A pending rigid transform (rotate about a pivot) previewed dashed over the real geometry. */
 export interface TransformPreview {
@@ -129,6 +129,7 @@ export function render(
 
   if (ui.closedRegions.length > 0) drawClosedRegions(ctx, view, ui.closedRegions);
 
+  beginHatchFrame();
   const ltscale = doc.settings.ltscale ?? 1;
   const everything = doc.all();
   // H-08: lower drawOrder first (stable), so a hatch can sit behind its boundary.

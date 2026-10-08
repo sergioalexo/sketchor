@@ -24,6 +24,15 @@ function regionPath(ctx: CanvasRenderingContext2D, view: View, h: HatchEntity): 
   }
 }
 
+let tintedThisFrame = 0;
+/** Call at the start of a frame; `hatchesTinted()` then says whether any hatch drawn since was summarised as a tint (H-02 status-bar notice). */
+export function beginHatchFrame(): void {
+  tintedThisFrame = 0;
+}
+export function hatchesTinted(): boolean {
+  return tintedThisFrame > 0;
+}
+
 export interface HatchDrawResult {
   /** The pattern was summarised as a tint (zoomed out or too dense) — the status bar can say so. */
   tinted: boolean;
@@ -126,5 +135,6 @@ export function drawHatchEntity(ctx: CanvasRenderingContext2D, view: View, h: Ha
     ctx.stroke();
   }
   ctx.restore();
+  if (tinted) tintedThisFrame++;
   return { tinted };
 }

@@ -882,6 +882,9 @@ interface AppState {
   setHatchSettings: (patch: Partial<HatchSettings>) => void;
   /** An existing hatch being edited with the Hatch panel (double-click / Properties → Edit), optionally waiting for an origin pick (H-08). */
   hatchEdit: { id: EntityId; pickOrigin: boolean } | null;
+  /** The last frame drew at least one hatch as an average-tone tint (zoomed out or too dense) — shown in the status bar. */
+  hatchTinted: boolean;
+  setHatchTinted: (v: boolean) => void;
   setHatchEdit: (v: { id: EntityId; pickOrigin: boolean } | null) => void;
   /** B-04: the block the active tab is editing (null in a normal drawing tab). */
   editingBlock: string | null;
@@ -1023,6 +1026,8 @@ export const useApp = create<AppState>((set, get) => ({
   hatchSettings: DEFAULT_HATCH_SETTINGS,
   setHatchSettings: (patch) => set((s) => ({ hatchSettings: { ...s.hatchSettings, ...patch } })),
   hatchEdit: null,
+  hatchTinted: false,
+  setHatchTinted: (hatchTinted) => set((s) => (s.hatchTinted === hatchTinted ? s : { hatchTinted })),
   setHatchEdit: (hatchEdit) => set({ hatchEdit }),
   editingBlock: null,
   insertSettings: DEFAULT_INSERT_SETTINGS,
