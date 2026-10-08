@@ -1,5 +1,5 @@
 import type { Entity, HatchEntity, HatchLoop, HatchPaint, Point } from "@sketchor/core";
-import { boundaryFromObjects, detectBoundary, newEntityId, nextEntityName } from "@sketchor/core";
+import { boundaryFromObjects, detectBoundary, ensurePatternRecord, newEntityId, nextEntityName } from "@sketchor/core";
 import { selectableEntities, useApp, type HatchSettings } from "../state/store";
 import { layerProp, type Pick, type Tool, type ToolContext } from "./tool";
 
@@ -78,7 +78,10 @@ export class HatchTool implements Tool {
   }
 
   private commit(ctx: ToolContext, found: { loops: HatchLoop[]; sources: string[] }): void {
-    ctx.execute({ type: "add-entity", entity: this.make(ctx, found.loops, found.sources, newEntityId()) });
+    const entity = this.make(ctx, found.loops, found.sources, newEntityId());
+    // A pattern outside the built-in library travels with the drawing (H-06).
+    const record = entity.paint.kind === "pattern" ? ensurePatternRecord(ctx.doc, entity.paint.name) : null;
+    ctx.execute(record ? { type: "batch", commands: [record, { type: "add-entity", entity }] } : { type: "add-entity", entity });
     this.pending = null;
     this.objects = [];
     this.cache = null;

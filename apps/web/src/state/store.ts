@@ -66,6 +66,7 @@ import {
   type SvgUnits,
   type PatternSpec,
   type Point,
+  syncDocPatterns,
 } from "@sketchor/core";
 
 /**
@@ -1123,7 +1124,9 @@ let unbindBus: (() => void) | null = null;
 /** Re-subscribes the revision/selection/dirty sync to whichever session's bus is now active. */
 function rebindBus(): void {
   unbindBus?.();
+  syncDocPatterns(doc);
   unbindBus = bus.onChange(() => {
+    syncDocPatterns(doc);
     syncFromBus();
     refreshLayers();
   });

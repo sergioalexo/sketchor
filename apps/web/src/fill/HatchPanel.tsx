@@ -1,7 +1,12 @@
-import { useEffect, useMemo, useRef } from "react";
-import { PALETTE, PATTERN_CATEGORIES, fillToHatch, hatchFill, loopFromPoints, lookupPattern, newEntityId, registeredPatterns, type Command, type HatchEntity } from "@sketchor/core";
+import { useMemo, useState } from "react";
+import { PALETTE, PATTERN_CATEGORIES, fillToHatch, lookupPattern, newEntityId, registeredPatterns, type Command, type HatchEntity } from "@sketchor/core";
 import { bus, doc, useApp, type HatchSettings } from "../state/store";
 import { paintFromSettings } from "../tools/hatchTool";
+import { PatternSwatch } from "./PatternSwatch";
+import { PatternLibrary } from "./PatternLibrary";
+import { loadUserPatterns } from "./userLibrary";
+
+loadUserPatterns();
 
 /**
  * Floating panel of the Hatch tool (H-04, replaces the old FillPanel): paint
@@ -12,52 +17,7 @@ import { paintFromSettings } from "../tools/hatchTool";
  */
 
 function Swatch({ s }: { s: HatchSettings }) {
-  const ref = useRef<HTMLCanvasElement>(null);
-  useEffect(() => {
-    const c = ref.current;
-    const ctx = c?.getContext("2d");
-    if (!c || !ctx) return;
-    const W = c.width;
-    const H = c.height;
-    ctx.clearRect(0, 0, W, H);
-    const paint = paintFromSettings(s);
-    if (paint.kind === "solid") {
-      ctx.fillStyle = paint.color;
-      ctx.fillRect(0, 0, W, H);
-      return;
-    }
-    if (paint.kind === "gradient") {
-      const g = ctx.createLinearGradient(0, 0, W, 0);
-      g.addColorStop(0, paint.colors[0]);
-      g.addColorStop(1, paint.colors[1] ?? "#fff");
-      ctx.fillStyle = g;
-      ctx.fillRect(0, 0, W, H);
-      return;
-    }
-    const def = lookupPattern(paint.name);
-    const spacing = Math.max(...(def?.families ?? [{ offset: { x: 0, y: 1 } }]).map((f) => Math.abs(f.offset.y)), 0.01) * paint.scale;
-    // Show about ten repeats of the coarsest family, however large the pattern is.
-    const world = Math.min(Math.max(spacing * 10, 1e-3), 1e6);
-    const ppu = W / world;
-    const loop = loopFromPoints([{ x: 0, y: 0 }, { x: world, y: 0 }, { x: world, y: H / ppu }, { x: 0, y: H / ppu }]);
-    const f = hatchFill({ id: "sw", type: "hatch", loops: [loop], paint, style: "normal" });
-    ctx.strokeStyle = getComputedStyle(c).color || "#ccc";
-    ctx.fillStyle = ctx.strokeStyle;
-    ctx.lineWidth = 1;
-    if (f.truncated || f.unknownPattern) {
-      ctx.globalAlpha = f.unknownPattern ? 0.15 : 0.5;
-      ctx.fillRect(0, 0, W, H);
-      return;
-    }
-    ctx.beginPath();
-    for (let i = 0; i < f.segments.length; i += 4) {
-      ctx.moveTo(f.segments[i] * ppu, H - f.segments[i + 1] * ppu);
-      ctx.lineTo(f.segments[i + 2] * ppu, H - f.segments[i + 3] * ppu);
-    }
-    ctx.stroke();
-    for (let i = 0; i < f.dots.length; i += 2) ctx.fillRect(f.dots[i] * ppu - 0.75, H - f.dots[i + 1] * ppu - 0.75, 1.5, 1.5);
-  }, [s.kind, s.pattern, s.scale, s.angle, s.solidColor, s.gradientColors]);
-  return <canvas ref={ref} width={96} height={56} className="hatch-swatch" data-testid="hatch-swatch" style={{ border: "1px solid var(--border)", borderRadius: 4, color: "var(--text)" }} />;
+  return <PatternSwatch paint={paintFromSettings(s)} />;
 }
 
 function convertFills(): number {
@@ -77,6 +37,7 @@ export function HatchPanel() {
   const s = useApp((st) => st.hatchSettings);
   const set = useApp((st) => st.setHatchSettings);
   const revision = useApp((st) => st.revision);
+  const [showLib, setShowLib] = useState(false);
   const byCategory = useMemo(() => {
     const m = new Map<string, string[]>();
     for (const p of registeredPatterns()) {
@@ -84,7 +45,7 @@ export function HatchPanel() {
       m.set(c, [...(m.get(c) ?? []), p.name]);
     }
     return [...m.entries()].sort((a, b) => (PATTERN_CATEGORIES.indexOf(a[0]) + 99) % 99 - (PATTERN_CATEGORIES.indexOf(b[0]) + 99) % 99);
-  }, []);
+  }, [revision, showLib]);
   const def = lookupPattern(s.pattern);
   const filledCount = doc.all().filter((e) => "fill" in e && e.fill).length;
 
@@ -120,9 +81,11 @@ export function HatchPanel() {
               ))}
             </select>
             <span className="straighten-hint" data-testid="hatch-desc">{def?.description ?? ""}</span>
+            <button className={`btn ghost ${showLib ? "active" : ""}`} data-testid="hatch-library" onClick={() => setShowLib(!showLib)}>Library…</button>
           </div>
         </div>
       )}
+      {s.kind === "pattern" && showLib && <PatternLibrary current={s.pattern} onPick={(p) => set({ pattern: p.name, scale: p.defaultScale?.mm ?? 1 })} />}
       {s.kind === "pattern" && (
         <div className="fill-row">
           <label>

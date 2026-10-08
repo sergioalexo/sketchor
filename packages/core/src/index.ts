@@ -69,3 +69,5 @@ export * from "./hatch/registry";
 export * from "./hatch/library";
 export * from "./hatch/boundary";
 export * from "./hatch/associate";
+export * from "./hatch/userPatterns";
+export * from "./hatch/tile";
