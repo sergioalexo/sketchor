@@ -20,6 +20,10 @@ import {
   entitiesInBox,
   entitiesCrossedByFence,
   entitiesInPolygon,
+  editableAttributes,
+  insertContents,
+  attributeTable,
+  attributeCsv,
   simplifyPath,
   selectSimilar,
   entityPoints,
@@ -42,6 +46,7 @@ import {
 import {
   applyStraighten,
   beginBlockEdit,
+  activeBlockEdit,
   saveBlockEdit,
   discardBlockEdit,
   bus,
@@ -60,6 +65,7 @@ import {
   useApp,
 } from "../state/store";
 import { openDrawing, saveCurrent } from "../io/drawingFile";
+import { downloadText } from "../blocks/download";
 import { matchesBinding, matchesModifier } from "../keybindings";
 import { printDrawing } from "../print/printDrawing";
 import { formatArea, formatLength } from "../units";
@@ -384,6 +390,10 @@ export function Viewport() {
 
     const activeTool = getTool(state.tool);
     const preview: Entity[] = activeTool ? activeTool.preview(toolCtx, snap?.point ?? null) : [];
+    // In the block editor the attribute definitions have no entity of their own: show each tag as text.
+    for (const a of activeBlockEdit()?.attributeDefs ?? []) {
+      preview.push({ id: `attdef:${a.tag}`, type: "text", at: a.at, text: `<${a.tag}>`, height: a.height, rotation: a.rotation });
+    }
 
     const straightenPlan = state.tool === "straighten" ? computeStraightenTransform() : null;
 
@@ -1210,6 +1220,8 @@ export function Viewport() {
       case "zoom":
       case "block":
       case "blockbase":
+      case "insert":
+      case "attdef":
       case "divide":
       case "align":
       case "lengthen":
@@ -1866,6 +1878,18 @@ export function Viewport() {
         const err = beginBlockEdit(name);
         return err ?? `editing block ${name}`;
       }
+      case "attEdit": {
+        const sel = app.selection.map((i) => doc.get(i)).find((en) => en?.type === "insert");
+        if (!sel) return "attedit: select an insert first";
+        app.setAttedit(sel.id);
+        return "editing attributes";
+      }
+      case "attExport": {
+        const table = attributeTable(doc, argument ? { blocks: [argument] } : {});
+        if (table.rows.length === 0) return "no inserts to extract";
+        downloadText("attributes.csv", attributeCsv(table), "text/csv");
+        return `extracted ${table.rows.length} insert(s)`;
+      }
       case "blockSave":
         return saveBlockEdit() ?? "block saved";
       case "blockClose":
@@ -1930,10 +1954,14 @@ export function Viewport() {
       return;
     }
 
-    // Double-click an insert to edit its block definition (B-04).
+    // Double-click an insert: its attribute values (ATTEDIT) when the click lands on an attribute text, else its block definition (B-04).
     const dblInsert = hit ? doc.get(hit) : null;
     if (dblInsert && dblInsert.type === "insert" && app.tool === "select" && doc.hasRecord("blocks", dblInsert.block)) {
-      beginBlockEdit(dblInsert.block);
+      if (editableAttributes(doc, dblInsert).length > 0 && insertContents(dblInsert).some((c) => c.type === "text" && c.id.includes(":attr:") && kindHitDistance(c, world) <= 8 / viewRef.current.scale)) {
+        app.setAttedit(dblInsert.id);
+      } else {
+        beginBlockEdit(dblInsert.block);
+      }
       return;
     }
 

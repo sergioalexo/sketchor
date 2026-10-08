@@ -1,6 +1,7 @@
 import type { Entity, EntityId, InsertEntity, PolylineEntity } from "../entities";
 import type { Point } from "../geometry";
 import { kindTessellate, kindTransform, type Affine } from "../kinds/registry";
+import { expandFields, fieldRevision } from "./fields";
 import { MAX_BLOCK_DEPTH, type AttributeDef, type BlockDefinition, type BlocksHost } from "./types";
 
 /**
@@ -102,6 +103,7 @@ function inherit(e: Entity, insert: InsertEntity): Entity {
 
 interface BodyCache {
   rev: number;
+  fields: number;
   /** name → definition body with nested inserts expanded, in definition (local) coordinates. */
   bodies: Map<string, Entity[]>;
 }
@@ -109,8 +111,8 @@ const caches = new WeakMap<BlocksHost, BodyCache>();
 
 function bodyCache(host: BlocksHost): BodyCache {
   let c = caches.get(host);
-  if (!c || c.rev !== host.tablesRevision) {
-    c = { rev: host.tablesRevision, bodies: new Map() };
+  if (!c || c.rev !== host.tablesRevision || c.fields !== fieldRevision()) {
+    c = { rev: host.tablesRevision, fields: fieldRevision(), bodies: new Map() };
     caches.set(host, c);
   }
   return c;
@@ -192,6 +194,9 @@ function evaluateWith(host: BlocksHost, insert: InsertEntity, stack: readonly st
       out.push({ ...placed, id: `${insert.id}:${key}:${e.id}` });
     }
   }
+  // Visible attribute values are part of what the instance shows (B-05).
+  let n = 0;
+  out.push(...attributeTexts(host, insert, () => `${insert.id}:attr:${n++}`));
   return out;
 }
 
@@ -204,6 +209,12 @@ export function evaluateInsert(host: BlocksHost, insert: InsertEntity): Entity[]
   return evaluateWith(host, insert, []);
 }
 
+/** What an attribute shows: the instance's value (constant attributes always use the default), else the field expression, else the default; fields expanded. */
+export function attributeValue(a: AttributeDef, insert: Pick<InsertEntity, "attributes">): string {
+  const raw = a.flags?.constant ? (a.default ?? "") : (insert.attributes[a.tag] ?? a.fieldExpr ?? a.default ?? "");
+  return expandFields(raw);
+}
+
 /** The world position of an attribute definition's text for the first array cell (or each cell). */
 export function attributeTexts(host: BlocksHost, insert: InsertEntity, newId: () => EntityId): Entity[] {
   const def = getBlock(host, insert.block);
@@ -212,7 +223,7 @@ export function attributeTexts(host: BlocksHost, insert: InsertEntity, newId: ()
   for (const { m } of placements(insert, def.basePoint)) {
     for (const a of def.attributeDefs as AttributeDef[]) {
       if (a.flags?.invisible) continue;
-      const text = insert.attributes[a.tag] ?? a.default ?? "";
+      const text = attributeValue(a, insert);
       if (text === "") continue;
       const rot = Math.atan2(m[1], m[0]);
       out.push({

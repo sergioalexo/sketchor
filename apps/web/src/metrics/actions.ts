@@ -258,6 +258,8 @@ export const COMMAND_LINE_ACTIONS: Record<AppCommandId, string> = {
   blockEdit: "block.edit",
   blockSave: "block.save",
   blockClose: "block.close",
+  attEdit: "block.attedit",
+  attExport: "block.attout",
 };
 
 /** "palette"/"command-line" are sent by their own components; the listeners here only see the other two. */

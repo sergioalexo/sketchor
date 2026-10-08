@@ -3,6 +3,8 @@ import { ArcTool, CircleTool, EllipseTool, LineTool, PointTool, PolygonTool, Pol
 import { AlignTool, ChamferTool, DivideTool, FilletTool, LengthenTool, MatchTool, OffsetTool, SplitTool, StretchTool, TrimTool, ZoomWindowTool } from "./editTools";
 import { BlockTool } from "./blockTool";
 import { BlockBaseTool } from "./blockBaseTool";
+import { InsertTool } from "./insertTool";
+import { AttdefTool } from "./attdefTool";
 import { HatchTool } from "./hatchTool";
 import { SplineEditTool } from "./splineEditTool";
 import { CopyTool, MirrorTool, MoveTool, RotateTool, ScaleTool } from "./modifyTools";
@@ -44,6 +46,8 @@ const TOOLS: Partial<Record<ToolId, Tool>> = {
   fill: new HatchTool(),
   block: new BlockTool(),
   blockbase: new BlockBaseTool(),
+  insert: new InsertTool(),
+  attdef: new AttdefTool(),
 };
 
 export function getTool(id: ToolId): Tool | null {

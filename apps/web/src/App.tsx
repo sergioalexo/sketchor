@@ -1,5 +1,5 @@
 import { useMemo, Fragment, lazy, Suspense, useEffect, useState } from "react";
-import { CONSTRAINT_LABELS, freeEndpointEntityIds } from "@sketchor/core";
+import { CONSTRAINT_LABELS, freeEndpointEntityIds, setFieldContext } from "@sketchor/core";
 import { bus, doc, entityMeasurement, getSessions, isModelSession, measurementText, TOOL_HINTS, useApp, type ToolId } from "./state/store";
 import { useTouchMode } from "./touchMode";
 import { SnapPopover } from "./SnapPopover";
@@ -20,6 +20,9 @@ import { PatternPanel } from "./pattern/PatternPanel";
 import { HatchPanel } from "./fill/HatchPanel";
 import { BlockPanel } from "./blocks/BlockPanel";
 import { BlockEditBar } from "./blocks/BlockEditBar";
+import { InsertPanel } from "./blocks/InsertPanel";
+import { AttdefPanel } from "./blocks/AttdefPanel";
+import { AttEditDialog } from "./blocks/AttEditDialog";
 import { TextPanel } from "./text/TextPanel";
 import { printDrawing } from "./print/printDrawing";
 import { PluginCommandPalette } from "./plugins/PluginCommandPalette";
@@ -400,6 +403,29 @@ const TOOLS: { id: ToolId; label: string; keyHint: string; icon: JSX.Element; di
     ),
   },
   {
+    id: "insert",
+    label: "Insert block",
+    keyHint: "",
+    icon: (
+      <svg viewBox="0 0 24 24" width="20" height="20">
+        <rect x="9" y="9" width="11" height="11" rx="1" {...S} />
+        <path d="M4 4h5M6.5 1.5v5" {...S} />
+        <path d="M5 13v7h4" {...S} strokeDasharray="2 2" />
+      </svg>
+    ),
+  },
+  {
+    id: "attdef",
+    label: "Attribute definition (in the block editor)",
+    keyHint: "",
+    icon: (
+      <svg viewBox="0 0 24 24" width="20" height="20">
+        <path d="M5 19l5-14 5 14M7 14h6" {...S} />
+        <path d="M18 8h3M19.5 6.5v3" {...S} />
+      </svg>
+    ),
+  },
+  {
     id: "block",
     label: "Create block",
     keyHint: "B",
@@ -693,6 +719,12 @@ export function App() {
   const activeSession = getSessions().find((s) => s.id === activeSessionId);
   // A STEP/IGES tab swaps the drawing canvas for the 3D viewer (see model3d/).
   const modelTab = isModelSession(activeSession);
+  // Attribute fields ({{filename}}) read the file name of the drawing being worked on (a block-editor tab uses its drawing's).
+  const fileNameForFields = activeSession?.blockEdit ? getSessions().find((s) => s.id === activeSession.blockEdit?.parentId)?.name : activeSession?.name;
+  useEffect(() => {
+    if (fileNameForFields) setFieldContext({ filename: fileNameForFields });
+    useApp.setState((s) => ({ revision: s.revision + 1 }));
+  }, [fileNameForFields]);
 
   const referenceEdge = referenceEdgeId ? doc.get(referenceEdgeId) : null;
   const referenceAngleDeg =
@@ -1317,6 +1349,9 @@ export function App() {
                 {tool === "straighten" && <StraightenPanel />}
                 {tool === "fill" && <HatchPanel />}
                 {tool === "block" && <BlockPanel />}
+                {tool === "insert" && <InsertPanel />}
+                {tool === "attdef" && <AttdefPanel />}
+                <AttEditDialog />
                 <BlockEditBar />
                 {(tool === "text" || tool === "dim") && <TextPanel />}
               </>

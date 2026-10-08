@@ -425,7 +425,9 @@ export type ToolId =
   | "match"
   | "stretch"
   | "block"
-  | "blockbase";
+  | "blockbase"
+  | "insert"
+  | "attdef";
 
 export const TOOL_HINTS: Record<ToolId, string> = {
   select: "Click to select (Shift adds; click again to cycle what's underneath) - drag left-to-right to window-select, right-to-left to crossing-select - Alt-drag lassos, Ctrl+Alt-drag fences - drag to move - Del deletes - G groups - U ungroups - Shift+C toggles construction",
@@ -463,6 +465,8 @@ export const TOOL_HINTS: Record<ToolId, string> = {
   lengthen: "Type +5 / -5 (change), 40 (new total length) or 150% - then click a line or arc near the end to change",
   match: "Click the source entity, then every entity that should take its layer, colour and construction flag",
   block: "Select the objects first, name the block in the panel, then click its base point - the objects become one insert (or are kept / removed, per the panel)",
+  insert: "Choose the block (and attribute values) in the panel, then click the insertion point - the tool stays active for more copies, Esc finishes",
+  attdef: "In the block editor: set the tag in the panel, then click where the attribute text goes",
   blockbase: "Click the new base point of the block being edited - instances re-anchor to it",
   stretch: "Drag a crossing box around the ends to move (two corners), then click a base point and a destination - endpoints inside the box move, the rest stay",
 };
@@ -747,6 +751,44 @@ export interface BlockSettings {
   scaleUniformly: boolean;
 }
 
+/** Insert tool settings (B-05/B-06): which block, how it is placed, and the attribute values typed into the prompt. */
+export interface InsertSettings {
+  block: string;
+  scale: number;
+  /** Degrees. */
+  rotation: number;
+  values: Record<string, string>;
+}
+
+export const DEFAULT_INSERT_SETTINGS: InsertSettings = { block: "", scale: 1, rotation: 0, values: {} };
+
+/** Attribute-definition tool settings (B-05). */
+export interface AttdefSettings {
+  tag: string;
+  prompt: string;
+  default: string;
+  fieldExpr: string;
+  height: number;
+  invisible: boolean;
+  constant: boolean;
+  verify: boolean;
+  preset: boolean;
+  multiline: boolean;
+}
+
+export const DEFAULT_ATTDEF_SETTINGS: AttdefSettings = {
+  tag: "",
+  prompt: "",
+  default: "",
+  fieldExpr: "",
+  height: 2.5,
+  invisible: false,
+  constant: false,
+  verify: false,
+  preset: false,
+  multiline: false,
+};
+
 export const DEFAULT_BLOCK_SETTINGS: BlockSettings = { name: "", mode: "convert", description: "", explodable: true, scaleUniformly: false };
 
 /** Hatch tool settings: the paint, island style and how boundaries are found. */
@@ -833,6 +875,13 @@ interface AppState {
   setHatchSettings: (patch: Partial<HatchSettings>) => void;
   /** B-04: the block the active tab is editing (null in a normal drawing tab). */
   editingBlock: string | null;
+  insertSettings: InsertSettings;
+  setInsertSettings: (patch: Partial<InsertSettings>) => void;
+  attdefSettings: AttdefSettings;
+  setAttdefSettings: (patch: Partial<AttdefSettings>) => void;
+  /** B-05: the insert whose attribute values the ATTEDIT dialog is editing. */
+  atteditId: string | null;
+  setAttedit: (id: string | null) => void;
   /** What the Create-block tool applies (B-03). */
   blockSettings: BlockSettings;
   setBlockSettings: (patch: Partial<BlockSettings>) => void;
@@ -964,6 +1013,12 @@ export const useApp = create<AppState>((set, get) => ({
   hatchSettings: DEFAULT_HATCH_SETTINGS,
   setHatchSettings: (patch) => set((s) => ({ hatchSettings: { ...s.hatchSettings, ...patch } })),
   editingBlock: null,
+  insertSettings: DEFAULT_INSERT_SETTINGS,
+  setInsertSettings: (patch) => set((s) => ({ insertSettings: { ...s.insertSettings, ...patch } })),
+  attdefSettings: DEFAULT_ATTDEF_SETTINGS,
+  setAttdefSettings: (patch) => set((s) => ({ attdefSettings: { ...s.attdefSettings, ...patch } })),
+  atteditId: null,
+  setAttedit: (id) => set({ atteditId: id }),
   blockSettings: DEFAULT_BLOCK_SETTINGS,
   setBlockSettings: (patch) => set((s) => ({ blockSettings: { ...s.blockSettings, ...patch } })),
   textHeight: 100,

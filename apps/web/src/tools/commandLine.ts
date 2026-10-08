@@ -32,7 +32,9 @@ export type AppCommandId =
   | "cancel"
   | "blockEdit"
   | "blockSave"
-  | "blockClose";
+  | "blockClose"
+  | "attEdit"
+  | "attExport";
 
 export type ParsedCommand =
   /** Activate a tool; `argument` is the rest of the line (a radius, a distance), passed on as typed input. */
@@ -114,6 +116,10 @@ export const TOOL_ALIASES: Record<string, ToolId> = {
   div: "divide",
   b: "block",
   bbase: "blockbase",
+  i: "insert",
+  insert: "insert",
+  att: "attdef",
+  attdef: "attdef",
   block: "block",
   divide: "divide",
   // select / view / measure
@@ -161,6 +167,10 @@ export const APP_ALIASES: Record<string, AppCommandId> = {
   refedit: "blockEdit",
   bsave: "blockSave",
   bclose: "blockClose",
+  attedit: "attEdit",
+  ate: "attEdit",
+  attout: "attExport",
+  eattext: "attExport",
 };
 
 /** Anything that looks like a coordinate or a measurement rather than a word. */

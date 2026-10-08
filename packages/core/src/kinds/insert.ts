@@ -3,6 +3,7 @@ import type { Entity, InsertEntity } from "../entities";
 import type { Point } from "../geometry";
 import { activeBlocks } from "../blocks/context";
 import { evaluateInsert } from "../blocks/evaluate";
+import { fieldRevision } from "../blocks/fields";
 import type { BlocksHost } from "../blocks/types";
 import { boundsOfPoints, kindBounds, kindHitDistance, kindSnaps, kindTessellate, type Affine, type EntityKind, type KindSnap } from "./registry";
 
@@ -18,6 +19,7 @@ import { boundsOfPoints, kindBounds, kindHitDistance, kindSnaps, kindTessellate,
 interface Evaluated {
   host: BlocksHost;
   rev: number;
+  fields: number;
   entities: Entity[];
 }
 const evaluated = new WeakMap<InsertEntity, Evaluated>();
@@ -27,9 +29,9 @@ export function insertContents(e: InsertEntity): Entity[] {
   const host = activeBlocks();
   if (!host) return [];
   const hit = evaluated.get(e);
-  if (hit && hit.host === host && hit.rev === host.tablesRevision) return hit.entities;
+  if (hit && hit.host === host && hit.rev === host.tablesRevision && hit.fields === fieldRevision()) return hit.entities;
   const entities = evaluateInsert(host, e);
-  evaluated.set(e, { host, rev: host.tablesRevision, entities });
+  evaluated.set(e, { host, rev: host.tablesRevision, fields: fieldRevision(), entities });
   return entities;
 }
 
