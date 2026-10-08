@@ -46,6 +46,17 @@
   FileWrite $2 '@="${SKETCHOR_THUMB_CLSID}"$\r$\n'
 !macroend
 
+; Same, but only when that extension has no marker yet: .eps/.ai normally belong
+; to Illustrator/Acrobat, whose handler we must not overwrite. $3 is scratch.
+!macro WRITE_THUMB_MARKER_IF_MISSING EXT
+  ClearErrors
+  ReadRegStr $3 HKLM "Software\Classes\${EXT}\ShellEx\${SHELLEX_THUMB}" ""
+  ${If} ${Errors}
+    !insertmacro WRITE_THUMB_MARKER "${EXT}"
+  ${EndIf}
+  ClearErrors
+!macroend
+
 !macro NSIS_HOOK_PREINSTALL
   ; Park a DLL Explorer may still have loaded so File can write the new one.
   ${If} ${FileExists} "$INSTDIR\shell-ext\dxf_thumbnailer.dll"
@@ -84,6 +95,8 @@
         !insertmacro WRITE_THUMB_MARKER ".stp"
         !insertmacro WRITE_THUMB_MARKER ".iges"
         !insertmacro WRITE_THUMB_MARKER ".igs"
+        !insertmacro WRITE_THUMB_MARKER_IF_MISSING ".eps"
+        !insertmacro WRITE_THUMB_MARKER_IF_MISSING ".ai"
         FileClose $2
         ExecShellWait "runas" "regedit.exe" '/s "$TEMP\sketchor-explorer-previews.reg"' SW_HIDE
         Delete "$TEMP\sketchor-explorer-previews.reg"

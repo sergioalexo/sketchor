@@ -258,7 +258,10 @@ fn write_thumbnail_cache(hash: String, png_base64: String) -> Result<bool, Strin
 /// elevated step. These two commands back that: the first says whether it's
 /// still needed, the second performs it (a UAC prompt) and re-checks.
 /// Off Windows both report "not applicable".
-const THUMB_MARKER_EXTS: [&str; 5] = [".step", ".stp", ".iges", ".igs", ".dxf"];
+///
+/// `.eps`/`.ai` (F-03) usually already have another program's marker (Illustrator,
+/// Acrobat): only *missing* keys are ever written, never overwritten.
+const THUMB_MARKER_EXTS: [&str; 7] = [".step", ".stp", ".iges", ".igs", ".dxf", ".eps", ".ai"];
 const SHELLEX_THUMB: &str = "{E357FCCD-A995-4576-B01F-234630154E96}";
 const SKETCHOR_THUMB_CLSID: &str = "{6F9E2A31-7C4B-4D8E-9A1F-2B3C4D5E6F70}";
 
@@ -270,18 +273,27 @@ struct ExplorerPreviewStatus {
 }
 
 #[cfg(windows)]
-fn marker_missing() -> bool {
+fn missing_markers() -> Vec<&'static str> {
     use std::os::windows::process::CommandExt;
-    THUMB_MARKER_EXTS.iter().any(|ext| {
-        let key = format!(r"HKLM\Software\Classes\{ext}\ShellEx\{SHELLEX_THUMB}");
-        // CREATE_NO_WINDOW: no console flash from reg.exe.
-        !std::process::Command::new("reg")
-            .args(["query", &key, "/ve"])
-            .creation_flags(0x0800_0000)
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
-    })
+    THUMB_MARKER_EXTS
+        .iter()
+        .copied()
+        .filter(|ext| {
+            let key = format!(r"HKLM\Software\Classes\{ext}\ShellEx\{SHELLEX_THUMB}");
+            // CREATE_NO_WINDOW: no console flash from reg.exe.
+            !std::process::Command::new("reg")
+                .args(["query", &key, "/ve"])
+                .creation_flags(0x0800_0000)
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+        })
+        .collect()
+}
+
+#[cfg(windows)]
+fn marker_missing() -> bool {
+    !missing_markers().is_empty()
 }
 
 #[tauri::command]
@@ -299,9 +311,15 @@ fn explorer_previews_status() -> ExplorerPreviewStatus {
 /// The marker keys as a `.reg` file: one elevated `regedit /s` import (one
 /// UAC prompt, shown as "Registry Editor", Microsoft-signed) covers every
 /// extension. Exposed for the installer-side script and tests to share.
+#[cfg(test)]
 fn markers_reg_file() -> String {
+    markers_reg_file_for(&THUMB_MARKER_EXTS)
+}
+
+#[cfg(any(windows, test))]
+fn markers_reg_file_for(exts: &[&str]) -> String {
     let mut out = String::from("Windows Registry Editor Version 5.00\r\n");
-    for ext in THUMB_MARKER_EXTS {
+    for ext in exts {
         out.push_str(&format!(
             "\r\n[HKEY_LOCAL_MACHINE\\Software\\Classes\\{ext}\\ShellEx\\{SHELLEX_THUMB}]\r\n@=\"{SKETCHOR_THUMB_CLSID}\"\r\n"
         ));
@@ -321,7 +339,7 @@ fn enable_explorer_previews() -> Result<bool, String> {
             return Ok(true);
         }
         let reg = std::env::temp_dir().join("sketchor-explorer-previews.reg");
-        std::fs::write(&reg, markers_reg_file()).map_err(|e| e.to_string())?;
+        std::fs::write(&reg, markers_reg_file_for(&missing_markers())).map_err(|e| e.to_string())?;
         // Start-Process -Verb RunAs is the supported way to request elevation
         // from an unelevated process; -Wait so the re-check below is honest.
         let ps = format!(
@@ -448,6 +466,22 @@ mod tests {
         let result = read_bytes(tmp.to_str().unwrap());
         let _ = std::fs::remove_file(&tmp);
         assert_eq!(result, Ok(bytes));
+    }
+
+    /// EPS/AI import reads only a header, a preview and the PostScript: a range
+    /// past the end is shortened, never an error, and an offset past it is empty.
+    #[test]
+    fn read_range_returns_the_slice_and_clamps_at_the_end() {
+        let tmp = std::env::temp_dir().join(format!("sketchor-range-test-{}", std::process::id()));
+        std::fs::write(&tmp, [10u8, 11, 12, 13, 14, 15]).unwrap();
+        let p = tmp.to_str().unwrap();
+        let mid = read_range(p, 2, 3);
+        let tail = read_range(p, 4, 100);
+        let past = read_range(p, 99, 4);
+        let _ = std::fs::remove_file(&tmp);
+        assert_eq!(mid, Ok(vec![12, 13, 14]));
+        assert_eq!(tail, Ok(vec![14, 15]));
+        assert_eq!(past, Ok(vec![]));
     }
 
     /// The .reg import is the only way the markers get created on a user's

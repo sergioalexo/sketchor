@@ -1,5 +1,5 @@
-//! Windows Explorer thumbnail provider for `.dxf` drawings and
-//! `.step`/`.iges` 3D models.
+//! Windows Explorer thumbnail provider for `.dxf` drawings, `.eps`/`.ai`
+//! (the embedded TIFF preview — see eps.rs) and `.step`/`.iges` 3D models.
 //!
 //! Implements an in-process COM server exposing `IThumbnailProvider`
 //! (initialised via `IInitializeWithFile`). Explorer calls `GetThumbnail`;
@@ -12,6 +12,7 @@
 //! Register (admin): regsvr32 dxf_thumbnailer.dll
 //! Unregister:       regsvr32 /u dxf_thumbnailer.dll
 
+pub mod eps;
 pub mod model;
 pub mod render;
 
@@ -122,6 +123,12 @@ fn trace(msg: &str) {
 /// there is nothing to show (Explorer then falls back to the icon).
 fn thumbnail_for(path: &str, size: u32) -> Option<windows::Win32::Graphics::Gdi::HBITMAP> {
     trace(&format!("request {size}px {path}"));
+    if eps::is_eps(path) {
+        let p = eps::preview(path);
+        trace(&format!("  eps preview {}", if p.is_some() { "found" } else { "none" }));
+        let p = p?;
+        return render::bitmap_from_rgba(&p.rgba, p.size, size).ok();
+    }
     if model::is_model(path) {
         let bytes = match std::fs::read(path) {
             Ok(b) => b,
@@ -334,8 +341,9 @@ fn set_dword(path: &str, name: &str, value: u32) -> Result<(), ()> {
 }
 
 /// Extensions this provider handles. STEP/IGES previews come from the
-/// sidecar cache or the wireframe fallback — see model.rs.
-const EXTENSIONS: [&str; 5] = [".dxf", ".step", ".stp", ".iges", ".igs"];
+/// sidecar cache or the wireframe fallback — see model.rs; EPS/AI from the
+/// file's own TIFF preview — see eps.rs.
+const EXTENSIONS: [&str; 7] = [".dxf", ".step", ".stp", ".iges", ".igs", ".eps", ".ai"];
 
 fn register(clsid: &str, dll: &str) -> Result<(), ()> {
     let base = format!("CLSID\\{clsid}");

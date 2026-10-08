@@ -330,7 +330,7 @@ the worker imports the vendored `.mjs`/`.wasm` directly. So:
   B-rep edge extractor that resolves NAUO/CDSR/ITEM_DEFINED_TRANSFORMATION
   placements and MAPPED_ITEMs (both rep_1/rep_2 orderings seen in the wild
   are handled by matching against the child's representations). The DLL
-  registers `.dxf .step .stp .iges .igs` (`EXTENSIONS` in lib.rs). Verify
+  registers `.dxf .step .stp .iges .igs .eps .ai` (`EXTENSIONS` in lib.rs; `.eps`/`.ai` read the DOS-EPS TIFF preview directly — `eps.rs` — and their HKLM markers are created only when missing, so Illustrator's handler is never overwritten). Verify
   end-to-end with `cargo run --release --example verify_shell_thumb -- file.step out.png`;
   the shell caches by path+mtime, so test a fresh copy after changing a sidecar.
 - **Two Explorer gotchas that cost a release (0.14.2):** (1) Explorer keeps
