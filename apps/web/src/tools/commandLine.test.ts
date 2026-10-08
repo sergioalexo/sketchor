@@ -65,7 +65,7 @@ describe("the alias tables", () => {
     const known = new Set([
       "select", "line", "polyline", "rectangle", "circle", "arc", "ellipse", "spline", "splinedit", "polygon", "slot", "point", "image",
       "measure", "straighten", "fill", "text", "dim", "pan", "move", "copy", "rotate", "scale", "mirror",
-      "trim", "split", "fillet", "chamfer", "offset", "zoom", "divide", "align", "lengthen", "match", "stretch", "block",
+      "trim", "split", "fillet", "chamfer", "offset", "zoom", "divide", "align", "lengthen", "match", "stretch", "block", "blockbase",
     ]);
     for (const [alias, tool] of Object.entries(TOOL_ALIASES)) {
       expect(known.has(tool), `${alias} -> ${tool}`).toBe(true);

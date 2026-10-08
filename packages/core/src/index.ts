@@ -61,6 +61,7 @@ export * from "./blocks/types";
 export * from "./blocks/context";
 export * from "./blocks/evaluate";
 export * from "./blocks/ops";
+export * from "./blocks/edit";
 export { insertContents } from "./kinds/insert";
 export * from "./hatch/loops";
 export * from "./hatch/pat";

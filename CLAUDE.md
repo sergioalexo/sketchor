@@ -81,6 +81,14 @@ expand into table/entity commands. Exporters don't write blocks yet (B-08): save
 and print pass entities through `flattenInserts`. Any new field that names a
 block must register a `registerEntityRefRewriter("blocks", …)`.
 
+**Block editor (B-04):** editing a definition opens a `DocSession` with
+`blockEdit` set (tab "Block: NAME") whose document is `blockEditDocument()` — the
+local entities plus the drawing's other tables. Every change on its bus is
+mirrored straight into the parent's definition *without history*
+(`liveSyncBlock`, `CommandBus.notify()`), so instances are live; Save restores
+the old body then runs one `update-block`, Discard/closing restores it. Code that
+treats "a tab" as a file (save, `isSessionBlank`) must respect `session.blockEdit`.
+
 ## Document tables and settings (`packages/core/src/tables.ts`)
 
 `SketchDocument` also holds named **tables** (`layers`, `blocks`, `dimStyles`,

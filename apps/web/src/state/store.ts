@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { setActiveBlocks, blockEditChanges, blockEditDocument, getBlock, type AttributeDef, type BlockDefinition } from "@sketchor/core";
 import type { Model3D } from "../model3d/types";
 import {
   displayUnitToDxfCode,
@@ -101,6 +102,19 @@ export interface DocSession {
   model?: Model3D | null;
   modelLoading?: boolean;
   modelError?: string | null;
+  /** B-04: set on a tab that edits a block definition of another tab (see {@link beginBlockEdit}). */
+  blockEdit?: BlockEditSession;
+}
+
+/** The state of one block-editor tab: where the definition came from and what it was before editing. */
+export interface BlockEditSession {
+  parentId: string;
+  name: string;
+  /** The definition as it was when editing began — restored on Discard, and the base the Save command diffs against. */
+  original: BlockDefinition;
+  basePoint: { x: number; y: number };
+  attributeDefs: AttributeDef[];
+  unbind: () => void;
 }
 
 /** True for a tab that shows (or is loading) a 3D model rather than a drawing. */
@@ -410,7 +424,8 @@ export type ToolId =
   | "lengthen"
   | "match"
   | "stretch"
-  | "block";
+  | "block"
+  | "blockbase";
 
 export const TOOL_HINTS: Record<ToolId, string> = {
   select: "Click to select (Shift adds; click again to cycle what's underneath) - drag left-to-right to window-select, right-to-left to crossing-select - Alt-drag lassos, Ctrl+Alt-drag fences - drag to move - Del deletes - G groups - U ungroups - Shift+C toggles construction",
@@ -448,6 +463,7 @@ export const TOOL_HINTS: Record<ToolId, string> = {
   lengthen: "Type +5 / -5 (change), 40 (new total length) or 150% - then click a line or arc near the end to change",
   match: "Click the source entity, then every entity that should take its layer, colour and construction flag",
   block: "Select the objects first, name the block in the panel, then click its base point - the objects become one insert (or are kept / removed, per the panel)",
+  blockbase: "Click the new base point of the block being edited - instances re-anchor to it",
   stretch: "Drag a crossing box around the ends to move (two corners), then click a base point and a destination - endpoints inside the box move, the rest stay",
 };
 
@@ -805,6 +821,8 @@ interface AppState {
   /** What the Hatch tool applies (H-04). */
   hatchSettings: HatchSettings;
   setHatchSettings: (patch: Partial<HatchSettings>) => void;
+  /** B-04: the block the active tab is editing (null in a normal drawing tab). */
+  editingBlock: string | null;
   /** What the Create-block tool applies (B-03). */
   blockSettings: BlockSettings;
   setBlockSettings: (patch: Partial<BlockSettings>) => void;
@@ -935,6 +953,7 @@ export const useApp = create<AppState>((set, get) => ({
   setFillColor: (color) => set({ fillColor: color }),
   hatchSettings: DEFAULT_HATCH_SETTINGS,
   setHatchSettings: (patch) => set((s) => ({ hatchSettings: { ...s.hatchSettings, ...patch } })),
+  editingBlock: null,
   blockSettings: DEFAULT_BLOCK_SETTINGS,
   setBlockSettings: (patch) => set((s) => ({ blockSettings: { ...s.blockSettings, ...patch } })),
   textHeight: 100,
@@ -1140,7 +1159,7 @@ function bumpSessionsVersion(): void {
 }
 
 function isSessionBlank(s: DocSession): boolean {
-  return s.doc.all().length === 0 && !s.dirty && !s.named && !isModelSession(s);
+  return s.doc.all().length === 0 && !s.dirty && !s.named && !isModelSession(s) && !s.blockEdit;
 }
 
 function nextUntitledName(): string {
@@ -1197,8 +1216,10 @@ export function switchToSession(id: string): void {
     pinnedMeasurements: [],
     importReport: null,
     importUnits: null,
+    editingBlock: incoming.blockEdit?.name ?? null,
   });
   rebindBus();
+  setActiveBlocks(incoming.doc);
   useApp.getState().syncLayersFromDoc(); // the layers are the incoming document's own
   bumpSessionsVersion();
 }
@@ -1219,6 +1240,7 @@ export function closeTab(id: string): void {
     const ok = window.confirm(`"${sessions[idx].name}" has unsaved changes. Close anyway?`);
     if (!ok) return;
   }
+  if (sessions[idx].blockEdit) restoreBlockOriginal(sessions[idx]);
   const wasActive = useApp.getState().activeSessionId === id;
   sessions.splice(idx, 1);
   if (sessions.length === 0) sessions.push(newSession(nextUntitledName()));
@@ -1383,3 +1405,133 @@ window.sketchor = {
     throw new Error("io/drawingFile.ts not loaded yet");
   },
 };
+
+/* ------------------------------ block editor (B-04) ----------------------------- */
+
+/** Writes the editor's current body into the parent's definition without history, so the parent tab (and every instance) is live. */
+function liveSyncBlock(editor: DocSession): void {
+  const be = editor.blockEdit;
+  const parent = be && sessions.find((x) => x.id === be.parentId);
+  if (!be || !parent) return;
+  const cur = getBlock(parent.doc, be.name) ?? be.original;
+  parent.doc._putRecord("blocks", { ...cur, ...blockEditChanges(editor.doc), basePoint: be.basePoint, attributeDefs: be.attributeDefs });
+  parent.bus.notify();
+}
+
+function restoreBlockOriginal(editor: DocSession): void {
+  const be = editor.blockEdit;
+  if (!be) return;
+  be.unbind();
+  const parent = sessions.find((x) => x.id === be.parentId);
+  if (parent) {
+    parent.doc._putRecord("blocks", be.original);
+    parent.bus.notify();
+  }
+  editor.blockEdit = undefined;
+}
+
+/** The active tab's block-edit session, if it is one. */
+export function activeBlockEdit(): BlockEditSession | null {
+  return activeSession().blockEdit ?? null;
+}
+
+/**
+ * B-04: opens `name` for editing in its own tab — the definition in local
+ * coordinates, every tool working, its own undo history. Each change is
+ * mirrored into the drawing's definition at once (without history), so the
+ * instances re-render live; Save collapses the session into one undoable
+ * `update-block`, Discard puts the old body back.
+ */
+export function beginBlockEdit(name: string): string | null {
+  const parent = activeSession();
+  const existing = sessions.find((x) => x.blockEdit?.parentId === parent.id && x.blockEdit.name === name);
+  if (existing) {
+    switchToSession(existing.id);
+    return null;
+  }
+  const def = getBlock(parent.doc, name);
+  if (!def) return `No block named '${name}'`;
+  const scratch = blockEditDocument(parent.doc, name);
+  if (!scratch) return `No block named '${name}'`;
+  const s: DocSession = {
+    id: newSessionId(),
+    name: `Block: ${name}`,
+    named: false,
+    dirty: false,
+    doc: scratch,
+    bus: new CommandBus(scratch),
+    selection: [],
+    layers: parent.layers,
+    activeLayer: parent.activeLayer,
+    view: null,
+    displayUnit: parent.displayUnit,
+    blockEdit: { parentId: parent.id, name, original: def, basePoint: { ...def.basePoint }, attributeDefs: def.attributeDefs.map((a) => ({ ...a })), unbind: () => {} },
+  };
+  s.blockEdit!.unbind = s.bus.onChange(() => liveSyncBlock(s));
+  sessions.push(s);
+  switchToSession(s.id);
+  useApp.getState().requestFit();
+  return null;
+}
+
+/** Saves the active block edit as one `update-block` on the drawing it came from and closes the tab. Returns an error text when refused. */
+export function saveBlockEdit(): string | null {
+  const editor = activeSession();
+  const be = editor.blockEdit;
+  if (!be) return "Not editing a block";
+  const parent = sessions.find((x) => x.id === be.parentId);
+  const finish = () => {
+    be.unbind();
+    editor.blockEdit = undefined;
+    const idx = sessions.indexOf(editor);
+    if (idx >= 0) sessions.splice(idx, 1);
+    if (parent) switchToSession(parent.id);
+    bumpSessionsVersion();
+  };
+  if (!parent) {
+    finish();
+    return null;
+  }
+  const changes = { ...blockEditChanges(editor.doc), basePoint: be.basePoint, attributeDefs: be.attributeDefs };
+  parent.doc._putRecord("blocks", be.original); // the command's inverse must restore the pre-edit body
+  parent.bus.execute({ type: "update-block", name: be.name, changes });
+  const saved = getBlock(parent.doc, be.name);
+  if (!saved || saved === be.original) {
+    liveSyncBlock(editor); // refused (e.g. a cycle): keep the live state and stay in the editor
+    return "The block could not be saved (it would contain itself)";
+  }
+  parent.dirty = true;
+  finish();
+  return null;
+}
+
+/** Throws the active block edit away and returns to the drawing. */
+export function discardBlockEdit(): void {
+  const editor = activeSession();
+  if (!editor.blockEdit) return;
+  const parentId = editor.blockEdit.parentId;
+  restoreBlockOriginal(editor);
+  const idx = sessions.indexOf(editor);
+  if (idx >= 0) sessions.splice(idx, 1);
+  const parent = sessions.find((x) => x.id === parentId) ?? sessions[0];
+  switchToSession(parent.id);
+  bumpSessionsVersion();
+}
+
+/** Moves the edited block's base point (local coordinates) and mirrors it live. */
+export function setBlockEditBase(p: { x: number; y: number }): void {
+  const editor = activeSession();
+  if (!editor.blockEdit) return;
+  editor.blockEdit.basePoint = { x: p.x, y: p.y };
+  liveSyncBlock(editor);
+  useApp.setState((s) => ({ sessionsVersion: s.sessionsVersion + 1 }));
+}
+
+/** Replaces the edited block's attribute definitions (B-05) and mirrors them live. */
+export function setBlockEditAttributes(defs: AttributeDef[]): void {
+  const editor = activeSession();
+  if (!editor.blockEdit) return;
+  editor.blockEdit.attributeDefs = defs;
+  liveSyncBlock(editor);
+  useApp.setState((s) => ({ sessionsVersion: s.sessionsVersion + 1 }));
+}

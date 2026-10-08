@@ -29,12 +29,15 @@ export type AppCommandId =
   | "relativeZero"
   | "save"
   | "open"
-  | "cancel";
+  | "cancel"
+  | "blockEdit"
+  | "blockSave"
+  | "blockClose";
 
 export type ParsedCommand =
   /** Activate a tool; `argument` is the rest of the line (a radius, a distance), passed on as typed input. */
   | { kind: "tool"; tool: ToolId; argument: string | null }
-  | { kind: "app"; id: AppCommandId }
+  | { kind: "app"; id: AppCommandId; argument?: string }
   /** Not a command — a coordinate or length for whatever tool is active. */
   | { kind: "point"; text: string }
   | { kind: "empty" }
@@ -110,6 +113,7 @@ export const TOOL_ALIASES: Record<string, ToolId> = {
   match: "match",
   div: "divide",
   b: "block",
+  bbase: "blockbase",
   block: "block",
   divide: "divide",
   // select / view / measure
@@ -153,6 +157,10 @@ export const APP_ALIASES: Record<string, AppCommandId> = {
   open: "open",
   esc: "cancel",
   cancel: "cancel",
+  bedit: "blockEdit",
+  refedit: "blockEdit",
+  bsave: "blockSave",
+  bclose: "blockClose",
 };
 
 /** Anything that looks like a coordinate or a measurement rather than a word. */
@@ -176,7 +184,7 @@ export function parseCommand(text: string): ParsedCommand {
   const argument = match[2]?.trim() || null;
 
   const app = APP_ALIASES[word];
-  if (app) return { kind: "app", id: app };
+  if (app) return argument ? { kind: "app", id: app, argument } : { kind: "app", id: app };
   const tool = TOOL_ALIASES[word];
   // `rebuild 8` is the spline-edit tool's own typed command, so the verb stays part of its argument.
   if (tool) return { kind: "tool", tool, argument: word === "rebuild" ? `rebuild${argument ? " " + argument : ""}` : argument };

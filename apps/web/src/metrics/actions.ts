@@ -255,6 +255,9 @@ export const COMMAND_LINE_ACTIONS: Record<AppCommandId, string> = {
   save: "file.save",
   open: "file.open",
   cancel: "edit.cancel",
+  blockEdit: "block.edit",
+  blockSave: "block.save",
+  blockClose: "block.close",
 };
 
 /** "palette"/"command-line" are sent by their own components; the listeners here only see the other two. */

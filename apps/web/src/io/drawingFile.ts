@@ -13,6 +13,7 @@ import {
   overlaySvgText,
   isModelSession,
   openIntoSession,
+  saveBlockEdit,
   openModelIntoSession,
   overlayDxfText,
   overlayEntities,
@@ -217,6 +218,12 @@ function defaultSaveName(format: SaveFormat): string {
 
 /** Saves the current drawing as DXF or SVG. No-op if the location prompt is cancelled. */
 export async function saveDrawing(format: SaveFormat, suggestedName?: string, mode: SaveMode = "save"): Promise<void> {
+  if (getActiveSession().blockEdit && mode === "save") {
+    // A block-editor tab saves into its drawing's block table (B-04), not to a file.
+    const err = saveBlockEdit();
+    if (err) useApp.getState().setSaveNotice({ kind: "error", message: err, at: Date.now() });
+    return;
+  }
   if (isModelSession(getActiveSession())) {
     // A model tab has no drawing behind it; saving would write an empty DXF.
     useApp.getState().setSaveNotice({ kind: "error", message: "3D models are view-only — nothing to save", at: Date.now() });

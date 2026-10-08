@@ -102,6 +102,12 @@ export class CommandBus {
     return () => this.listeners.delete(fn);
   }
 
+  /** Tells listeners the document changed outside a command (the block editor's live preview writes the definition directly). */
+  notify(): void {
+    setActiveBlocks(this.doc);
+    this.emit();
+  }
+
   private emit(): void {
     for (const fn of this.listeners) fn();
   }

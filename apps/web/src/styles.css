@@ -863,6 +863,8 @@ body {
 
 /* ---------- fill / hatch tool ---------- */
 
+.block-edit-bar { gap: 10px; border-color: #e0a030; }
+
 .fill-panel {
   position: absolute;
   top: 14px;

@@ -19,6 +19,7 @@ import { ConstraintPanel } from "./constraints/ConstraintPanel";
 import { PatternPanel } from "./pattern/PatternPanel";
 import { HatchPanel } from "./fill/HatchPanel";
 import { BlockPanel } from "./blocks/BlockPanel";
+import { BlockEditBar } from "./blocks/BlockEditBar";
 import { TextPanel } from "./text/TextPanel";
 import { printDrawing } from "./print/printDrawing";
 import { PluginCommandPalette } from "./plugins/PluginCommandPalette";
@@ -1316,6 +1317,7 @@ export function App() {
                 {tool === "straighten" && <StraightenPanel />}
                 {tool === "fill" && <HatchPanel />}
                 {tool === "block" && <BlockPanel />}
+                <BlockEditBar />
                 {(tool === "text" || tool === "dim") && <TextPanel />}
               </>
             )}

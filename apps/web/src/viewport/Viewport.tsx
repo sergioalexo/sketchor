@@ -41,6 +41,9 @@ import {
 } from "@sketchor/core";
 import {
   applyStraighten,
+  beginBlockEdit,
+  saveBlockEdit,
+  discardBlockEdit,
   bus,
   closeTab,
   computeStraightenTransform,
@@ -1206,6 +1209,7 @@ export function Viewport() {
       case "offset":
       case "zoom":
       case "block":
+      case "blockbase":
       case "divide":
       case "align":
       case "lengthen":
@@ -1769,7 +1773,7 @@ export function Viewport() {
         return;
       }
       case "app": {
-        const done = runAppCommand(parsed.id);
+        const done = runAppCommand(parsed.id, parsed.argument);
         say(done ?? parsed.id, done ? "out" : "out");
         return;
       }
@@ -1782,7 +1786,7 @@ export function Viewport() {
   };
 
   /** The non-tool commands; returns a line to echo. */
-  const runAppCommand = (id: AppCommandId): string => {
+  const runAppCommand = (id: AppCommandId, argument?: string): string => {
     const app = useApp.getState();
     const entitiesOf = (ids: EntityId[]) => ids.map((i) => doc.get(i)).filter((en): en is Entity => !!en);
     switch (id) {
@@ -1855,6 +1859,18 @@ export function Viewport() {
         redraw();
         return relativeZeroRef.current ? "relative zero set" : "move the cursor onto the drawing first";
       }
+      case "blockEdit": {
+        const sel = app.selection.map((i) => doc.get(i)).find((en) => en?.type === "insert");
+        const name = argument ?? (sel && sel.type === "insert" ? sel.block : "");
+        if (!name) return "bedit: name a block or select an insert first";
+        const err = beginBlockEdit(name);
+        return err ?? `editing block ${name}`;
+      }
+      case "blockSave":
+        return saveBlockEdit() ?? "block saved";
+      case "blockClose":
+        discardBlockEdit();
+        return "block edit closed";
       case "save":
         void saveCurrent();
         return "save";
@@ -1911,6 +1927,13 @@ export function Viewport() {
     if (t?.doubleClick?.(toolCtx, pickFrom(e, world, resolvePick(world, e.shiftKey).snap))) {
       syncPrompt();
       redraw();
+      return;
+    }
+
+    // Double-click an insert to edit its block definition (B-04).
+    const dblInsert = hit ? doc.get(hit) : null;
+    if (dblInsert && dblInsert.type === "insert" && app.tool === "select" && doc.hasRecord("blocks", dblInsert.block)) {
+      beginBlockEdit(dblInsert.block);
       return;
     }
 
