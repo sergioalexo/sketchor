@@ -1,3 +1,4 @@
+import { blendWithWhite, hatchArt } from "./hatch/render";
 import { isFullEllipse } from "./ellipse";
 import type { ArcEntity, Entity, PolylineEntity } from "./entities";
 import { polylineSegments } from "./entities";
@@ -123,6 +124,43 @@ export function drawEntitiesToPdf(
       pdf.text(p.x, p.y, e.text, { size: e.height * scale, color: e.color ?? stroke });
     } else if (e.type === "polyline") {
       pdf.polyline(polylinePoints(e), paint, e.closed);
+    } else if (e.type === "hatch") {
+      // H-09: PDF here has no transparency, so a transparent hatch is blended toward the white paper instead.
+      const art = hatchArt(e);
+      if (!art) continue;
+      const t = art.transparency;
+      const rings = art.rings.map((ring) => ring.map(at));
+      if (art.background) pdf.rings(rings, { fill: blendWithWhite(art.background, t) });
+      const a = art.paint;
+      if (a.kind === "solid") pdf.rings(rings, { fill: blendWithWhite(a.color, t) });
+      else if (a.kind === "gradient") {
+        const stops = a.spec.stops.map((s) => ({ t: s.t, color: blendWithWhite(s.color, t) }));
+        const s = a.spec;
+        if (s.kind === "linear") {
+          const p1 = at({ x: s.x1, y: s.y1 });
+          const p2 = at({ x: s.x2, y: s.y2 });
+          pdf.shade(rings, { kind: "axial", x1: p1.x, y1: p1.y, x2: p2.x, y2: p2.y, stops });
+        } else {
+          const c = at({ x: s.cx, y: s.cy });
+          const f = at({ x: s.fx, y: s.fy });
+          pdf.shade(rings, { kind: "radial", cx: c.x, cy: c.y, r: s.r * scale, fx: f.x, fy: f.y, stops });
+        }
+      } else if (a.kind === "tint") {
+        if (a.opacity > 0) pdf.rings(rings, { fill: blendWithWhite(e.color ?? stroke, 1 - a.opacity * (1 - t)) });
+        else pdf.rings(rings, { stroke: paint.stroke, width: paint.width });
+      } else {
+        const col = blendWithWhite(e.color ?? stroke, t);
+        const flat: number[] = [];
+        for (let i = 0; i < a.segments.length; i += 2) {
+          const q = at({ x: a.segments[i], y: a.segments[i + 1] });
+          flat.push(q.x, q.y);
+        }
+        pdf.segments(flat, { stroke: col, width: Math.max(paint.width * 0.5, 0.1) });
+        for (let i = 0; i < a.dots.length; i += 2) {
+          const q = at({ x: a.dots[i], y: a.dots[i + 1] });
+          pdf.circle(q.x, q.y, paint.width * 0.6, { fill: col });
+        }
+      }
     } else {
       // A kind outside the built-in seven (kinds/registry.ts): its tessellation, one path per run.
       for (const run of kindTessellate(e as Entity, 0.01)) {

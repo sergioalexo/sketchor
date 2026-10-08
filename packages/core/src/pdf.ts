@@ -124,6 +124,8 @@ export class PdfBuilder {
   readonly height: number;
   private readonly pages: string[] = [];
   private current: string[] = [];
+  /** Gradient dictionaries (`/Sh1 << … >>`), shared by every page's resources. */
+  private readonly shadings: string[] = [];
 
   constructor(size: PdfPageSize = PDF_LETTER) {
     this.width = size.width;
@@ -201,6 +203,65 @@ export class PdfBuilder {
     this.current.push(`q\n${this.paint(paint)}\n${parts.join(" ")} ${this.finish(paint)}\nQ`);
   }
 
+  /** Several closed rings filled together with the even-odd rule (a region with islands), optionally outlined. */
+  rings(rings: readonly (readonly PdfPoint[])[], paint: PdfPaint): void {
+    const d = this.ringPath(rings);
+    if (!d) return;
+    const op = paint.fill && paint.stroke ? "B*" : paint.fill ? "f*" : "S";
+    this.current.push(`q\n${this.paint(paint)}\n${d} ${op}\nQ`);
+  }
+
+  /** Many independent segments `[x1, y1, x2, y2, …]` (page coordinates) as one stroked path. */
+  segments(flat: ArrayLike<number>, paint: PdfPaint): void {
+    const parts: string[] = [];
+    for (let i = 0; i + 3 < flat.length; i += 4) {
+      parts.push(`${num(flat[i])} ${num(this.ty(flat[i + 1]))} m ${num(flat[i + 2])} ${num(this.ty(flat[i + 3]))} l`);
+    }
+    if (parts.length === 0) return;
+    this.current.push(`q\n${this.paint({ ...paint, fill: undefined })}\n${parts.join(" ")} S\nQ`);
+  }
+
+  /**
+   * Fills the rings (even-odd clip) with a gradient. Coordinates are page
+   * coordinates (Y down). `radial` has a focus circle of radius 0 at (fx, fy).
+   */
+  shade(
+    rings: readonly (readonly PdfPoint[])[],
+    shading: { kind: "axial"; x1: number; y1: number; x2: number; y2: number; stops: { t: number; color: string }[] } | { kind: "radial"; cx: number; cy: number; r: number; fx: number; fy: number; stops: { t: number; color: string }[] },
+  ): void {
+    const d = this.ringPath(rings);
+    if (!d || shading.stops.length < 2) return;
+    const comp = (c: string): string => rgb(c).map((v) => num(v)).join(" ");
+    const stops = [...shading.stops].sort((a, b) => a.t - b.t);
+    const fns: string[] = [];
+    const bounds: string[] = [];
+    const encode: string[] = [];
+    for (let i = 0; i + 1 < stops.length; i++) {
+      fns.push(`<< /FunctionType 2 /Domain [0 1] /C0 [${comp(stops[i].color)}] /C1 [${comp(stops[i + 1].color)}] /N 1 >>`);
+      if (i > 0) bounds.push(num(stops[i].t));
+      encode.push("0 1");
+    }
+    const fn = `<< /FunctionType 3 /Domain [0 1] /Functions [${fns.join(" ")}] /Bounds [${bounds.join(" ")}] /Encode [${encode.join(" ")}] >>`;
+    const coords =
+      shading.kind === "axial"
+        ? `${num(shading.x1)} ${num(this.ty(shading.y1))} ${num(shading.x2)} ${num(this.ty(shading.y2))}`
+        : `${num(shading.fx)} ${num(this.ty(shading.fy))} 0 ${num(shading.cx)} ${num(this.ty(shading.cy))} ${num(shading.r)}`;
+    const dict = `<< /ShadingType ${shading.kind === "axial" ? 2 : 3} /ColorSpace /DeviceRGB /Coords [${coords}] /Function ${fn} /Extend [true true] >>`;
+    const name = `Sh${this.shadings.length + 1}`;
+    this.shadings.push(`/${name} ${dict}`);
+    this.current.push(`q\n${d} W* n\n/${name} sh\nQ`);
+  }
+
+  private ringPath(rings: readonly (readonly PdfPoint[])[]): string {
+    const parts: string[] = [];
+    for (const ring of rings) {
+      if (ring.length < 3) continue;
+      ring.forEach((p, i) => parts.push(`${num(p.x)} ${num(this.ty(p.y))} ${i === 0 ? "m" : "l"}`));
+      parts.push("h");
+    }
+    return parts.join(" ");
+  }
+
   /** `y` is the text baseline, measured down from the top of the page. */
   text(x: number, y: number, text: string, style: PdfTextStyle = {}): void {
     if (!text) return;
@@ -234,7 +295,7 @@ export class PdfBuilder {
     pages.forEach((content, i) => {
       objects.push(
         `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${num(this.width)} ${num(this.height)}] ` +
-          `/Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${6 + i * 2} 0 R >>`,
+          `/Resources << /Font << /F1 3 0 R /F2 4 0 R >>${this.shadings.length > 0 ? ` /Shading << ${this.shadings.join(" ")} >>` : ""} >> /Contents ${6 + i * 2} 0 R >>`,
       );
       objects.push(`<< /Length ${content.length} >>\nstream\n${content}\nendstream`);
     });

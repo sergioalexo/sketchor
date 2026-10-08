@@ -1,4 +1,5 @@
-import type { TextEntity, ArcEntity, CircleEntity, EllipseEntity, Entity, SplineEntity, ImageEntity, LineEntity, PolylineEntity } from "./entities";
+import { hatchArt } from "./hatch/render";
+import type { HatchEntity, TextEntity, ArcEntity, CircleEntity, EllipseEntity, Entity, SplineEntity, ImageEntity, LineEntity, PolylineEntity } from "./entities";
 import { layerOf, newEntityId, polylineSegments, textWidth } from "./entities";
 import type { Point } from "./geometry";
 import { arcPointAt, arcSweep, bulgeToArc, dist } from "./geometry";
@@ -188,6 +189,57 @@ export function entitiesToSvgDocument(entities: Entity[], opts: SvgExportOptions
     return out;
   };
 
+  // H-09: hatches. A pattern is explicit strokes (already clipped to the region), a solid a flat even-odd
+  // path, a gradient a real <linearGradient>/<radialGradient>; transparency is group opacity.
+  const defs: string[] = [];
+  let gradientIndex = 0;
+  const hatchSvg = (h: HatchEntity): string => {
+    const art = hatchArt(h);
+    const col = h.color ? escapeXml(h.color) : stroke;
+    if (!art) return "";
+    const d = art.rings.map((ring) => ring.map((q, i) => `${i === 0 ? "M" : "L"}${fmt(toSvg(q).x)} ${fmt(toSvg(q).y)}`).join(" ") + " Z").join(" ");
+    const opacity = art.transparency > 0 ? ` opacity="${fmt(1 - art.transparency)}"` : "";
+    const parts: string[] = [];
+    if (art.background) parts.push(`<path d="${d}" fill="${escapeXml(art.background)}" fill-rule="evenodd" stroke="none"/>`);
+    const a = art.paint;
+    if (a.kind === "solid") parts.push(`<path d="${d}" fill="${escapeXml(a.color)}" fill-rule="evenodd" stroke="none"/>`);
+    else if (a.kind === "gradient") {
+      const id = `hatchgrad${++gradientIndex}`;
+      const s = a.spec;
+      const stops = s.stops.map((st) => `<stop offset="${fmt(st.t)}" stop-color="${escapeXml(st.color)}"/>`).join("");
+      if (s.kind === "linear") {
+        const p1 = toSvg({ x: s.x1, y: s.y1 });
+        const p2 = toSvg({ x: s.x2, y: s.y2 });
+        defs.push(`<linearGradient id="${id}" gradientUnits="userSpaceOnUse" x1="${fmt(p1.x)}" y1="${fmt(p1.y)}" x2="${fmt(p2.x)}" y2="${fmt(p2.y)}">${stops}</linearGradient>`);
+      } else {
+        const c = toSvg({ x: s.cx, y: s.cy });
+        const f = toSvg({ x: s.fx, y: s.fy });
+        defs.push(`<radialGradient id="${id}" gradientUnits="userSpaceOnUse" cx="${fmt(c.x)}" cy="${fmt(c.y)}" r="${fmt(s.r)}" fx="${fmt(f.x)}" fy="${fmt(f.y)}">${stops}</radialGradient>`);
+      }
+      parts.push(`<path d="${d}" fill="url(#${id})" fill-rule="evenodd" stroke="none"/>`);
+    } else if (a.kind === "tint") {
+      parts.push(a.opacity > 0 ? `<path d="${d}" fill="${col}" fill-opacity="${fmt(a.opacity)}" fill-rule="evenodd" stroke="none"/>` : `<path d="${d}"${paint(h)} fill="none"/>`);
+    } else {
+      const seg = a.segments;
+      const dd: string[] = [];
+      for (let i = 0; i < seg.length; i += 4) {
+        const p1 = toSvg({ x: seg[i], y: seg[i + 1] });
+        const p2 = toSvg({ x: seg[i + 2], y: seg[i + 3] });
+        dd.push(`M${fmt(p1.x)} ${fmt(p1.y)}L${fmt(p2.x)} ${fmt(p2.y)}`);
+      }
+      const w = h.lineweight && h.lineweight > 0 ? fmt(h.lineweight) : fmt(Math.max(strokeWidth * 0.5, 0.05));
+      if (dd.length > 0) parts.push(`<path d="${dd.join("")}" stroke="${col}" stroke-width="${w}" fill="none"/>`);
+      const dots = a.dots;
+      const dotPath: string[] = [];
+      for (let i = 0; i < dots.length; i += 2) {
+        const q = toSvg({ x: dots[i], y: dots[i + 1] });
+        dotPath.push(`M${fmt(q.x)} ${fmt(q.y)}h0`);
+      }
+      if (dotPath.length > 0) parts.push(`<path d="${dotPath.join("")}" stroke="${col}" stroke-width="${fmt(Number(w) * 2)}" stroke-linecap="round" fill="none"/>`);
+    }
+    return parts.length > 1 || opacity ? `<g${opacity}>${parts.join("")}</g>` : parts.join("");
+  };
+
   const groups: string[] = [];
   let layerIndex = 0;
   for (const [layer, ents] of byLayer) {
@@ -231,6 +283,8 @@ export function entitiesToSvgDocument(entities: Entity[], opts: SvgExportOptions
         body.push(`<path d="${splinePathD(e, toSvg)}${e.closed ? " Z" : ""}"${paint(e)}/>`);
       } else if (e.type === "polyline") {
         body.push(`<path d="${polylinePathD(e, toSvg)}"${paint(e)}/>`);
+      } else if (e.type === "hatch") {
+        body.push(hatchSvg(e));
       } else {
         // A kind outside the built-in seven (kinds/registry.ts): its tessellation, one path per run.
         for (const run of kindTessellate(e, 0.01)) {
@@ -255,6 +309,7 @@ export function entitiesToSvgDocument(entities: Entity[], opts: SvgExportOptions
     `<?xml version="1.0" encoding="UTF-8"?>\n` +
     `<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" width="${sizeOf(width)}" height="${sizeOf(height)}" ` +
     `viewBox="0 0 ${fmt(width)} ${fmt(height)}" stroke="${stroke}" stroke-width="${fmt(strokeWidth)}" fill="none">\n` +
+    (defs.length > 0 ? `<defs>${defs.join("")}</defs>\n` : "") +
     `${groups.join("\n")}\n</svg>\n`
   );
 }
