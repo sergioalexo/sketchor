@@ -214,7 +214,7 @@ preview becomes an image entity; PDF-based `.ai` → a message, no crash).
 `apps/web/src/io/epsImport.ts` reads files in **ranges** (`RangeReader`; Rust
 `read_file_range`) — never `arrayBuffer()` a whole EPS: Photoshop ones reach
 260 MB. Real customer files are never copied into the repo; tests use inline
-synthetic fixtures (`eps.test.ts`).
+synthetic fixtures (`eps.test.ts`). `export.ts` writes EPS (`entitiesToEps`, and `entitiesToEpsFile` with an optional DOS header + TIFF preview): geometry is translated to the lower-left corner and `%%SketchorOrigin x y mm` carries the offset so the importer restores absolute positions — `export.test.ts` pins the 0.001 mm round trip; keep it green when touching either side.
 
 ## Build & run
 

@@ -48,6 +48,8 @@ export interface EpsHeader {
   agm: boolean;
   /** `%%Title` when present. */
   title: string;
+  /** Sketchor's own `%%SketchorOrigin: x y mm` — where the page's lower-left corner sits in the drawing, so a round trip keeps absolute positions. */
+  sketchorOrigin: [number, number] | null;
 }
 
 function latin1(b: Uint8Array, start: number, end: number): string {
@@ -79,6 +81,8 @@ export function parseEpsHeader(ps: Uint8Array): EpsHeader {
   const ll = /^%%LanguageLevel:\s*(\d+)/m.exec(head);
   const kind: EpsKind = pdf ? "pdf" : /Photoshop/i.test(creator) ? "photoshop" : /Illustrator/i.test(creator) || /^%AI\d*_/m.test(head) ? "illustrator" : "generic";
   const bbox = bboxOf(head, "BoundingBox");
+  const so = /^%%SketchorOrigin:\s*([-+\d.eE]+)\s+([-+\d.eE]+)\s*mm/m.exec(head);
+  const sketchorOrigin = so && Number.isFinite(Number(so[1])) && Number.isFinite(Number(so[2])) ? ([Number(so[1]), Number(so[2])] as [number, number]) : null;
   return {
     kind,
     creator,
@@ -87,6 +91,7 @@ export function parseEpsHeader(ps: Uint8Array): EpsHeader {
     languageLevel: ll ? Number(ll[1]) : 1,
     agm: text.includes("Adobe_AGM_Core"),
     title,
+    sketchorOrigin,
   };
 }
 

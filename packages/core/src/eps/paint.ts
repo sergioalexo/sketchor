@@ -41,31 +41,39 @@ function styled<T extends Entity>(e: T, st: EntityStyle): T {
   return e;
 }
 
-/** Whether `sp` is a loop of four Béziers tracing a circle; returns it in world mm. */
+/**
+ * Whether a closed run of Béziers traces a circle: 4 curves (Illustrator's own
+ * circle) or 8/12/16 (finer writers, including Sketchor's EPS export). On-curve
+ * points equidistant from the centre, equal angular steps, handles the textbook
+ * 4/3·tan(step/4)·r long. Returns centre and radius in world mm.
+ */
 function asCircle(nodes: { p: Point; c1?: Point; c2?: Point }[]): { center: Point; radius: number } | null {
-  if (nodes.length !== 5) return null;
-  const P = nodes.slice(0, 4).map((n) => n.p);
-  if (d2(nodes[4].p, P[0]) > 1e-4) return null;
-  if (nodes.slice(1).some((n) => !n.c1 || !n.c2)) return null;
-  const center = { x: (P[0].x + P[2].x) / 2, y: (P[0].y + P[2].y) / 2 };
-  const c2 = { x: (P[1].x + P[3].x) / 2, y: (P[1].y + P[3].y) / 2 };
-  const r = d2(P[0], center);
-  if (r < 1e-6 || d2(center, c2) > r * 1e-3) return null;
-  for (const p of P) if (Math.abs(d2(p, center) - r) > r * 1e-3) return null;
-  // consecutive points a quarter turn apart
-  for (let i = 0; i < 4; i++) {
+  const n = nodes.length - 1;
+  if (n < 4 || n > 16 || n % 4 !== 0) return null;
+  if (d2(nodes[n].p, nodes[0].p) > 1e-4) return null;
+  if (nodes.slice(1).some((q) => !q.c1 || !q.c2)) return null;
+  const P = nodes.slice(0, n).map((q) => q.p);
+  const center = { x: P.reduce((t, q) => t + q.x, 0) / n, y: P.reduce((t, q) => t + q.y, 0) / n };
+  const r = P.reduce((t, q) => t + d2(q, center), 0) / n;
+  if (r < 1e-6) return null;
+  for (const q of P) if (Math.abs(d2(q, center) - r) > r * 1e-3) return null;
+  const step = (2 * Math.PI) / n;
+  let dir = 0;
+  for (let i = 0; i < n; i++) {
     const a = P[i];
-    const b = P[(i + 1) % 4];
-    const dot = (a.x - center.x) * (b.x - center.x) + (a.y - center.y) * (b.y - center.y);
-    if (Math.abs(dot) > r * r * 2e-3) return null;
+    const c = P[(i + 1) % n];
+    const cross = (a.x - center.x) * (c.y - center.y) - (a.y - center.y) * (c.x - center.x);
+    const dot = (a.x - center.x) * (c.x - center.x) + (a.y - center.y) * (c.y - center.y);
+    const ang = Math.atan2(cross, dot);
+    if (dir === 0) dir = Math.sign(ang);
+    if (!dir || Math.abs(ang - dir * step) > 2e-3) return null;
   }
-  // handles: 0.5523 r, tangent
-  const k = 0.5522847498 * r;
-  for (let i = 1; i <= 4; i++) {
+  const k = (4 / 3) * Math.tan(step / 4) * r;
+  for (let i = 1; i <= n; i++) {
     const a = P[i - 1];
-    const b = P[i % 4];
-    const { c1, c2: c2p } = nodes[i];
-    if (Math.abs(d2(a, c1!) - k) > r * 5e-3 || Math.abs(d2(b, c2p!) - k) > r * 5e-3) return null;
+    const c = P[i % n];
+    const { c1, c2 } = nodes[i];
+    if (Math.abs(d2(a, c1!) - k) > r * 5e-3 || Math.abs(d2(c, c2!) - k) > r * 5e-3) return null;
   }
   return { center, radius: r };
 }

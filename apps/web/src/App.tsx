@@ -45,6 +45,7 @@ import { openExternal } from "./update/updateService";
 import { useTheme } from "./theme/themeStore";
 import { ThemePicker } from "./theme/ThemePicker";
 import { useThemeDrop } from "./theme/useThemeDrop";
+import { useDrawingDrop } from "./io/useDrawingDrop";
 
 /**
  * The project's home page, opened by the logo in the toolbar. Must stay
@@ -579,6 +580,7 @@ export function App() {
   const clearPinnedMeasurements = useApp((s) => s.clearPinnedMeasurements);
   const referenceEdgeId = useApp((s) => s.referenceEdgeId);
   useThemeDrop();
+  useDrawingDrop();
   const saveNotice = useApp((s) => s.saveNotice);
   const setSaveNotice = useApp((s) => s.setSaveNotice);
 

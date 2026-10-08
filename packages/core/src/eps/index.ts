@@ -12,6 +12,7 @@ import { rgbaToPngDataUrl } from "./png";
 import { decodeTiff, downscale, type RgbaImage } from "./tiff";
 
 export * from "./dsc";
+export * from "./export";
 export { decodeTiff, downscale } from "./tiff";
 export { encodePng, rgbaToPngDataUrl } from "./png";
 export { cmykToRgb, rgbToCss } from "./color";
@@ -102,8 +103,9 @@ export function importEpsParts(parts: EpsParts, opts: EpsImportOptions = {}): Ep
   }
 
   const bb = header.hiResBbox;
-  const ox = bb ? bb[0] : 0;
-  const oy = bb ? bb[1] : 0;
+  // mm → points: a file we wrote says where its lower-left corner belongs in the drawing
+  const ox = (bb ? bb[0] : 0) - (header.sketchorOrigin ? header.sketchorOrigin[0] / K : 0);
+  const oy = (bb ? bb[1] : 0) - (header.sketchorOrigin ? header.sketchorOrigin[1] / K : 0);
   let startAt: number | undefined;
   if (header.agm) {
     for (const m of AGM_MARKERS) {
