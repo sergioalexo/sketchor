@@ -395,6 +395,26 @@ export function overlaySvgText(text: string, label: string): { count: number; wa
   return { ...added, warnings };
 }
 
+/**
+ * F-01: replaces the drawing with an imported EPS/AI (already parsed — see
+ * io/epsImport.ts). Points are already mm; the document's unit is left as it is.
+ */
+export function importEpsResult(entities: Entity[], warnings: string[]): { count: number; warnings: string[] } {
+  applyImportedEntities(entities, true);
+  useApp.getState().setImportReport(svgReport(entities));
+  useApp.getState().setFileWarnings(warnings);
+  useApp.getState().setImportUnits(null);
+  return { count: entities.length, warnings };
+}
+
+/** EPS/AI overlay: as {@link overlaySvgText} — the geometry goes on its own layer. */
+export function overlayEpsResult(entities: Entity[], warnings: string[], label: string): { count: number; warnings: string[]; layer: string } {
+  useApp.getState().setImportReport(svgReport(entities));
+  useApp.getState().setFileWarnings(warnings);
+  const added = overlayEntities(entities, label);
+  return { ...added, warnings };
+}
+
 export type ToolId =
   | "select"
   | "line"

@@ -79,3 +79,4 @@ export * from "./hatch/gradient";
 export * from "./hatch/ops";
 export * from "./hatch/render";
 export * from "./hatch/hatchDxf";
+export * from "./eps";

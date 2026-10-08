@@ -194,6 +194,28 @@ filtered to finite numbers. Export writes Inkscape layers, exact `A` arcs and
 `mode: "laser"` (hairline, one colour per layer, no fills/text). New SVG
 behaviour gets a fixture in `src/fixtures/svg/` + `svgFixtures.test.ts`.
 
+## EPS import (`packages/core/src/eps/`, plan F-01)
+
+No Ghostscript: `interp.ts` is a restricted PostScript interpreter (stack, dict
+stack, control, matrices, path/paint/colour/text operators; `Interp` takes the
+raw bytes + an origin and returns entities in mm). **Illustrator's AGM/CoolType
+prolog is never executed** — `importEpsParts` starts the interpreter at
+`%%EndPageSetup` (when the header names `Adobe_AGM_Core`) and the AGM
+shorthands (`mo li cv cp clp f ef @ ct lw cmyk sepcs sep add_res get_res img nf
+msf sh …`) are native ops. Unknown operators are counted (`unsupported`) and
+skipped; every loop ticks an op budget, the operand stack is capped, and
+non-finite coordinates are rejected, so hostile input terminates. `paint.ts`
+turns subpaths into entities (all-line run → polyline, all-curve → exact cubic
+spline, four quarter-turn Béziers → circle, compound fill → one solid hatch;
+fill-then-stroke of the same path becomes one entity). Colours: black stays
+"automatic" (no colour field), spot colours name the layer. `dsc.ts` strips the
+DOS binary header (`C5D0D3C6`) and sniffs the creator (Photoshop → the TIFF
+preview becomes an image entity; PDF-based `.ai` → a message, no crash).
+`apps/web/src/io/epsImport.ts` reads files in **ranges** (`RangeReader`; Rust
+`read_file_range`) — never `arrayBuffer()` a whole EPS: Photoshop ones reach
+260 MB. Real customer files are never copied into the repo; tests use inline
+synthetic fixtures (`eps.test.ts`).
+
 ## Build & run
 
 ```bash

@@ -135,7 +135,7 @@ fn scan_drawings(dir: &str) -> Result<Vec<DrawingEntry>, String> {
             continue;
         }
         let lower = path.to_string_lossy().to_lowercase();
-        if !(lower.ends_with(".dxf") || lower.ends_with(".svg") || is_model_path(&lower)) {
+        if !(lower.ends_with(".dxf") || lower.ends_with(".svg") || lower.ends_with(".eps") || lower.ends_with(".ai") || is_model_path(&lower)) {
             continue;
         }
         let name = match path.file_name() {
@@ -187,6 +187,26 @@ async fn read_file_bytes(path: String) -> Result<tauri::ipc::Response, String> {
 
 fn read_bytes(path: &str) -> Result<Vec<u8>, String> {
     std::fs::read(path).map_err(|e| e.to_string())
+}
+
+/// Reads `length` bytes starting at `offset` (fewer at the end of the file) as
+/// an `ArrayBuffer`. EPS/AI import (F-01) needs only a header, a preview and,
+/// for Illustrator files, the PostScript section — a Photoshop EPS can be
+/// 260 MB of raster nobody wants shipped over IPC.
+#[tauri::command]
+async fn read_file_range(path: String, offset: u64, length: u64) -> Result<tauri::ipc::Response, String> {
+    tauri::async_runtime::spawn_blocking(move || read_range(&path, offset, length).map(tauri::ipc::Response::new))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn read_range(path: &str, offset: u64, length: u64) -> Result<Vec<u8>, String> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(path).map_err(|e| e.to_string())?;
+    f.seek(SeekFrom::Start(offset)).map_err(|e| e.to_string())?;
+    let mut buf = Vec::new();
+    f.take(length).read_to_end(&mut buf).map_err(|e| e.to_string())?;
+    Ok(buf)
 }
 
 /// Writes a drawing back to a full native path. The desktop file browser and
@@ -361,6 +381,7 @@ fn main() {
             list_drawings_in_dir,
             read_drawing_file,
             read_file_bytes,
+            read_file_range,
             write_drawing_file,
             write_thumbnail_cache,
             explorer_previews_status,

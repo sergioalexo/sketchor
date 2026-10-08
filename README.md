@@ -209,6 +209,7 @@ format:
   inside a block inherits the layer the block was placed on, as CAD expects.
 - **SVG** — read/write, dimensionally accurate 1:1 world units; hatches export as exact stroke segments, flat fills or real gradients (PDF: shadings); import resolves stroke/fill/dashes/weights from attributes, `style=` and `<style>` CSS, reads text, Inkscape layers and `<use>`; export writes Inkscape layers, exact arcs and a "for laser / CAM" mode; fixture corpus + hostile-input tests
   (`packages/core/src/svg.ts`).
+- **EPS / AI (Illustrator EPS)** — import only: an own PostScript-subset interpreter (`packages/core/src/eps/`) reads Illustrator and plain-PostScript EPS into exact splines, polylines, circles, solid hatches, text and images (CMYK → RGB, spot colours → layers, points → mm); Photoshop raster EPS and PDF-based `.ai` are handled gracefully (embedded preview / a clear message). Files are read in ranges, so a 260 MB raster EPS opens instantly.
 - **DWG** — read-only, via a GPL-3.0 WebAssembly build of GNU LibreDWG (see
   `apps/web/src/browser/dwgImport.ts` and `/NOTICE.md`). There is no DWG
   export.

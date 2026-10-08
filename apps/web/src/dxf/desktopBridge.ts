@@ -1,6 +1,6 @@
-import { importDxfText, importEntities, importSvgText, openIntoSession, useApp } from "../state/store";
+import { importDxfText, importEntities, importEpsResult, importSvgText, openIntoSession, useApp } from "../state/store";
 import { DWG_UNREADABLE, dwgToDxfText } from "../browser/dwgImport";
-import { EPS_UNSUPPORTED } from "../io/formats";
+import { importEpsFromReader, tauriReader } from "../io/epsImport";
 import { decodeDxfBytes } from "@sketchor/core";
 import { bindDxfVersion, bindSavePath, openModelBytes } from "../io/drawingFile";
 
@@ -96,11 +96,17 @@ export function initDesktopFileOpen(): void {
     revealFolder(payload.dir);
   });
 
-  // F-01 (EPS importer) will parse the bytes; until then the tab opens empty with a warning.
+  // F-01: EPS/AI is read in ranges (see io/epsImport.ts), so a 260 MB raster EPS only costs its preview.
   tauri.event.listen("open-eps", ({ payload }) => {
-    if (!payload) return;
-    openIntoSession(payload.name, () => importEntities([], [EPS_UNSUPPORTED]));
-    revealFolder(payload.dir);
+    if (!payload?.path) return;
+    const path = payload.path;
+    importEpsFromReader(tauriReader(tauri.core.invoke, path)).then(
+      (eps) => {
+        openIntoSession(payload.name, () => importEpsResult(eps.entities, eps.warnings));
+        revealFolder(payload.dir);
+      },
+      () => openIntoSession(payload.name, () => importEntities([], ["the EPS/AI file could not be read"])),
+    );
   });
 
   tauri.event.listen("open-model", ({ payload }) => {

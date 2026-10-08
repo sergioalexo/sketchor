@@ -1,7 +1,8 @@
 import { type BlockDefinition, decodeDxfBytes, entitiesToDxf, entitiesToDxf2018, entitiesToSvgDocument, flattenInserts } from "@sketchor/core";
 import { DWG_UNREADABLE, dwgToDxfText } from "../browser/dwgImport";
 import { isModelFile, loadModel } from "../model3d/stepImport";
-import { EPS_UNSUPPORTED, acceptList, allExtensions, formatOf } from "./formats";
+import { acceptList, allExtensions, formatOf } from "./formats";
+import { importEpsBlob } from "./epsImport";
 import {
   doc,
   finishSessionSave,
@@ -9,7 +10,9 @@ import {
   getSessions,
   importDxfText,
   importEntities,
+  importEpsResult,
   importSvgText,
+  overlayEpsResult,
   overlaySvgText,
   isModelSession,
   openIntoSession,
@@ -217,7 +220,7 @@ function defaultSaveName(format: SaveFormat): string {
   const base = target?.name ?? getSessions().find((s) => s.id === activeSessionId() && s.named)?.name;
   const ext = fileExtension(format);
   if (!base) return `drawing.${ext}`;
-  return `${base.replace(/\.(dxf|svg|dwg|step|stp|iges|igs)$/i, "")}.${ext}`;
+  return `${base.replace(/\.(dxf|svg|dwg|eps|ai|step|stp|iges|igs)$/i, "")}.${ext}`;
 }
 
 /** Saves the current drawing as DXF or SVG. No-op if the location prompt is cancelled. */
@@ -339,7 +342,8 @@ export async function loadDrawingFile(name: string, file: File): Promise<void> {
     const text = await file.text();
     openIntoSession(name, () => importSvgText(text));
   } else if (/\.(eps|ai)$/i.test(name)) {
-    openIntoSession(name, () => importEntities([], [EPS_UNSUPPORTED])); // F-01 replaces this
+    const eps = await importEpsBlob(file);
+    openIntoSession(name, () => importEpsResult(eps.entities, eps.warnings));
   } else if (/\.dwg$/i.test(name)) {
     const text = await dwgToDxfText(await file.arrayBuffer());
     openIntoSession(name, () => (text ? importDxfText(text) : importEntities([], [DWG_UNREADABLE])));
@@ -403,8 +407,8 @@ export async function overlayDrawingFile(name: string, file: File): Promise<{ co
     return overlaySvgText(text, label);
   }
   if (/\.(eps|ai)$/i.test(name)) {
-    useApp.getState().setFileWarnings([EPS_UNSUPPORTED]);
-    return { ...overlayEntities([], label), warnings: [EPS_UNSUPPORTED], layer: label };
+    const eps = await importEpsBlob(file);
+    return overlayEpsResult(eps.entities, eps.warnings, label);
   }
   if (/\.dwg$/i.test(name)) {
     const text = await dwgToDxfText(await file.arrayBuffer());

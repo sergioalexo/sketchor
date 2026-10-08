@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "../theme/themeStore";
 import { decodeDxfBytes, parseSvgText } from "@sketchor/core";
-import { getSessions, importDxfText, importSvgText, openIntoSession, useApp } from "../state/store";
+import { getSessions, importDxfText, importEpsResult, importSvgText, openIntoSession, useApp } from "../state/store";
 import { bindDxfVersion, bindSaveHandle, bindSavePath, fileDxfText, openModelBytes } from "../io/drawingFile";
 import { isModelFile } from "../model3d/stepImport";
 import { acceptList, browserAddFilter, mimeOf } from "../io/formats";
-import { fileToSvg, isDrawingFile, queueThumbnail } from "./thumbnail";
+import { epsEntitiesToSvg, fileToSvg, isDrawingFile, isEpsFile, queueThumbnail } from "./thumbnail";
+import { blobReader, epsThumbnailDataUrl, importEpsFromReader, tauriReader, type RangeReader } from "../io/epsImport";
 
 interface Entry {
   name: string;
@@ -68,8 +69,20 @@ function tauri(): TauriInvoke | undefined {
   return (window as unknown as { __TAURI__?: TauriInvoke }).__TAURI__;
 }
 
+/** A range reader over an entry's bytes (EPS/AI are never read whole as text), or null when it has no readable source. */
+async function entryReader(entry: Entry): Promise<RangeReader | null> {
+  if (entry.file) return blobReader(entry.file);
+  if (entry.handle) return blobReader(await entry.handle.getFile());
+  if (entry.path) {
+    const t = tauri();
+    return t ? tauriReader(t.core.invoke, entry.path) : null;
+  }
+  return null;
+}
+
 async function readEntryText(entry: Entry): Promise<string> {
   if (entry.text !== undefined) return entry.text;
+  if (isEpsFile(entry.name)) return ""; // binary: opened / previewed through entryReader
   const isDxf = /\.dxf$/i.test(entry.name);
   if (entry.file) return isDxf ? fileDxfText(entry.file) : entry.file.text();
   if (entry.handle) {
@@ -108,6 +121,12 @@ async function readEntryBytes(entry: Entry): Promise<ArrayBuffer> {
 }
 
 async function openEntry(entry: Entry, text: string): Promise<void> {
+  if (isEpsFile(entry.name)) {
+    const reader = await entryReader(entry);
+    const eps = reader ? await importEpsFromReader(reader) : { entities: [], warnings: ["the EPS/AI file could not be read"] };
+    openIntoSession(entry.name, () => importEpsResult(eps.entities, eps.warnings));
+    return;
+  }
   if (isModelFile(entry.name)) {
     // View-only, opens in its own 3D tab; nothing to bind a Save to.
     openModelBytes(entry.name, await readEntryBytes(entry));
@@ -592,7 +611,7 @@ export function FileExplorerPanel({ hidden, onClose }: { hidden: boolean; onClos
    * been read yet are dropped rather than sent empty.
    */
   const dragPayload = (entry: Entry): { name: string; text: string }[] => {
-    const group = selected.includes(tagKey(entry)) ? selectedEntries : [entry];
+    const group = (selected.includes(tagKey(entry)) ? selectedEntries : [entry]).filter((e) => !isEpsFile(e.name)); // binary: no text to carry
     return group
       .map((e) => ({ name: e.name, text: textCache.current.get(tagKey(e)) }))
       .filter((f): f is { name: string; text: string } => f.text !== undefined);
@@ -625,8 +644,8 @@ export function FileExplorerPanel({ hidden, onClose }: { hidden: boolean; onClos
   /** Writes the current selection out as individual files (the multi-file counterpart to dragging one out). */
   const exportSelected = async () => {
     for (const entry of selectedEntries) {
-      const text = await readEntryText(entry);
-      const url = URL.createObjectURL(new Blob([text], { type: MIME_FOR(entry.name) }));
+      const body = isEpsFile(entry.name) ? await readEntryBytes(entry) : await readEntryText(entry);
+      const url = URL.createObjectURL(new Blob([body], { type: MIME_FOR(entry.name) }));
       const a = document.createElement("a");
       a.href = url;
       a.download = entry.name;
@@ -953,6 +972,22 @@ function useThumbnail(
                 );
               } catch {
                 setSvg(fallback);
+              }
+              return;
+            }
+            if (isEpsFile(entry.name)) {
+              // F-03: the file's own TIFF preview when it has one (instant, and what the author saw); else render the imported vectors.
+              try {
+                const reader = await entryReader(entry);
+                if (!reader) throw new Error("no source");
+                const url = await epsThumbnailDataUrl(reader, size * 3);
+                if (url) setSvg(`<img src="${url}" alt="" draggable="false" />`);
+                else {
+                  const eps = await importEpsFromReader(reader);
+                  setSvg(epsEntitiesToSvg(eps.entities, { size, background: canvasTheme.bg, stroke: canvasTheme.entity }));
+                }
+              } catch {
+                setSvg(fileToSvg(entry.name, "", { size }));
               }
               return;
             }

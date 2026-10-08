@@ -1,14 +1,14 @@
-import { dxfToSvg, entitiesToSvg, parseSvgText, type ThumbnailOptions } from "@sketchor/core";
+import { dxfToSvg, entitiesToSvg, parseSvgText, type Entity, type ThumbnailOptions } from "@sketchor/core";
 
 /**
  * True for file kinds the in-app file browser lists thumbnails for:
- * drawings (DXF/SVG) and 3D models (STEP/IGES, previewed in isometric view
+ * drawings (DXF/SVG/EPS/AI) and 3D models (STEP/IGES, previewed in isometric view
  * via model3d/modelThumbnail.ts). DWG is import-only and not text-readable,
  * so it's opened via the Open dialog / file association rather than browsed
  * here — see drawingFile.ts.
  */
 export function isDrawingFile(name: string): boolean {
-  return /\.(dxf|svg|step|stp|iges|igs)$/i.test(name);
+  return /\.(dxf|svg|eps|ai|step|stp|iges|igs)$/i.test(name);
 }
 
 /**
@@ -24,6 +24,14 @@ export function fileToSvg(name: string, text: string, opts?: ThumbnailOptions): 
   } catch {
     return entitiesToSvg([], opts);
   }
+}
+
+/** True for the binary PostScript formats (EPS/AI), which are read in ranges rather than as text. */
+export const isEpsFile = (name: string): boolean => /\.(eps|ai)$/i.test(name);
+
+/** F-03: thumbnail SVG for imported EPS/AI geometry (used when a file has no embedded preview). Raster entities are left out. */
+export function epsEntitiesToSvg(entities: Entity[], opts?: ThumbnailOptions): string {
+  return entitiesToSvg(entities.filter((e) => e.type !== "image"), opts);
 }
 
 /* --------------------------- background rendering ------------------------- */
