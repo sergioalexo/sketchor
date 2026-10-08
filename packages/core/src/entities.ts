@@ -424,6 +424,8 @@ export interface HatchEntity {
   associative?: boolean;
   /** Boundary entity ids, when associative. */
   sources?: EntityId[];
+  /** Draw order, lower first (H-08); absent = 0. A negative number sends the hatch behind its boundary. */
+  drawOrder?: number;
   /** An associative hatch whose boundary could no longer be formed keeps its last loops and is flagged (H-05). */
   boundaryLost?: boolean;
   backgroundColor?: string;

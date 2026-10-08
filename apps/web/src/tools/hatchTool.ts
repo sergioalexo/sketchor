@@ -46,6 +46,8 @@ export class HatchTool implements Tool {
 
   prompt(): string {
     const s = this.settings();
+    const editing = useApp.getState().hatchEdit;
+    if (editing) return editing.pickOrigin ? "Hatch origin: click the new pattern origin" : "Editing hatch: change the panel, Apply, then Done";
     if (s.mode === "match") return "Match hatch: click an existing hatch to copy its pattern, scale and angle";
     if (s.mode === "objects") return this.objects.length ? `Hatch: ${this.objects.length} object(s) picked — click more, Enter to hatch, Esc to cancel` : "Hatch: click boundary objects (or select some first), then Enter";
     return this.pending ? "Hatch: Shift+click adds regions, click or Enter to create the hatch" : "Hatch: click inside a closed region (Shift+click collects several)";
@@ -95,6 +97,16 @@ export class HatchTool implements Tool {
 
   pick(ctx: ToolContext, p: Pick): void {
     const s = this.settings();
+    const editing = useApp.getState().hatchEdit;
+    if (editing) {
+      // Editing an existing hatch: a click only sets its origin when asked to, never makes a new hatch.
+      const h = ctx.doc.get(editing.id);
+      if (editing.pickOrigin && h && h.type === "hatch" && h.paint.kind === "pattern") {
+        ctx.execute({ type: "update-entity", entity: { ...h, paint: { ...h.paint, origin: { x: p.point.x, y: p.point.y } } } });
+        useApp.getState().setHatchEdit({ id: editing.id, pickOrigin: false });
+      }
+      return;
+    }
     if (s.mode === "match") {
       const hit = ctx.hitTest(p.world).map((id) => ctx.doc.get(id)).find((e) => e?.type === "hatch");
       if (hit && hit.type === "hatch") useApp.getState().setHatchSettings({ ...settingsFromHatch(hit), mode: "point" });

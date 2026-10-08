@@ -703,6 +703,7 @@ export function diffToCommands(doc: SketchDocument, parsed: ParsedEntity[]): Com
           if (existing.associative !== undefined) updated.associative = existing.associative;
           if (existing.sources) updated.sources = existing.sources;
           if (existing.boundaryLost) updated.boundaryLost = existing.boundaryLost;
+          if (existing.drawOrder !== undefined) updated.drawOrder = existing.drawOrder;
           if (existing.backgroundColor !== undefined) updated.backgroundColor = existing.backgroundColor;
           if (existing.transparency !== undefined) updated.transparency = existing.transparency;
         }

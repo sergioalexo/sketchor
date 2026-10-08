@@ -75,3 +75,4 @@ export * from "./hatch/associate";
 export * from "./hatch/userPatterns";
 export * from "./hatch/tile";
 export * from "./hatch/gradient";
+export * from "./hatch/ops";

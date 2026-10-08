@@ -1,3 +1,4 @@
+import { settingsFromHatch } from "../tools/hatchTool";
 import { useEffect, useRef, useState } from "react";
 import type { BoxSelectMode, ClosedRegion, Command, Entity, EntityId, Point, TextEntity } from "@sketchor/core";
 import {
@@ -1962,6 +1963,17 @@ export function Viewport() {
       } else {
         beginBlockEdit(dblInsert.block);
       }
+      return;
+    }
+
+    // Double-click a hatch to edit it in the Hatch panel (H-08).
+    const dblHatch = hit ? doc.get(hit) : null;
+    if (dblHatch && dblHatch.type === "hatch" && app.tool === "select") {
+      app.setHatchSettings(settingsFromHatch(dblHatch));
+      app.setTool("fill");
+      app.setHatchEdit({ id: dblHatch.id, pickOrigin: false });
+      syncPrompt();
+      redraw();
       return;
     }
 

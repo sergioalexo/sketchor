@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Command, Entity, HatchEntity, PolylineEntity, SplineEntity } from "@sketchor/core";
-import { GRADIENT_NAMES, entityArea, entityLength, arcPointAt, arcSweep, bulgeToArc, BUILTIN_LINETYPES, dist, ellipseSweep, nurbsDomain, nurbsPointAt, findClosedRegions, isFullEllipse, layerOf, polylineLength, addSplinePoint, polylineToSpline, rebuildSpline, refitSpline, removeSplinePoint, splineToControlPoints, splineToPolyline } from "@sketchor/core";
+import { GRADIENT_NAMES, explodeHatchCommands, recreateBoundaryCommands, setHatchDrawOrder, entityArea, entityLength, arcPointAt, arcSweep, bulgeToArc, BUILTIN_LINETYPES, dist, ellipseSweep, nurbsDomain, nurbsPointAt, findClosedRegions, isFullEllipse, layerOf, polylineLength, addSplinePoint, polylineToSpline, rebuildSpline, refitSpline, removeSplinePoint, splineToControlPoints, splineToPolyline } from "@sketchor/core";
 import { bus, doc, useApp } from "../state/store";
+import { settingsFromHatch } from "../tools/hatchTool";
 import { parseLength } from "../tools/typedInput";
 import { factorFromMm, formatArea, formatLength, type DisplayUnit } from "../units";
 
@@ -316,6 +317,7 @@ function Geometry({ entity, unit }: { entity: Entity; unit: DisplayUnit }) {
               <TextField value={entity.backgroundColor ?? ""} testId="prop-hatch-bg" onCommit={(v) => update(withBackground(entity, v))} />
             </Row>
           )}
+          {p.kind === "pattern" && <PointRow label="Origin" p={p.origin ?? { x: 0, y: 0 }} unit={unit} testId="prop-hatch-origin" onCommit={(o) => update({ ...entity, paint: { ...p, origin: o } })} />}
           <Row label="Islands">
             <select
               value={entity.style}
@@ -327,6 +329,7 @@ function Geometry({ entity, unit }: { entity: Entity; unit: DisplayUnit }) {
               <option value="ignore">Ignore</option>
             </select>
           </Row>
+          <HatchActions entity={entity} />
         </Section>
       );
     }
@@ -716,4 +719,28 @@ function withBackground(h: HatchEntity, color: string): HatchEntity {
   const { backgroundColor: _b, ...rest } = h;
   void _b;
   return color ? { ...rest, backgroundColor: color } : rest;
+}
+
+function HatchActions({ entity }: { entity: HatchEntity }) {
+  const [msg, setMsg] = useState("");
+  const behind = (entity.drawOrder ?? 0) < 0;
+  return (
+    <>
+      <div className="propspanel-row propspanel-actions">
+        <button className="btn ghost sm" data-testid="prop-hatch-edit" title="Open this hatch in the Hatch panel" onClick={() => { const app = useApp.getState(); app.setHatchSettings(settingsFromHatch(entity)); app.setTool("fill"); app.setHatchEdit({ id: entity.id, pickOrigin: false }); }}>
+          Edit…
+        </button>
+        <button className="btn ghost sm" data-testid="prop-hatch-boundary" title="Add the boundary as real entities" onClick={() => { const r = recreateBoundaryCommands(entity); bus.execute({ type: "batch", commands: r.commands }); useApp.getState().setSelection(r.ids); }}>
+          Recreate boundary
+        </button>
+        <button className="btn ghost sm" data-testid="prop-hatch-explode" title="Replace the hatch by its lines (grouped)" onClick={() => { const c = explodeHatchCommands(entity); if (!c) setMsg("Too dense to explode"); else { bus.execute({ type: "batch", commands: c }); setMsg(""); } }}>
+          Explode
+        </button>
+        <button className="btn ghost sm" data-testid="prop-hatch-behind" title="Draw the hatch behind (or back in front of) other geometry" onClick={() => bus.execute({ type: "update-entity", entity: setHatchDrawOrder(entity, behind ? 0 : -1) })}>
+          {behind ? "Bring to front" : "Send behind"}
+        </button>
+      </div>
+      {msg && <div className="propspanel-row">{msg}</div>}
+    </>
+  );
 }

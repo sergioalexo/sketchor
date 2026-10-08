@@ -873,6 +873,9 @@ interface AppState {
   /** What the Hatch tool applies (H-04). */
   hatchSettings: HatchSettings;
   setHatchSettings: (patch: Partial<HatchSettings>) => void;
+  /** An existing hatch being edited with the Hatch panel (double-click / Properties → Edit), optionally waiting for an origin pick (H-08). */
+  hatchEdit: { id: EntityId; pickOrigin: boolean } | null;
+  setHatchEdit: (v: { id: EntityId; pickOrigin: boolean } | null) => void;
   /** B-04: the block the active tab is editing (null in a normal drawing tab). */
   editingBlock: string | null;
   insertSettings: InsertSettings;
@@ -1012,6 +1015,8 @@ export const useApp = create<AppState>((set, get) => ({
   setFillColor: (color) => set({ fillColor: color }),
   hatchSettings: DEFAULT_HATCH_SETTINGS,
   setHatchSettings: (patch) => set((s) => ({ hatchSettings: { ...s.hatchSettings, ...patch } })),
+  hatchEdit: null,
+  setHatchEdit: (hatchEdit) => set({ hatchEdit }),
   editingBlock: null,
   insertSettings: DEFAULT_INSERT_SETTINGS,
   setInsertSettings: (patch) => set((s) => ({ insertSettings: { ...s.insertSettings, ...patch } })),
@@ -1065,7 +1070,7 @@ export const useApp = create<AppState>((set, get) => ({
   fitRequestId: 0,
   requestFit: () => set((s) => ({ fitRequestId: s.fitRequestId + 1 })),
   // Switching tools invalidates any in-progress reference-edge pick or entered group.
-  setTool: (tool) => set({ tool, referenceEdgeId: null, referenceEdgeSegment: null, enteredGroupId: null }),
+  setTool: (tool) => set((s) => ({ tool, referenceEdgeId: null, referenceEdgeSegment: null, enteredGroupId: null, hatchEdit: tool === "fill" ? s.hatchEdit : null })),
   prompt: "",
   setPrompt: (prompt) => set((s) => (s.prompt === prompt ? s : { prompt })),
   setSelection: (selection) => set({ selection }),

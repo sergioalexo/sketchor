@@ -16,6 +16,7 @@ import {
   screenDashPattern,
   transformed,
   translated,
+  drawOrderOf,
 } from "@sketchor/core";
 import type { MeasureResult } from "../state/store";
 import { gridStep, worldToScreen, type View } from "./view";
@@ -129,7 +130,10 @@ export function render(
   if (ui.closedRegions.length > 0) drawClosedRegions(ctx, view, ui.closedRegions);
 
   const ltscale = doc.settings.ltscale ?? 1;
-  for (const entity of doc.all()) {
+  const everything = doc.all();
+  // H-08: lower drawOrder first (stable), so a hatch can sit behind its boundary.
+  const drawList = everything.some((e) => drawOrderOf(e) !== 0) ? [...everything].sort((a, b) => drawOrderOf(a) - drawOrderOf(b)) : everything;
+  for (const entity of drawList) {
     if (ui.hiddenLayers.has(layerOf(entity))) continue;
     const locked = ui.lockedLayers.has(layerOf(entity));
     const selected = ui.selection.has(entity.id);

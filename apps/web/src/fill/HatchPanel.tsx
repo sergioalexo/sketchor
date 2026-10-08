@@ -33,11 +33,32 @@ function convertFills(): number {
   return commands.length / 2;
 }
 
+/** Writes the panel's settings onto the hatch being edited (H-08), keeping its origin / double / own line families when the pattern is unchanged. */
+function applyToHatch(id: string, s: HatchSettings): void {
+  const h = doc.get(id);
+  if (!h || h.type !== "hatch") return;
+  let paint = paintFromSettings(s);
+  const old = h.paint;
+  if (paint.kind === "pattern" && old.kind === "pattern") {
+    paint = { ...paint, ...(old.origin ? { origin: old.origin } : {}), ...(old.double ? { double: true } : {}) };
+    if (old.name.toUpperCase() === paint.name.toUpperCase() && old.def) paint.def = old.def;
+  }
+  const { transparency: _t, backgroundColor: _b, ...rest } = h;
+  void _t;
+  void _b;
+  bus.execute({
+    type: "update-entity",
+    entity: { ...rest, paint, style: s.style, ...(s.transparency > 0 ? { transparency: s.transparency } : {}), ...(s.backgroundColor && paint.kind === "pattern" ? { backgroundColor: s.backgroundColor } : {}) },
+  });
+}
+
 export function HatchPanel() {
   const s = useApp((st) => st.hatchSettings);
   const set = useApp((st) => st.setHatchSettings);
   const revision = useApp((st) => st.revision);
   const [showLib, setShowLib] = useState(false);
+  const edit = useApp((st) => st.hatchEdit);
+  const setEdit = useApp((st) => st.setHatchEdit);
   const byCategory = useMemo(() => {
     const m = new Map<string, string[]>();
     for (const p of registeredPatterns()) {
@@ -51,6 +72,14 @@ export function HatchPanel() {
 
   return (
     <div className="fill-panel" data-testid="hatch-panel" data-revision={revision} style={{ minWidth: 320 }}>
+      {edit && (
+        <div className="fill-row" data-testid="hatch-edit-bar">
+          <strong>Editing hatch</strong>
+          <button className="btn ghost" data-testid="hatch-edit-apply" onClick={() => applyToHatch(edit.id, s)}>Apply</button>
+          <button className={`btn ghost ${edit.pickOrigin ? "active" : ""}`} data-testid="hatch-edit-origin" disabled={s.kind !== "pattern"} onClick={() => setEdit({ id: edit.id, pickOrigin: true })}>Set origin…</button>
+          <button className="btn ghost" data-testid="hatch-edit-done" onClick={() => setEdit(null)}>Done</button>
+        </div>
+      )}
       <div className="fill-row">
         {(["pattern", "solid", "gradient"] as const).map((k) => (
           <button key={k} className={`btn ghost ${s.kind === k ? "active" : ""}`} data-testid={`hatch-kind-${k}`} onClick={() => set({ kind: k })}>
