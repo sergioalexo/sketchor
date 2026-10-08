@@ -208,6 +208,78 @@ REPLACEMENTS = [
     ("    colorTool (nullptr),\n    rootNode (nullptr)", "    colorTool (nullptr),\n    index (nullptr),\n    rootNode (nullptr)"),
 ] + TRIANGULATE_LEAF_FIX
 
+# Sketchor fix #2: the one-call whole-shape BRepMesh run leaves *no* faces
+# triangulated for some big sub-assemblies. Observed on a real 74 MB
+# SolidWorks export (AP203, ~700 NAUO, ~1,500 solids, no MAPPED_ITEM):
+# BRepMesh_IncrementalMesh over the 1,375-solid compound of one
+# sub-assembly returned without error but produced zero triangles on all
+# 23,982 faces - while the same solids meshed one by one all succeeded, and
+# the sibling sub-assembly (540 solids) meshed fine as a compound. The
+# importer reported success and 1,375 empty meshes, i.e. 2/3 of the parts
+# silently missing. So before a solid/shell is read out, any one of its
+# faces still lacking a triangulation gets the solid meshed on its own
+# (a no-op where the compound pass already worked, so well-behaved files
+# cost nothing and keep their exact output).
+ENSURE_MESHED = r'''
+/*
+ * Sketchor patch: mesh a solid/shell by itself when the compound pass left
+ * any of its faces without a triangulation (see patch_importer.py).
+ */
+static bool HasUntriangulatedFace (const TopoDS_Shape& shape)
+{
+    for (TopExp_Explorer ex (shape, TopAbs_FACE); ex.More (); ex.Next ()) {
+        TopLoc_Location location;
+        Handle (Poly_Triangulation) triangulation = BRep_Tool::Triangulation (TopoDS::Face (ex.Current ()), location);
+        if (triangulation.IsNull () || triangulation->NbTriangles () == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static void EnsureMeshed (const TopoDS_Shape& shape, const ImportParams& params)
+{
+    if (!HasUntriangulatedFace (shape)) {
+        return;
+    }
+    try {
+        TopoDS_Shape own = shape;
+        TriangulateShape (own, params);
+    } catch (Standard_Failure&) {
+        // leave it: the mesh comes out empty, as before
+    }
+}
+'''
+
+LEAF_MESH_REPLACEMENTS = [
+    (
+        "static std::string GetLabelNameNoRef (const TDF_Label& label)",
+        ENSURE_MESHED + "\n" + "static std::string GetLabelNameNoRef (const TDF_Label& label)",
+    ),
+    (
+        "#include <XCAFDoc_DocumentTool.hxx>\n",
+        "#include <XCAFDoc_DocumentTool.hxx>\n#include <Poly_Triangulation.hxx>\n#include <Standard_Failure.hxx>\n",
+    ),
+    (
+        "        for (TopExp_Explorer ex (shape, TopAbs_SOLID); ex.More (); ex.Next ()) {\n"
+        "            const TopoDS_Shape& currentShape = ex.Current ();\n"
+        "            XcafShapeMesh",
+        "        for (TopExp_Explorer ex (shape, TopAbs_SOLID); ex.More (); ex.Next ()) {\n"
+        "            const TopoDS_Shape& currentShape = ex.Current ();\n"
+        "            EnsureMeshed (currentShape, params);\n"
+        "            XcafShapeMesh",
+    ),
+    (
+        "        for (TopExp_Explorer ex (shape, TopAbs_SHELL, TopAbs_SOLID); ex.More (); ex.Next ()) {\n"
+        "            const TopoDS_Shape& currentShape = ex.Current ();\n"
+        "            XcafShapeMesh",
+        "        for (TopExp_Explorer ex (shape, TopAbs_SHELL, TopAbs_SOLID); ex.More (); ex.Next ()) {\n"
+        "            const TopoDS_Shape& currentShape = ex.Current ();\n"
+        "            EnsureMeshed (currentShape, params);\n"
+        "            XcafShapeMesh",
+    ),
+]
+
 HEADER_REPLACEMENTS = [
     ("class ImporterXcaf : public Importer", "class LabelIndex;\n\nclass ImporterXcaf : public Importer"),
     (
@@ -217,9 +289,9 @@ HEADER_REPLACEMENTS = [
 ]
 
 
-def apply(path: Path, pairs) -> int:
+def apply(path: Path, pairs, marker: str = "LabelIndex") -> int:
     text = path.read_text(encoding="utf-8")
-    if "LabelIndex" in text:
+    if marker in text:
         print(f"{path.name}: already patched")
         return 0
     for old, new in pairs:
@@ -234,5 +306,6 @@ def apply(path: Path, pairs) -> int:
 
 if __name__ == "__main__":
     rc = apply(ROOT / "importer-xcaf.cpp", REPLACEMENTS)
+    rc |= apply(ROOT / "importer-xcaf.cpp", LEAF_MESH_REPLACEMENTS, "EnsureMeshed")
     rc |= apply(ROOT / "importer-xcaf.hpp", HEADER_REPLACEMENTS)
     sys.exit(rc)

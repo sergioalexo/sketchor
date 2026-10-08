@@ -25,6 +25,11 @@ triangles, hierarchy) from both builds:
 | 3.2 MB, 1,659 parts   |         29.0 s  |     3.0 s  |
 | 6.0 MB, 3,012 parts   |         93.1 s  |     4.4 s  |
 
+A second patch (`EnsureMeshed`) re-meshes any solid/shell that the compound-wide
+`BRepMesh` pass left with untriangulated faces. Without it, a 74 MB SolidWorks
+assembly came out with 1,375 of its 2,027 solids empty (one big sub-assembly
+compound meshed to nothing, no error); with it all 2,027 have triangles.
+
 ## Rebuilding (Windows)
 
 One-time setup:
