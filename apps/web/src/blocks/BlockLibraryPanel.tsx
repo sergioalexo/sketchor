@@ -65,7 +65,7 @@ export function BlockLibraryPanel({ onClose }: { onClose: () => void }) {
         const deps = (src.records("blocks") as BlockDefinition[]).map((d) => structuredClone(d));
         entry = { def: blockFromEntities(name, src.all()), deps };
       } else {
-        entry = { def: blockFromEntities(name, parseDxf(text).entities), deps: [] };
+        entry = { def: blockFromEntities(name, parseDxf(text, { blocks: "explode" }).entities), deps: [] };
       }
       if (entry.def.entities.length === 0) {
         setNote(`${file.name}: nothing to insert`);

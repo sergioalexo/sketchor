@@ -322,28 +322,31 @@ describe("TEXT and MTEXT", () => {
 describe("INSERT and BLOCKS", () => {
   const withBlocks = (blocks: string, entities: string) => dxf(section("BLOCKS", blocks), section("ENTITIES", entities));
   const unitLine = rec("LINE", [[10, 0], [20, 0], [11, 10], [21, 0]]);
+  // These pin the in-place expansion (thumbnails and `blocks: "explode"`); kept blocks are covered in blocks/dxfBlocks.test.ts.
+  const parseExploded = (text: string) => parseDxf(text, { blocks: "explode" });
+  const explodedEntities = (text: string): Entity[] => parseExploded(text).entities;
 
   it("places a block body at the insertion point", () => {
     const text = withBlocks(block("SQ", [0, 0], unitLine), rec("INSERT", [[2, "SQ"], [10, 100], [20, 50]]));
-    const [e] = entitiesOf(text) as LineEntity[];
+    const [e] = explodedEntities(text) as LineEntity[];
     closeTo(e.a, 100, 50);
     closeTo(e.b, 110, 50);
   });
 
   it("subtracts the block's base point", () => {
     const body = rec("LINE", [[10, 5], [20, 0], [11, 15], [21, 0]]);
-    const [e] = entitiesOf(withBlocks(block("SQ", [5, 0], body), rec("INSERT", [[2, "SQ"], [10, 100], [20, 50]]))) as LineEntity[];
+    const [e] = explodedEntities(withBlocks(block("SQ", [5, 0], body), rec("INSERT", [[2, "SQ"], [10, 100], [20, 50]]))) as LineEntity[];
     closeTo(e.a, 100, 50);
     closeTo(e.b, 110, 50);
   });
 
   it("applies rotation and scale", () => {
-    const rotated = entitiesOf(
+    const rotated = explodedEntities(
       withBlocks(block("SQ", [0, 0], unitLine), rec("INSERT", [[2, "SQ"], [10, 0], [20, 0], [50, 90]])),
     )[0] as LineEntity;
     closeTo(rotated.b, 0, 10);
 
-    const scaled = entitiesOf(
+    const scaled = explodedEntities(
       withBlocks(block("SQ", [0, 0], unitLine), rec("INSERT", [[2, "SQ"], [10, 0], [20, 0], [41, 2], [42, 2]])),
     )[0] as LineEntity;
     closeTo(scaled.b, 20, 0);
@@ -351,7 +354,7 @@ describe("INSERT and BLOCKS", () => {
 
   it("approximates a non-uniformly scaled circle and warns", () => {
     const body = rec("CIRCLE", [[10, 0], [20, 0], [40, 10]]);
-    const result = parse(withBlocks(block("B", [0, 0], body), rec("INSERT", [[2, "B"], [10, 0], [20, 0], [41, 4], [42, 1]])));
+    const result = parseExploded(withBlocks(block("B", [0, 0], body), rec("INSERT", [[2, "B"], [10, 0], [20, 0], [41, 4], [42, 1]])));
     expect((result.entities[0] as CircleEntity).radius).toBeCloseTo(20, 9); // geometric mean of 4x and 1x
     expect(result.warnings).toEqual(["a block was inserted with non-uniform scale — its circles/arcs are approximated as circular"]);
   });
@@ -360,7 +363,7 @@ describe("INSERT and BLOCKS", () => {
     const body =
       rec("ARC", [[10, 0], [20, 0], [40, 5], [50, 0], [51, 90]]) +
       rec("LWPOLYLINE", [[70, 1], [10, 0], [20, 0], [42, 0.5], [10, 10], [20, 0], [42, 0], [10, 10], [20, 10], [42, 0]]);
-    const entities = entitiesOf(withBlocks(block("B", [0, 0], body), rec("INSERT", [[2, "B"], [10, 0], [20, 0], [41, -1], [42, 1]])));
+    const entities = explodedEntities(withBlocks(block("B", [0, 0], body), rec("INSERT", [[2, "B"], [10, 0], [20, 0], [41, -1], [42, 1]])));
     expect((entities[0] as ArcEntity).ccw).toBe(false);
     expect((entities[1] as PolylineEntity).bulges).toEqual([-0.5, -0, -0]);
   });
@@ -370,7 +373,7 @@ describe("INSERT and BLOCKS", () => {
       block("SQ", [0, 0], unitLine),
       rec("INSERT", [[2, "SQ"], [10, 0], [20, 0], [70, 3], [71, 2], [44, 100], [45, 50]]),
     );
-    const entities = entitiesOf(text) as LineEntity[];
+    const entities = explodedEntities(text) as LineEntity[];
     expect(entities).toHaveLength(6);
     expect(entities.map((e) => [e.a.x, e.a.y])).toEqual([
       [0, 0],
@@ -384,32 +387,32 @@ describe("INSERT and BLOCKS", () => {
 
   it("gives every stamped copy a fresh id", () => {
     const text = withBlocks(block("SQ", [0, 0], unitLine), rec("INSERT", [[2, "SQ"], [10, 0], [20, 0], [70, 4]]));
-    const ids = entitiesOf(text).map((e) => e.id);
+    const ids = explodedEntities(text).map((e) => e.id);
     expect(new Set(ids).size).toBe(ids.length);
   });
 
   it("expands nested blocks", () => {
     const blocks = block("INNER", [0, 0], unitLine) + block("OUTER", [0, 0], rec("INSERT", [[2, "INNER"], [10, 10], [20, 0]]));
-    const [e] = entitiesOf(withBlocks(blocks, rec("INSERT", [[2, "OUTER"], [10, 100], [20, 0]]))) as LineEntity[];
+    const [e] = explodedEntities(withBlocks(blocks, rec("INSERT", [[2, "OUTER"], [10, 100], [20, 0]]))) as LineEntity[];
     closeTo(e.a, 110, 0);
     closeTo(e.b, 120, 0);
   });
 
   it("lets block geometry on layer 0 inherit the INSERT's layer, but keeps its own otherwise", () => {
     const body = rec("LINE", [[8, "0"], [10, 0], [20, 0], [11, 1], [21, 0]]) + rec("LINE", [[8, "inner"], [10, 0], [20, 0], [11, 1], [21, 0]]);
-    const entities = entitiesOf(withBlocks(block("B", [0, 0], body), rec("INSERT", [[2, "B"], [8, "parts"], [10, 0], [20, 0]])));
+    const entities = explodedEntities(withBlocks(block("B", [0, 0], body), rec("INSERT", [[2, "B"], [8, "parts"], [10, 0], [20, 0]])));
     expect(entities.map((e) => e.layer)).toEqual(["parts", "inner"]);
   });
 
   it("warns about a reference to a missing block definition", () => {
-    const result = parse(entitiesOnly(rec("INSERT", [[2, "GHOST"], [10, 0], [20, 0]])));
+    const result = parseExploded(entitiesOnly(rec("INSERT", [[2, "GHOST"], [10, 0], [20, 0]])));
     expect(result.entities).toEqual([]);
     expect(result.warnings).toEqual(["a block reference points at a missing block definition ('GHOST')"]);
   });
 
   it("breaks a self-referencing block instead of recursing forever", () => {
     const blocks = block("LOOP", [0, 0], unitLine + rec("INSERT", [[2, "LOOP"], [10, 10], [20, 0]]));
-    const result = parse(withBlocks(blocks, rec("INSERT", [[2, "LOOP"], [10, 0], [20, 0]])));
+    const result = parseExploded(withBlocks(blocks, rec("INSERT", [[2, "LOOP"], [10, 0], [20, 0]])));
     expect(result.entities).toHaveLength(1);
     expect(result.warnings).toContain("block 'LOOP' inserts itself — skipped to avoid infinite nesting");
   });
@@ -419,7 +422,7 @@ describe("INSERT and BLOCKS", () => {
     const chain = Array.from({ length: depth }, (_, i) =>
       block(`B${i}`, [0, 0], i === depth - 1 ? unitLine : rec("INSERT", [[2, `B${i + 1}`], [10, 0], [20, 0]])),
     ).join("");
-    const result = parse(withBlocks(chain, rec("INSERT", [[2, "B0"], [10, 0], [20, 0]])));
+    const result = parseExploded(withBlocks(chain, rec("INSERT", [[2, "B0"], [10, 0], [20, 0]])));
     expect(result.warnings).toContain("blocks nested deeper than 8 levels were not expanded");
     expect(result.entities).toEqual([]);
   });

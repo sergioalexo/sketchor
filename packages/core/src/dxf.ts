@@ -1,4 +1,6 @@
-import type { Entity, SplineEntity } from "./entities";
+import type { Entity, InsertEntity, SplineEntity } from "./entities";
+import type { AttributeDef, BlockDefinition } from "./blocks/types";
+import { blockWouldCycle } from "./blocks/evaluate";
 import { imageCorners, newEntityId, polylineSegments, textCorners, transformed } from "./entities";
 import type { Point } from "./geometry";
 import { kindBounds, kindTessellate, kindTransform } from "./kinds/registry";
@@ -249,7 +251,32 @@ const ORIGIN: Point = { x: 0, y: 0 };
 function scaleToMm(entities: Entity[], insUnits: number): Entity[] {
   const mmPerUnit = MM_PER_INSUNIT[insUnits];
   if (!mmPerUnit || mmPerUnit === 1) return entities;
-  return entities.map((e) => transformed(e, ORIGIN, 0, 0, 0, mmPerUnit));
+  return entities.map((e) => scaleKept(e, mmPerUnit));
+}
+
+/** `e` scaled about the origin by `k`; an insert only moves (see {@link scaleKept}) — pair it with {@link scaleBlockDefinition}. */
+export function scaleEntityKeepingInserts(e: Entity, k: number): Entity {
+  return scaleKept(e, k);
+}
+
+/** A block definition with every length scaled by `k` (body, base point, attribute positions and heights). */
+export function scaleBlockDefinition(def: BlockDefinition, k: number): BlockDefinition {
+  return {
+    ...def,
+    basePoint: { x: def.basePoint.x * k, y: def.basePoint.y * k },
+    entities: def.entities.map((e) => scaleKept(e, k)),
+    attributeDefs: def.attributeDefs.map((a) => ({ ...a, at: { x: a.at.x * k, y: a.at.y * k }, height: a.height * k })),
+  };
+}
+
+/** Scales file units to mm. An insert only moves (and its array spacing grows): its scale is a ratio, and the definitions it names are scaled the same way. */
+function scaleKept(e: Entity, k: number): Entity {
+  if (e.type !== "insert") return transformed(e, ORIGIN, 0, 0, 0, k);
+  return {
+    ...e,
+    insert: { x: e.insert.x * k, y: e.insert.y * k },
+    ...(e.array ? { array: { ...e.array, colSpacing: e.array.colSpacing * k, rowSpacing: e.array.rowSpacing * k } } : {}),
+  };
 }
 
 function num(raw: RawEntity, code: number, fallback = 0): number {
@@ -582,11 +609,15 @@ export interface DxfParseResult {
    * caller's `assumeUnits` (0 if none given — coordinates left as-is).
    */
   insUnits: number;
+  /** B-07: the file's named block definitions (mm), empty when exploded. Anonymous `*` blocks are expanded where used. */
+  blocks: BlockDefinition[];
   /** How {@link insUnits} was decided — anything but `insunits`/`measurement` is a guess worth showing the user. */
   unitSource: DxfUnitSource;
 }
 
 export interface DxfParseOptions {
+  /** B-07: "keep" (default) turns BLOCKS into block definitions and INSERT into `insert` entities; "explode" expands every INSERT in place (what a thumbnail wants). */
+  blocks?: "keep" | "explode";
   /**
    * `$INSUNITS` code to read the file in when it gives no unit hint at all
    * (e.g. the unit the user is already working in, so the numbers show up
@@ -714,6 +745,8 @@ const MAX_BLOCK_DEPTH = 8;
 
 interface ConvertContext {
   blocks: Map<string, BlockDef>;
+  /** B-07: named INSERTs become `insert` entities instead of being expanded in place. */
+  keep?: boolean;
   warnings: string[];
   depth: number;
   /** Block names currently being instantiated, to break self-referential definitions. */
@@ -735,11 +768,33 @@ function convertRecords(raws: RawEntity[], ctx: ConvertContext): Entity[] {
   const entities: Entity[] = [];
   const warnings = ctx.warnings;
 
-  for (const raw of raws) {
+  // Records an INSERT has claimed (its ATTRIBs and SEQEND) — not converted on their own.
+  const claimed = new Set<number>();
+  for (let ri = 0; ri < raws.length; ri++) {
+    if (claimed.has(ri)) continue;
+    const raw = raws[ri];
     const rawLayer = str(raw, 8, "0") || "0";
     const layer = rawLayer === "0" && ctx.insertLayer ? ctx.insertLayer : rawLayer;
     const beforeCount = entities.length;
     switch (raw.type) {
+      case "ATTRIB": {
+        // A loose attribute (or one met while exploding): its value becomes visible text.
+        const value = unescapeDxfText(str(raw, 1, ""));
+        if (value && (num(raw, 70, 0) & 1) === 0) {
+          entities.push({
+            id: newEntityId(),
+            type: "text",
+            layer,
+            at: { x: num(raw, 10), y: num(raw, 20) },
+            text: value,
+            height: num(raw, 40, 2.5) || 2.5,
+            rotation: (num(raw, 50, 0) * Math.PI) / 180,
+          });
+        }
+        break;
+      }
+      case "ATTDEF":
+        break;
       case "LINE":
         entities.push(
           line(
@@ -827,6 +882,36 @@ function convertRecords(raws: RawEntity[], ctx: ConvertContext): Entity[] {
       case "INSERT": {
         const name = str(raw, 2, "");
         const block = ctx.blocks.get(name);
+        if (ctx.keep && block && !name.startsWith("*")) {
+          // B-07: keep the reference. Anonymous (`*U`, `*X`...) blocks are still expanded below.
+          const attributes: Record<string, string> = {};
+          if (num(raw, 66, 0) === 1) {
+            for (let k = ri + 1; k < raws.length; k++) {
+              if (raws[k].type === "ATTRIB") {
+                claimed.add(k);
+                attributes[str(raws[k], 2, "")] = unescapeDxfText(str(raws[k], 1, ""));
+              } else {
+                if (raws[k].type === "SEQEND") claimed.add(k);
+                break;
+              }
+            }
+          }
+          const cols = Math.max(1, Math.round(num(raw, 70, 1)) || 1);
+          const rows = Math.max(1, Math.round(num(raw, 71, 1)) || 1);
+          const ins: InsertEntity = {
+            id: newEntityId(),
+            type: "insert",
+            block: name,
+            insert: { x: num(raw, 10), y: num(raw, 20) },
+            scale: { x: num(raw, 41, 1) || 1, y: num(raw, 42, 1) || 1 },
+            rotation: (num(raw, 50, 0) * Math.PI) / 180,
+            attributes,
+            ...(rawLayer !== "0" ? { layer: rawLayer } : {}),
+            ...(cols > 1 || rows > 1 ? { array: { cols, rows, colSpacing: num(raw, 44, 0), rowSpacing: num(raw, 45, 0) } } : {}),
+          };
+          entities.push(ins);
+          break;
+        }
         if (!block) {
           warnings.push(`a block reference points at a missing block definition ('${name}')`);
           break;
@@ -913,16 +998,64 @@ export function parseDxf(text: string, options: DxfParseOptions = {}): DxfParseR
   const insUnits = resolved.source === "none" ? (options.assumeUnits ?? 0) : resolved.code;
   const raws = collectRawEntities(allPairs);
   const blocks = collectBlocks(allPairs);
+  const keep = (options.blocks ?? "keep") === "keep";
 
-  const entities = scaleToMm(convertRecords(raws, { blocks, warnings, depth: 0, stack: new Set() }), insUnits);
+  const entities = scaleToMm(convertRecords(raws, { blocks, warnings, depth: 0, stack: new Set(), keep }), insUnits);
+  const blockDefs = keep ? buildBlockDefinitions(blocks, { blocks, warnings, depth: 0, stack: new Set(), keep }, insUnits) : [];
 
   return {
     entities,
+    blocks: blockDefs,
     warnings: dedupe(warnings),
     report: buildImportReport(raws),
     insUnits,
     unitSource: resolved.source,
   };
+}
+
+/** Named (non-`*`) BLOCKs → definitions in mm: ATTDEFs become attribute defs, nested INSERTs stay inserts, self-nesting is cut with a warning. */
+function buildBlockDefinitions(blocks: Map<string, BlockDef>, ctx: ConvertContext, insUnits: number): BlockDefinition[] {
+  const k = MM_PER_INSUNIT[insUnits] || 1;
+  const defs = new Map<string, BlockDefinition>();
+  for (const [name, raw] of blocks) {
+    if (name.startsWith("*")) continue;
+    const attributeDefs: AttributeDef[] = raw.body
+      .filter((r) => r.type === "ATTDEF")
+      .map((r) => {
+        const flags = num(r, 70, 0);
+        const prompt = str(r, 3, "");
+        const def = unescapeDxfText(str(r, 1, ""));
+        return {
+          tag: str(r, 2, ""),
+          at: { x: num(r, 10) * k, y: num(r, 20) * k },
+          height: (num(r, 40, 2.5) || 2.5) * k,
+          rotation: (num(r, 50, 0) * Math.PI) / 180,
+          ...(prompt ? { prompt } : {}),
+          ...(def ? { default: def } : {}),
+          flags: { invisible: (flags & 1) !== 0, constant: (flags & 2) !== 0, verify: (flags & 4) !== 0, preset: (flags & 8) !== 0 },
+        } satisfies AttributeDef;
+      })
+      .filter((a) => a.tag !== "");
+    const body = raw.body.filter((r) => r.type !== "ATTDEF");
+    const entities = convertRecords(body, { ...ctx, stack: new Set([name]) }).map((e) => (k === 1 ? e : scaleKept(e, k)));
+    defs.set(name, {
+      name,
+      basePoint: { x: raw.base.x * k, y: raw.base.y * k },
+      entities,
+      attributeDefs,
+      explodable: true,
+      scaleUniformly: false,
+    });
+  }
+  // A cyclic or absurdly deep nesting would make the evaluator draw nothing for it: drop the nested references and say so.
+  const host = { getRecord: (_t: string, n: string) => defs.get(n), tablesRevision: 0 };
+  for (const [name, def] of defs) {
+    if (blockWouldCycle(host, name, def.entities)) {
+      ctx.warnings.push(`block '${name}' nests itself — its nested block references were dropped`);
+      defs.set(name, { ...def, entities: def.entities.filter((e) => e.type !== "insert") });
+    }
+  }
+  return [...defs.values()];
 }
 
 const SUPPORTED_TYPES = new Set([
@@ -965,7 +1098,7 @@ function buildImportReport(raws: RawEntity[]): DxfImportReport {
  * VIEWPORT and paper-space layout records describe *how* a drawing is
  * presented on a sheet, not what it contains.
  */
-const KNOWN_IGNORED = new Set(["SEQEND", "POLYLINE", "VERTEX", "VIEWPORT"]);
+const KNOWN_IGNORED = new Set(["SEQEND", "POLYLINE", "VERTEX", "VIEWPORT", "ATTRIB", "ATTDEF"]);
 
 function dedupe(list: string[]): string[] {
   return [...new Set(list)];
@@ -1169,5 +1302,5 @@ export function entitiesToSvg(entities: Entity[], opts: ThumbnailOptions = {}): 
 
 /** Convenience: DXF text straight to a thumbnail SVG string. */
 export function dxfToSvg(text: string, opts: ThumbnailOptions = {}): string {
-  return entitiesToSvg(parseDxf(text).entities, opts);
+  return entitiesToSvg(parseDxf(text, { blocks: "explode" }).entities, opts);
 }

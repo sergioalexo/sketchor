@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { setActiveBlocks, blockEditChanges, blockEditDocument, getBlock, type AttributeDef, type BlockDefinition } from "@sketchor/core";
+import { scaleBlockDefinition, scaleEntityKeepingInserts, setActiveBlocks, blockEditChanges, blockEditDocument, getBlock, type AttributeDef, type BlockDefinition } from "@sketchor/core";
 import type { Model3D } from "../model3d/types";
 import {
   displayUnitToDxfCode,
@@ -190,14 +190,17 @@ export function applySketchCode(text: string): ParseIssue[] {
 }
 
 /** Shared by every import path: replaces (or adds to) the drawing's entities as one undoable step. */
-function applyImportedEntities(entities: Entity[], replace: boolean): void {
+function applyImportedEntities(entities: Entity[], replace: boolean, blocks: BlockDefinition[] = []): void {
   const commands: Command[] = [];
   if (replace) {
     const ids = doc.all().map((e) => e.id);
     if (ids.length) commands.push({ type: "delete-entities", ids });
     // A fresh file brings its own layers: what was hidden or locked in the old drawing must not carry over by name.
     for (const r of doc.records("layers")) commands.push({ type: "delete-table-record", table: "layers", name: r.name });
+    for (const r of doc.records("blocks")) commands.push({ type: "delete-table-record", table: "blocks", name: r.name });
   }
+  // B-07: the file's block definitions come before the inserts that name them; an existing block of the same name is never overwritten by an add-import.
+  for (const b of blocks) if (replace || !doc.hasRecord("blocks", b.name)) commands.push({ type: "put-table-record", table: "blocks", record: b });
   for (const entity of entities) commands.push({ type: "add-entity", entity });
   if (commands.length === 1) bus.execute(commands[0]);
   else if (commands.length > 1) bus.execute({ type: "batch", commands });
@@ -268,7 +271,7 @@ export function importDxfText(text: string, replace = true): { count: number; wa
 /** {@link importDxfText} for an already-parsed file. */
 function importParsedDxf(result: DxfParseResult, replace: boolean): { count: number; warnings: string[] } {
   const { entities, warnings, report, insUnits, unitSource } = result;
-  applyImportedEntities(entities, replace);
+  applyImportedEntities(entities, replace, result.blocks);
   useApp.getState().setImportReport(report);
   useApp.getState().setFileWarnings(warnings.filter((w) => !w.startsWith("unsupported entity")));
   useApp.getState().setImportUnits({ code: insUnits, source: unitSource });
@@ -298,8 +301,12 @@ export function reinterpretImportUnits(to: DisplayUnit): void {
     const origin = { x: 0, y: 0 };
     const commands: Command[] = targets.map((e) => ({
       type: "update-entity",
-      entity: transformed(e, origin, 0, 0, 0, factor),
+      entity: scaleEntityKeepingInserts(e, factor),
     }));
+    // Definitions live in the same unit as the geometry (B-07): scale them with it.
+    if (importUnits.layer === undefined) {
+      for (const r of doc.records("blocks")) commands.push({ type: "put-table-record", table: "blocks", record: scaleBlockDefinition(r as BlockDefinition, factor) });
+    }
     if (commands.length) bus.execute({ type: "batch", commands });
   }
   if (importUnits.layer === undefined) useApp.getState().setDisplayUnit(to);
@@ -335,7 +342,7 @@ export function overlayEntities(entities: Entity[], label: string): { count: num
 
 /** DXF-specific overlay: parses `text` and adds it via {@link overlayEntities}. The file's own unit still scales its coordinates into the shared millimeter space (see dxf.ts) — only the document's own saved unit is left alone. A file with no unit hint is read in the document's unit. */
 export function overlayDxfText(text: string, label: string): { count: number; warnings: string[]; layer: string } {
-  const { entities, warnings, report, insUnits, unitSource } = parseDxf(text, { assumeUnits: currentUnitCode() });
+  const { entities, warnings, report, insUnits, unitSource } = parseDxf(text, { assumeUnits: currentUnitCode(), blocks: "explode" });
   useApp.getState().setImportReport(report);
   const added = overlayEntities(entities, label);
   useApp.getState().setImportUnits({ code: insUnits, source: unitSource, layer: added.layer });
