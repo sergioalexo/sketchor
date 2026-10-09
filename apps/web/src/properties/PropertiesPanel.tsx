@@ -1,7 +1,7 @@
 import { TEXT_STYLE_PRESETS } from "@sketchor/core";
 import { useEffect, useMemo, useState } from "react";
-import type { Command, Entity, HatchEntity, PolylineEntity, SplineEntity } from "@sketchor/core";
-import { GRADIENT_NAMES, explodeHatchCommands, recreateBoundaryCommands, setHatchDrawOrder, entityArea, entityLength, arcPointAt, arcSweep, bulgeToArc, BUILTIN_LINETYPES, dist, ellipseSweep, nurbsDomain, nurbsPointAt, findClosedRegions, isFullEllipse, layerOf, polylineLength, addSplinePoint, polylineToSpline, rebuildSpline, refitSpline, removeSplinePoint, splineToControlPoints, splineToPolyline } from "@sketchor/core";
+import type { BlockDefinition, BlockTreeNode, Command, Entity, HatchEntity, InsertEntity, PolylineEntity, SplineEntity } from "@sketchor/core";
+import { GRADIENT_NAMES, blockTree, editableAttributes, isMirroredInsert, withAttributeValues, withInsertArray, withInsertScale, explodeHatchCommands, recreateBoundaryCommands, setHatchDrawOrder, entityArea, entityLength, arcPointAt, arcSweep, bulgeToArc, BUILTIN_LINETYPES, dist, ellipseSweep, nurbsDomain, nurbsPointAt, findClosedRegions, isFullEllipse, layerOf, polylineLength, addSplinePoint, polylineToSpline, rebuildSpline, refitSpline, removeSplinePoint, splineToControlPoints, splineToPolyline } from "@sketchor/core";
 import { bus, doc, useApp } from "../state/store";
 import { settingsFromHatch } from "../tools/hatchTool";
 import { parseLength } from "../tools/typedInput";
@@ -400,9 +400,84 @@ function Geometry({ entity, unit }: { entity: Entity; unit: DisplayUnit }) {
           <NumberRow label="Rotation" value={deg(entity.rotation)} suffix="°" testId="prop-rotation" onCommit={(v) => update({ ...entity, rotation: rad(v) })} />
         </Section>
       );
+    case "insert":
+      return <InsertGeometry entity={entity} unit={unit} />;
     default:
       return null; // a kind with no geometry editor yet
   }
+}
+
+/** B-10: an insert's placement, scale (with a uniform lock), array, attribute values and block swap. */
+function InsertGeometry({ entity, unit }: { entity: InsertEntity; unit: DisplayUnit }) {
+  const [lock, setLock] = useState(false);
+  const update = (e: Entity) => bus.execute({ type: "update-entity", entity: e });
+  const def = doc.getRecord("blocks", entity.block) as BlockDefinition | undefined;
+  const names = (doc.records("blocks") as BlockDefinition[]).map((b) => b.name);
+  const arr = entity.array;
+  const f = factorFromMm(unit);
+  const deg = (r: number) => (r * 180) / Math.PI;
+  const attrs = editableAttributes(doc, entity);
+  const tree = blockTree(doc, entity.block);
+  const renderTree = (nodes: BlockTreeNode[], depth = 0): React.ReactNode =>
+    nodes.map((n) => (
+      <div key={`${depth}-${n.block}`} className="straighten-hint" style={{ paddingLeft: 8 + depth * 10 }}>
+        {n.block} x{n.count}
+        {renderTree(n.children, depth + 1)}
+      </div>
+    ));
+  return (
+    <Section title="Block">
+      <Row label="Block">
+        <select
+          value={entity.block}
+          data-testid="prop-block"
+          onChange={(e) => {
+            const to = e.target.value;
+            if (to && to !== entity.block) update({ ...entity, block: to });
+          }}
+        >
+          {!def && <option value={entity.block}>{entity.block} (missing)</option>}
+          {names.map((n) => (
+            <option key={n} value={n}>
+              {n}
+            </option>
+          ))}
+        </select>
+      </Row>
+      <PointRow label="Insert" p={entity.insert} unit={unit} onCommit={(p) => update({ ...entity, insert: p })} testId="prop-insert" />
+      <NumberRow label="Scale X" value={entity.scale.x} testId="prop-scale-x" onCommit={(v) => update(withInsertScale(entity, def, "x", v, lock))} />
+      <NumberRow label="Scale Y" value={entity.scale.y} testId="prop-scale-y" onCommit={(v) => update(withInsertScale(entity, def, "y", v, lock))} />
+      <Row label="Uniform">
+        <input type="checkbox" checked={lock || !!def?.scaleUniformly} disabled={!!def?.scaleUniformly} data-testid="prop-scale-lock" onChange={(e) => setLock(e.target.checked)} />
+        {isMirroredInsert(entity) && <span className="straighten-hint"> mirrored</span>}
+      </Row>
+      <NumberRow label="Rotation" suffix="°" value={deg(entity.rotation)} testId="prop-rotation" onCommit={(v) => update({ ...entity, rotation: (v * Math.PI) / 180 })} />
+      <NumberRow label="Columns" value={arr?.cols ?? 1} testId="prop-array-cols" onCommit={(v) => update(withInsertArray(entity, { cols: v }))} />
+      <NumberRow label="Rows" value={arr?.rows ?? 1} testId="prop-array-rows" onCommit={(v) => update(withInsertArray(entity, { rows: v }))} />
+      {arr && (
+        <>
+          <NumberRow label={`Column spacing (${unit})`} value={arr.colSpacing * f} testId="prop-array-colsp" onCommit={(v) => update(withInsertArray(entity, { colSpacing: v / f }))} />
+          <NumberRow label={`Row spacing (${unit})`} value={arr.rowSpacing * f} testId="prop-array-rowsp" onCommit={(v) => update(withInsertArray(entity, { rowSpacing: v / f }))} />
+        </>
+      )}
+      {attrs.map((a) => (
+        <Row key={a.tag} label={a.prompt || a.tag}>
+          <TextField
+            value={entity.attributes[a.tag] ?? ""}
+            placeholder={a.default ?? ""}
+            testId={`prop-attr-${a.tag}`}
+            onCommit={(v) => update(withAttributeValues(entity, { [a.tag]: v }))}
+          />
+        </Row>
+      ))}
+      {tree.length > 0 && (
+        <div data-testid="prop-block-tree">
+          <div className="straighten-hint">Contains</div>
+          {renderTree(tree)}
+        </div>
+      )}
+    </Section>
+  );
 }
 
 /** Show-CVs toggle and the end-tangent handles of a fit spline (C-07). */

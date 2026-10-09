@@ -1,4 +1,4 @@
-import { curveEnd, curveStart, curvesToPolylines, dist, joinEntities, pathOf, type Entity } from "@sketchor/core";
+import { curveEnd, curveStart, curvesToPolylines, dist, insertContents, joinEntities, pathOf, type Entity } from "@sketchor/core";
 import { area as polygonArea, polygonContainsPolygon } from "./geometry";
 import { DEFAULT_CHORD_TOLERANCE, flattenCircle, flattenClosedPolyline } from "./flatten";
 import type { Point } from "./types";
@@ -75,7 +75,19 @@ export function extractPartsWithDiagnostics(
 ): ExtractResult {
   const chordTol = opts.chordTolerance ?? DEFAULT_CHORD_TOLERANCE;
   // C-08: ellipses/splines become arc-fitted polylines (0.01 mm) so they close, chain and nest like any other outline.
-  const selected = curvesToPolylines(entities.filter((e) => selectedIds.has(e.id)), Math.min(chordTol, 0.01));
+  // B-10: a selected block instance is one part — its evaluated geometry decides the outline, and every id found is
+  // mapped back to the insert so the original (and a materialised copy) stays a single instance.
+  const owner = new Map<string, string>();
+  const picked = entities
+    .filter((e) => selectedIds.has(e.id))
+    .flatMap((e) => {
+      if (e.type !== "insert") return [e];
+      return insertContents(e).map((c) => {
+        owner.set(c.id, e.id);
+        return c;
+      });
+    });
+  const selected = curvesToPolylines(picked, Math.min(chordTol, 0.01));
   const { regions, openChains } = gatherRegions(selected, chordTol, opts.joinTolerance);
   if (regions.length === 0) return { parts: [], openChains };
 
@@ -120,6 +132,15 @@ export function extractPartsWithDiagnostics(
     if (parent === null) buildPart(i);
   });
 
+  if (owner.size > 0) {
+    const back = (ids: string[]) => [...new Set(ids.map((id) => owner.get(id) ?? id))];
+    for (const part of parts) {
+      part.outerSourceIds = back(part.outerSourceIds);
+      part.holeSourceIds = part.holeSourceIds.map((h) => back(h).filter((id) => !part.outerSourceIds.includes(id)));
+      part.sourceIds = back(part.sourceIds);
+    }
+    for (const c of openChains) c.entityIds = [...new Set(c.entityIds.map((id) => owner.get(id) ?? id))];
+  }
   return { parts, openChains };
 }
 

@@ -69,6 +69,7 @@ export * from "./blocks/fields";
 export * from "./blocks/attributes";
 export * from "./blocks/library";
 export * from "./blocks/manage";
+export * from "./blocks/insertEdit";
 export { insertContents } from "./kinds/insert";
 export * from "./hatch/loops";
 export * from "./hatch/pat";

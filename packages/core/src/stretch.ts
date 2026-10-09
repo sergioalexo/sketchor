@@ -52,6 +52,9 @@ export function stretchEntity(e: Entity, box: Bounds, dx: number, dy: number): E
       return inside(e.at, box) ? translated(e, dx, dy) : null;
     case "image":
       return imageCorners(e).some((p) => inside(p, box)) ? translated(e, dx, dy) : null;
+    case "insert":
+      // B-10: an instance moves whole when its insertion point is in the box (not when only its contents are).
+      return inside(e.insert, box) ? translated(e, dx, dy) : null;
     default:
       // A kind outside the built-in seven: moved whole if any of its points is in the box.
       return kindPoints(e as Entity).some((p) => inside(p, box)) ? translated(e as Entity, dx, dy) : null;

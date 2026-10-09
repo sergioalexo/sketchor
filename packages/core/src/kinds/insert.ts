@@ -65,12 +65,22 @@ function transformInsert(e: InsertEntity, m: Affine): InsertEntity | null {
   const uniformScale = Math.hypot(a, b);
   let array = e.array;
   if (array && (array.cols > 1 || array.rows > 1)) {
-    // Array offsets travel with the geometry only under a plain rotation + uniform scale.
-    if (Math.abs(det) < 1e-12 || a * d - b * c < 0 || Math.abs(Math.hypot(a, b) - Math.hypot(c, d)) > 1e-9 * uniformScale) return null;
-    array = { ...array, colSpacing: array.colSpacing * uniformScale, rowSpacing: array.rowSpacing * uniformScale };
+    // Array offsets are measured along the rotated axes, so they travel with the geometry under a
+    // rotation + uniform scale; a mirror also turns the frame over, which flips the row direction.
+    if (Math.abs(det) < 1e-12 || Math.abs(Math.hypot(a, b) - Math.hypot(c, d)) > 1e-9 * uniformScale) return null;
+    const flip = a * d - b * c < 0 ? -1 : 1;
+    array = { ...array, colSpacing: array.colSpacing * uniformScale, rowSpacing: array.rowSpacing * uniformScale * flip };
   }
   const to: Point = { x: m[0] * e.insert.x + m[2] * e.insert.y + m[4], y: m[1] * e.insert.x + m[3] * e.insert.y + m[5] };
   return { ...e, insert: to, rotation, scale: { x: sx, y: sy }, ...(array ? { array } : {}) };
+}
+
+/** The rotation handle: out along the instance's own x axis, clear of the contents. */
+function rotateGripPoint(e: InsertEntity): Point {
+  const b = insertKind.bounds?.(e) ?? null;
+  const reach = b ? Math.max(b.maxX - b.minX, b.maxY - b.minY) * 0.6 : 0;
+  const d = Math.max(reach, 2);
+  return { x: e.insert.x + Math.cos(e.rotation) * d, y: e.insert.y + Math.sin(e.rotation) * d };
 }
 
 export const insertKind: EntityKind<InsertEntity> = {
@@ -94,8 +104,17 @@ export const insertKind: EntityKind<InsertEntity> = {
     const inner = insertContents(e).flatMap((c) => kindSnaps(c));
     return [{ point: e.insert, kind: "node" }, ...inner];
   },
-  grips: (e) => [{ point: e.insert, kind: "insert", index: 0 }],
-  applyGrip: (e, _g, to) => ({ ...e, insert: { x: to.x, y: to.y } }),
+  grips: (e) => [
+    { point: e.insert, kind: "insert", index: 0 },
+    { point: rotateGripPoint(e), kind: "rotate", index: 1 },
+  ],
+  applyGrip: (e, g, to) => {
+    if (g.kind === "rotate") {
+      if (Math.hypot(to.x - e.insert.x, to.y - e.insert.y) < 1e-12) return e;
+      return { ...e, rotation: Math.atan2(to.y - e.insert.y, to.x - e.insert.x) };
+    }
+    return { ...e, insert: { x: to.x, y: to.y } };
+  },
   hitDistance: (e, p) => {
     const parts = insertContents(e);
     if (parts.length === 0) return Math.min(...marker(e).map(([a, b]) => distSeg(p, a, b)));

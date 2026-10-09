@@ -857,6 +857,18 @@ function drawHandles(ctx: CanvasRenderingContext2D, view: View, entity: Entity):
       ctx.beginPath();
       ctx.arc(s.x, s.y, 4, 0, Math.PI * 2);
       ctx.fill();
+    } else if (g.kind === "rotate" && entity.type === "insert") {
+      // Rotation handle: a round knob on a thin line back to the insertion point.
+      const from = worldToScreen(view, entity.insert);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(from.x, from.y);
+      ctx.lineTo(s.x, s.y);
+      ctx.stroke();
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(s.x, s.y, 4, 0, Math.PI * 2);
+      ctx.fill();
     } else if (g.kind === "cv") {
       ctx.strokeRect(s.x - 3, s.y - 3, 6, 6); // a hollow, smaller square: pulls the curve, is not on it
     } else if (g.kind === "mid" || g.kind === "center") ctx.strokeRect(s.x - 3.5, s.y - 3.5, 7, 7);
