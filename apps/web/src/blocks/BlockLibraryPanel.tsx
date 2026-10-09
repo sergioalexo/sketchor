@@ -1,7 +1,13 @@
 import { useMemo, useRef, useState } from "react";
 import {
   blockFromEntities,
+  blockCountCsv,
+  blockCountTable,
   blockPreviewEntities,
+  instancesOf,
+  planPurge,
+  planReplaceBlock,
+  purgeCandidates,
   entitiesToSvg,
   instanceCounts,
   libraryEntry,
@@ -14,6 +20,7 @@ import {
   type LibraryEntry,
 } from "@sketchor/core";
 import { beginBlockEdit, bus, doc, useApp } from "../state/store";
+import { downloadText } from "./download";
 import { addToLibrary, loadLibrary, removeFromLibrary } from "./libraryStore";
 
 /**
@@ -31,6 +38,8 @@ export function BlockLibraryPanel({ onClose }: { onClose: () => void }) {
   const [query, setQuery] = useState("");
   const [library, setLibrary] = useState<LibraryEntry[]>(() => loadLibrary());
   const [note, setNote] = useState("");
+  const [showCount, setShowCount] = useState(false);
+  const [replacing, setReplacing] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const blocks = useMemo(
@@ -47,6 +56,30 @@ export function BlockLibraryPanel({ onClose }: { onClose: () => void }) {
     setInsert({ block: name, values: {} });
     setTool("insert");
   };
+
+  const purge = () => {
+    const c = purgeCandidates(doc);
+    const plan = planPurge(doc);
+    if (!plan) {
+      setNote("Nothing to purge");
+      return;
+    }
+    const summary = Object.entries(c).filter(([, v]) => v.length > 0).map(([k, v]) => `${v.length} ${k}`).join(", ");
+    if (!window.confirm(`Purge ${summary}?`)) return;
+    bus.execute({ type: "batch", commands: plan });
+    setNote(`Purged ${summary}`);
+  };
+  const rename = (name: string) => {
+    const to = window.prompt(`Rename ${name} to`, name)?.trim();
+    if (to && to !== name) bus.execute({ type: "rename-block", from: name, to });
+  };
+  const replace = (from: string, to: string) => {
+    setReplacing(null);
+    const plan = planReplaceBlock(doc, from, to);
+    if (!plan) setNote(`Cannot replace ${from} with ${to}`);
+    else bus.execute({ type: "batch", commands: plan });
+  };
+  const countRows = showCount ? blockCountTable(doc) : [];
 
   const insertFromLibrary = (entry: LibraryEntry, redefine = false) => {
     const cmds: Command[] = planLibraryImport(doc, entry, redefine);
@@ -99,6 +132,21 @@ export function BlockLibraryPanel({ onClose }: { onClose: () => void }) {
       <div style={{ padding: 8 }}>
         <input type="search" placeholder="Search" value={query} data-testid="blocklib-search" style={{ width: "100%" }} onChange={(e) => setQuery(e.target.value)} />
       </div>
+      {source === "drawing" && (
+        <div style={{ display: "flex", gap: 4, padding: "0 8px 4px", flexWrap: "wrap" }}>
+          <button className="btn ghost sm" data-testid="blocklib-purge" title="Remove unused blocks, layers, linetypes, styles and patterns" onClick={purge}>Purge</button>
+          <button className="btn ghost sm" data-testid="blocklib-count" onClick={() => setShowCount(!showCount)}>Count</button>
+        </div>
+      )}
+      {showCount && (
+        <div style={{ padding: "0 8px 8px" }} data-testid="blocklib-count-table">
+          <table style={{ width: "100%" }}>
+            <thead><tr><th align="left">Block</th><th>Placed</th><th>Total</th></tr></thead>
+            <tbody>{countRows.map((r) => <tr key={r.block}><td>{r.block}</td><td align="center">{r.placed}</td><td align="center">{r.total}</td></tr>)}</tbody>
+          </table>
+          <button className="btn ghost sm" onClick={() => downloadText("block-count.csv", blockCountCsv(countRows), "text/csv")}>Save CSV</button>
+        </div>
+      )}
       {note && <div className="straighten-hint" style={{ padding: "0 8px" }}>{note}</div>}
       <div style={{ overflowY: "auto", flex: 1 }}>
         {source === "drawing" &&
@@ -111,6 +159,15 @@ export function BlockLibraryPanel({ onClose }: { onClose: () => void }) {
                 <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
                   <button className="btn ghost sm" data-testid={`blocklib-insert-${b.name}`} onClick={() => place(b.name)}>Insert</button>
                   <button className="btn ghost sm" onClick={() => beginBlockEdit(b.name)}>Edit</button>
+                  <button className="btn ghost sm" title="Rename" onClick={() => rename(b.name)}>Rename</button>
+                  <button className="btn ghost sm" title="Select all instances" onClick={() => useApp.getState().setSelection(instancesOf(doc, b.name))}>Select</button>
+                  <button className="btn ghost sm" title="Replace with another block" onClick={() => setReplacing(replacing === b.name ? null : b.name)}>Replace</button>
+                  {replacing === b.name && (
+                    <select value="" onChange={(e) => e.target.value && replace(b.name, e.target.value)}>
+                      <option value="">with...</option>
+                      {(doc.records("blocks") as BlockDefinition[]).filter((o) => o.name !== b.name).map((o) => <option key={o.name} value={o.name}>{o.name}</option>)}
+                    </select>
+                  )}
                   <button
                     className="btn ghost sm"
                     title="Keep in the library"
