@@ -332,10 +332,10 @@ function uniqueOverlayLayerName(base: string): string {
  * {@link importDxfText}'s replace path, overlaying isn't "opening" a
  * document, so the document keeps whatever unit it already had.
  */
-export function overlayEntities(entities: Entity[], label: string): { count: number; layer: string } {
+export function overlayEntities(entities: Entity[], label: string, blocks: BlockDefinition[] = []): { count: number; layer: string } {
   const layer = uniqueOverlayLayerName(label);
   const tagged = entities.map((e) => ({ ...e, layer }));
-  applyImportedEntities(tagged, false);
+  applyImportedEntities(tagged, false, blocks);
   useApp.getState().setActiveLayer(layer);
   return { count: entities.length, layer };
 }
@@ -375,8 +375,8 @@ function svgImportUnits(units: SvgUnits, layer?: string): ImportUnits {
  * `$INSUNITS` does.
  */
 export function importSvgText(text: string): { count: number; warnings: string[] } {
-  const { entities, warnings, units } = parseSvgText(text);
-  applyImportedEntities(entities, true);
+  const { entities, warnings, units, blocks } = parseSvgText(text, { blocks: "keep" });
+  applyImportedEntities(entities, true, blocks);
   useApp.getState().setImportReport(svgReport(entities));
   useApp.getState().setFileWarnings(warnings);
   useApp.getState().setImportUnits(svgImportUnits(units));
@@ -387,10 +387,10 @@ export function importSvgText(text: string): { count: number; warnings: string[]
 
 /** SVG overlay: as {@link overlayDxfText} — the drawing keeps its own unit; only the overlay layer is re-readable. */
 export function overlaySvgText(text: string, label: string): { count: number; warnings: string[]; layer: string } {
-  const { entities, warnings, units } = parseSvgText(text);
+  const { entities, warnings, units, blocks } = parseSvgText(text, { blocks: "keep" });
   useApp.getState().setImportReport(svgReport(entities));
   useApp.getState().setFileWarnings(warnings);
-  const added = overlayEntities(entities, label);
+  const added = overlayEntities(entities, label, blocks);
   useApp.getState().setImportUnits(svgImportUnits(units, added.layer));
   return { ...added, warnings };
 }

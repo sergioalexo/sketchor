@@ -814,6 +814,20 @@ export interface SvgImportResult {
   warnings: string[];
   /** How the file's user units map to mm — entities are already scaled. See {@link SvgUnits}. */
   units: SvgUnits;
+  /** SV-04: one definition per `<symbol>` used with `{ blocks: "keep" }`; the matching `insert` entities are in `entities`. */
+  blocks: BlockDefinition[];
+}
+
+export interface SvgImportOptions {
+  /** "keep": a `<use>` of a `<symbol>` becomes an insert of a real block (when its placement is a similarity); default "explode" draws the geometry in place. */
+  blocks?: "keep" | "explode";
+}
+
+function invertMat(m: Mat): Mat | null {
+  const [a, b, c, d, e, f] = m;
+  const det = a * d - b * c;
+  if (!Number.isFinite(det) || Math.abs(det) < 1e-12) return null;
+  return [d / det, -b / det, -c / det, a / det, (c * f - d * e) / det, (b * e - a * f) / det];
 }
 
 /** True when no number anywhere inside `v` is NaN or infinite. */
@@ -841,13 +855,16 @@ const MAX_NESTING = 256;
  * real size when they name one, else 96 dpi is assumed (see {@link SvgUnits}).
  * Uses the browser's DOMParser (this module's one browser-API dependency).
  */
-export function parseSvgText(text: string): SvgImportResult {
+export function parseSvgText(text: string, options: SvgImportOptions = {}): SvgImportResult {
+  const keepBlocks = options.blocks === "keep";
+  const blockDefs: BlockDefinition[] = [];
+  const blockCache = new Map<string, string>();
   const entities: Entity[] = [];
   const warnings: string[] = [];
   const doc = new DOMParser().parseFromString(text, "image/svg+xml");
   if (doc.querySelector("parsererror")) {
     warnings.push("the SVG could not be parsed (malformed XML)");
-    return { entities, warnings, units: { mmPerUserUnit: SVG_MM_PER_PX, source: "assumed" } };
+    return { entities, warnings, units: { mmPerUserUnit: SVG_MM_PER_PX, source: "assumed" }, blocks: [] };
   }
 
   const numAttr = (el: Element, name: string, fallback = 0): number => {
@@ -922,6 +939,55 @@ export function parseSvgText(text: string): SvgImportResult {
   let effectCount = 0;
   let useCount = 0;
   const useStack = new Set<Element>();
+  const symbolIds = new Map<Element, number>();
+
+  /**
+   * SV-04: a `<use>` of a `<symbol>` as an insert of a real block. The body is walked once per (symbol, inherited style) at the
+   * document's own viewport scale (symbol origin = base point) and each use becomes translate, rotate, scale of it. Returns false
+   * when the placement has shear or the symbol draws nothing, so the caller expands geometry instead.
+   */
+  const placeAsBlock = (target: Element, um: Mat, cs: Declarations, layer: string | undefined, depth: number): boolean => {
+    const vp = viewport.mat;
+    const inv = invertMat(vp);
+    if (!inv) return false;
+    const [a0, b0, c0, d0, e0, f0] = multiply(um, inv);
+    const A: Mat = [a0, -b0, -c0, d0, e0, -f0]; // body world (Y up) to instance world
+    const sx = Math.hypot(A[0], A[1]);
+    let sy = Math.hypot(A[2], A[3]);
+    if (!(sx > 1e-9) || !(sy > 1e-9)) return false;
+    if (Math.abs(A[0] * A[2] + A[1] * A[3]) > 1e-6 * sx * sy) return false;
+    if (A[0] * A[3] - A[1] * A[2] < 0) sy = -sy;
+    if (!symbolIds.has(target)) symbolIds.set(target, symbolIds.size);
+    const key = `${symbolIds.get(target)}|${JSON.stringify(cs)}`;
+    let name = blockCache.get(key);
+    if (name === undefined) {
+      const before = entities.length;
+      walk(target, vp, computeStyle(target, cs), null, depth);
+      const body = entities.splice(before).map((e) => {
+        const { layer: _l, ...rest } = e as Entity & { layer?: string };
+        return rest as Entity;
+      });
+      if (body.length === 0) return false;
+      const base = target.getAttribute("id") || "symbol";
+      let n = base;
+      for (let i = 2; blockDefs.some((d) => d.name === n); i++) n = `${base}~${i}`;
+      name = n;
+      blockDefs.push({ name, basePoint: fromSvgPoint(applyMat(vp, 0, 0)), entities: body, attributeDefs: [], explodable: true, scaleUniformly: false });
+      blockCache.set(key, name);
+    }
+    const def = blockDefs.find((d) => d.name === name)!;
+    entities.push({
+      id: newEntityId(),
+      type: "insert",
+      ...(layer ? { layer } : {}),
+      block: name,
+      insert: applyMat(A, def.basePoint.x, def.basePoint.y),
+      scale: { x: sx, y: sy },
+      rotation: Math.atan2(A[1], A[0]),
+      attributes: {},
+    });
+    return true;
+  };
 
   const firstNum = (el: Element, a: string): number | null => {
     const v = el.getAttribute(a);
@@ -1194,7 +1260,6 @@ export function parseSvgText(text: string): SvgImportResult {
           try {
             const ttag = target.tagName.toLowerCase();
             if (ttag === "symbol" || ttag === "svg") {
-              // Expanded as geometry for now; real blocks need B-01.
               const vb = (target.getAttribute("viewBox") ?? "").trim().split(/[\s,]+/).map(Number);
               if (vb.length === 4 && vb.every(Number.isFinite) && vb[2] > 0 && vb[3] > 0) {
                 const uw = parseUserLength(child.getAttribute("width") ?? target.getAttribute("width") ?? undefined);
@@ -1204,7 +1269,9 @@ export function parseSvgText(text: string): SvgImportResult {
                 const oy = uh ? (uh - vb[3] * sc) / 2 : 0;
                 um = multiply(um, [sc, 0, 0, sc, ox - vb[0] * sc, oy - vb[1] * sc]);
               }
-              walk(target, um, computeStyle(target, cs), layer ?? null, depth);
+              if (!(keepBlocks && ttag === "symbol" && placeAsBlock(target, um, cs, layer, depth))) {
+                walk(target, um, computeStyle(target, cs), layer ?? null, depth);
+              }
             } else {
               walkList([target], um, cs, layer ?? null, depth + 1);
             }
@@ -1233,5 +1300,5 @@ export function parseSvgText(text: string): SvgImportResult {
   if (hiddenCount) warnings.push(`${hiddenCount} hidden or invisible element${hiddenCount === 1 ? "" : "s"} (display:none, visibility:hidden, or no stroke and no fill) skipped`);
   const finite = entities.filter(allFinite);
   if (finite.length !== entities.length) warnings.push(`${entities.length - finite.length} element${entities.length - finite.length === 1 ? "" : "s"} with non-finite coordinates were skipped`);
-  return { entities: finite, warnings: [...new Set(warnings)], units: viewport.units };
+  return { entities: finite, warnings: [...new Set(warnings)], units: viewport.units, blocks: blockDefs };
 }

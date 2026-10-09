@@ -185,8 +185,8 @@ own `Element.matches`) < `style=""`, inherited through `<g>`; `stroke` →
 colour (black = automatic, so it never becomes a literal black on a dark
 canvas), `fill` → `fill` on closed shapes, `stroke-width` → `lineweight` mm,
 `stroke-dasharray` → nearest builtin linetype. `<defs>`/`<symbol>`/gradients
-are never drawn in place; `<use>` expands as geometry on the use's layer
-(real blocks wait for B-01). Layers come from `data-layer`, Inkscape
+are never drawn in place; `<use>` of a `<symbol>` imports as an insert of a real block with
+`parseSvgText(text, {blocks:"keep"})` (default `"explode"` expands geometry on the use's layer). Layers come from `data-layer`, Inkscape
 `groupmode="layer"`, or Illustrator top-level `<g id>`. Anything that walks the
 DOM must use `elementChildren` (sibling links, not the live `children`
 collection — quadratic in jsdom), respect `MAX_NESTING`, and the result is
