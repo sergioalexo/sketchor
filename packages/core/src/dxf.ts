@@ -10,6 +10,7 @@ import { aciToHex } from "./aci";
 import { transformEllipse } from "./ellipse";
 import { clampedUniformKnots as clampedKnots, interpolateNurbs, isValidNurbs, type NurbsData } from "./nurbs";
 import { unescapeDxfText } from "./dxfText";
+import { STANDARD_TEXT_STYLE, hAlignFromCode, vAlignFromCode, type TextStyle } from "./textStyle";
 
 /** Minimal XML text-content escape for the thumbnail SVG. */
 function escapeXml(s: string): string {
@@ -614,6 +615,41 @@ export interface DxfParseResult {
   blocks: BlockDefinition[];
   /** How {@link insUnits} was decided — anything but `insunits`/`measurement` is a guess worth showing the user. */
   unitSource: DxfUnitSource;
+  /** D-01: the file's STYLE table as text styles (heights in mm); empty when it only has Standard defaults. */
+  textStyles: TextStyle[];
+}
+
+/** Font file name (group 3) → a `TextStyle.font` value: `.shx` → `shx:<name>`, `.ttf`/`.otf` → `ttf:<family>`, anything else the stroke font. */
+export function fontFromStyleFile(file: string): string {
+  const f = file.trim().replace(/^.*[\\/]/, "");
+  const m = /^(.*)\.(shx|ttf|otf|ttc)$/i.exec(f);
+  if (!m || !m[1]) return "sketchor-stroke";
+  return m[2].toLowerCase() === "shx" ? (m[1].toLowerCase() === "txt" ? "sketchor-stroke" : `shx:${m[1].toLowerCase()}`) : `ttf:${m[1]}`;
+}
+
+/** The STYLE table (TABLES section) as {@link TextStyle}s, scaled by `k` (mm per file unit). */
+function collectTextStyles(pairs: Pair[], k: number): TextStyle[] {
+  const out: TextStyle[] = [];
+  for (const r of collectSectionRecords(pairs, "TABLES")) {
+    if (r.type !== "STYLE") continue;
+    const name = str(r, 2, "");
+    if (!name || name.startsWith("*")) continue;
+    const flags = Math.round(num(r, 71, 0));
+    const wf = num(r, 41, 1);
+    const style: TextStyle = {
+      name,
+      font: fontFromStyleFile(str(r, 3, "")),
+      height: Math.max(0, num(r, 40, 0)) * k,
+      widthFactor: wf > 0 ? wf : 1,
+      oblique: num(r, 50, 0),
+      backwards: (flags & 2) !== 0,
+      upsideDown: (flags & 4) !== 0,
+    };
+    // A bare Standard with every default carries no information.
+    if (name === "Standard" && JSON.stringify({ ...style, name: "" }) === JSON.stringify({ ...STANDARD_TEXT_STYLE, name: "" })) continue;
+    out.push(style);
+  }
+  return out;
 }
 
 export interface DxfParseOptions {
@@ -900,7 +936,29 @@ function convertRecords(raws: RawEntity[], ctx: ConvertContext): Entity[] {
             ? cleanMtext(unescapeDxfText(raw.pairs.filter((p) => p.code === 3).map((p) => p.value).join("") + raw1))
             : unescapeDxfText(raw1);
         if (content) {
-          entities.push({ id: newEntityId(), type: "text", layer, at, text: content, height, rotation });
+          const style = str(raw, 7, "");
+          const hc = Math.round(num(raw, 72, 0));
+          const vc = Math.round(num(raw, 73, 0));
+          const halign = raw.type === "TEXT" ? hAlignFromCode(hc) : undefined;
+          const valign = raw.type === "TEXT" ? vAlignFromCode(vc) : undefined;
+          const wf = num(raw, 41, 1);
+          const ob = num(raw, 51, 0);
+          // With a non-default alignment the real insertion point is group 11.
+          const place = (halign || valign) && raw.pairs.some((p) => p.code === 11) ? { x: num(raw, 11), y: num(raw, 21) } : at;
+          entities.push({
+            id: newEntityId(),
+            type: "text",
+            layer,
+            at: place,
+            text: content,
+            height,
+            rotation,
+            ...(style && style !== "Standard" ? { style } : {}),
+            ...(halign ? { halign } : {}),
+            ...(valign ? { valign } : {}),
+            ...(raw.type === "TEXT" && wf > 0 && wf !== 1 ? { widthFactor: wf } : {}),
+            ...(raw.type === "TEXT" && ob ? { oblique: ob } : {}),
+          });
         }
         break;
       }
@@ -1050,6 +1108,7 @@ export function parseDxf(text: string, options: DxfParseOptions = {}): DxfParseR
     report: buildImportReport(raws),
     insUnits,
     unitSource: resolved.source,
+    textStyles: collectTextStyles(allPairs, MM_PER_INSUNIT[insUnits] || 1),
   };
 }
 

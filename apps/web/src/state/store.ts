@@ -1,3 +1,4 @@
+import type { TextStyle } from "@sketchor/core";
 import { create } from "zustand";
 import { scaleBlockDefinition, scaleEntityKeepingInserts, setActiveBlocks, blockEditChanges, blockEditDocument, getBlock, type AttributeDef, type BlockDefinition } from "@sketchor/core";
 import type { Model3D } from "../model3d/types";
@@ -190,7 +191,7 @@ export function applySketchCode(text: string): ParseIssue[] {
 }
 
 /** Shared by every import path: replaces (or adds to) the drawing's entities as one undoable step. */
-function applyImportedEntities(entities: Entity[], replace: boolean, blocks: BlockDefinition[] = []): void {
+function applyImportedEntities(entities: Entity[], replace: boolean, blocks: BlockDefinition[] = [], textStyles: TextStyle[] = []): void {
   const commands: Command[] = [];
   if (replace) {
     const ids = doc.all().map((e) => e.id);
@@ -198,7 +199,10 @@ function applyImportedEntities(entities: Entity[], replace: boolean, blocks: Blo
     // A fresh file brings its own layers: what was hidden or locked in the old drawing must not carry over by name.
     for (const r of doc.records("layers")) commands.push({ type: "delete-table-record", table: "layers", name: r.name });
     for (const r of doc.records("blocks")) commands.push({ type: "delete-table-record", table: "blocks", name: r.name });
+    for (const r of doc.records("textStyles")) commands.push({ type: "delete-table-record", table: "textStyles", name: r.name });
   }
+  // D-01: the file's text styles; an add-import never overwrites an existing style of the same name.
+  for (const s of textStyles) if (replace || !doc.hasRecord("textStyles", s.name)) commands.push({ type: "put-table-record", table: "textStyles", record: s });
   // B-07: the file's block definitions come before the inserts that name them; an existing block of the same name is never overwritten by an add-import.
   for (const b of blocks) if (replace || !doc.hasRecord("blocks", b.name)) commands.push({ type: "put-table-record", table: "blocks", record: b });
   for (const entity of entities) commands.push({ type: "add-entity", entity });
@@ -271,7 +275,7 @@ export function importDxfText(text: string, replace = true): { count: number; wa
 /** {@link importDxfText} for an already-parsed file. */
 function importParsedDxf(result: DxfParseResult, replace: boolean): { count: number; warnings: string[] } {
   const { entities, warnings, report, insUnits, unitSource } = result;
-  applyImportedEntities(entities, replace, result.blocks);
+  applyImportedEntities(entities, replace, result.blocks, result.textStyles);
   useApp.getState().setImportReport(report);
   useApp.getState().setFileWarnings(warnings.filter((w) => !w.startsWith("unsupported entity")));
   useApp.getState().setImportUnits({ code: insUnits, source: unitSource });

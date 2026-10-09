@@ -4,6 +4,7 @@ import { dist } from "../geometry";
 import { ellipseSweep, isFullEllipse } from "../ellipse";
 import { kindTessellate } from "../kinds/registry";
 import { aciToHex, hexToRgb, nearestAci } from "../aci";
+import { H_ALIGN_CODE, V_ALIGN_CODE } from "../textStyle";
 import { n, pair } from "./write";
 import { hatchDxfPairs, type OutPair } from "../hatch/hatchDxf";
 
@@ -165,6 +166,13 @@ export function polylineEntity2018(e: PolylineEntity, handle: string, owner: str
   );
 }
 
+/** 72/73 plus the alignment point (11): DXF ignores group 11 unless an alignment is set, so write it only then. */
+function textAlignGroups(e: TextEntity): string {
+  const h = H_ALIGN_CODE[e.halign ?? "left"];
+  const v = V_ALIGN_CODE[e.valign ?? "baseline"];
+  return h || v ? `72\n${h}\n` + pair(11, e.at.x) + pair(21, e.at.y) + pair(31, 0) + `73\n${v}\n` : "";
+}
+
 export function textEntity2018(e: TextEntity, handle: string, owner: string): string {
   return (
     `0\nTEXT\n` +
@@ -174,7 +182,10 @@ export function textEntity2018(e: TextEntity, handle: string, owner: string): st
     pair(40, e.height) +
     pair(1, e.text) +
     (e.rotation ? pair(50, (e.rotation * 180) / Math.PI) : "") +
-    pair(7, "Standard") +
+    (e.widthFactor && e.widthFactor !== 1 ? pair(41, e.widthFactor) : "") +
+    (e.oblique ? pair(51, e.oblique) : "") +
+    pair(7, e.style || "Standard") +
+    textAlignGroups(e) +
     `100\nAcDbText\n` +
     nameXdata(e.name)
   );

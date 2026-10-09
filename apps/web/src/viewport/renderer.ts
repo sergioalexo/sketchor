@@ -1,3 +1,4 @@
+import { canvasFontFamily, resolveTextLook, type TableRecord } from "@sketchor/core";
 import type { Bounds, BoxSelectMode, CanvasTokens, ClosedRegion, Entity, EntityId, Point, SketchDocument } from "@sketchor/core";
 import {
   arcPointAt,
@@ -130,6 +131,7 @@ export function render(
   if (ui.closedRegions.length > 0) drawClosedRegions(ctx, view, ui.closedRegions);
 
   beginHatchFrame();
+  textStyleLookup = (name) => doc.getRecord("textStyles", name);
   const ltscale = doc.settings.ltscale ?? 1;
   const everything = doc.all();
   // H-08: lower drawOrder first (stable), so a hatch can sit behind its boundary.
@@ -690,6 +692,9 @@ function drawOrigin(ctx: CanvasRenderingContext2D, width: number, height: number
   ctx.textBaseline = "alphabetic";
 }
 
+/** D-01: set at the start of each frame so `drawEntity` (which has no document) can resolve a text's style. */
+let textStyleLookup: ((name: string) => TableRecord | undefined) | undefined;
+
 function drawEntity(
   ctx: CanvasRenderingContext2D,
   view: View,
@@ -728,8 +733,15 @@ function drawEntity(
     ctx.translate(p.x, p.y);
     ctx.rotate(-entity.rotation); // world CCW → screen CW
     ctx.fillStyle = color;
-    ctx.textBaseline = "alphabetic";
-    ctx.font = `${Math.max(1, entity.height * view.scale)}px ui-sans-serif, system-ui, sans-serif`;
+    // D-01: the named style's font/shape, with the entity's own overrides on top.
+    const look = resolveTextLook(entity, textStyleLookup);
+    ctx.textBaseline = entity.valign === "middle" ? "middle" : entity.valign === "top" ? "top" : entity.valign === "bottom" ? "bottom" : "alphabetic";
+    ctx.textAlign = entity.halign ?? "left";
+    ctx.font = `${Math.max(1, entity.height * view.scale)}px ${canvasFontFamily(look.font)}`;
+    if (look.oblique) ctx.transform(1, 0, -Math.tan((look.oblique * Math.PI) / 180), 1, 0, 0);
+    if (look.widthFactor !== 1 || look.backwards || look.upsideDown) {
+      ctx.scale(look.widthFactor * (look.backwards ? -1 : 1), look.upsideDown ? -1 : 1);
+    }
     ctx.fillText(entity.text, 0, 0);
     ctx.restore();
     return;

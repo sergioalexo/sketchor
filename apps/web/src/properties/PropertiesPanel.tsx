@@ -1,3 +1,4 @@
+import { TEXT_STYLE_PRESETS } from "@sketchor/core";
 import { useEffect, useMemo, useState } from "react";
 import type { Command, Entity, HatchEntity, PolylineEntity, SplineEntity } from "@sketchor/core";
 import { GRADIENT_NAMES, explodeHatchCommands, recreateBoundaryCommands, setHatchDrawOrder, entityArea, entityLength, arcPointAt, arcSweep, bulgeToArc, BUILTIN_LINETYPES, dist, ellipseSweep, nurbsDomain, nurbsPointAt, findClosedRegions, isFullEllipse, layerOf, polylineLength, addSplinePoint, polylineToSpline, rebuildSpline, refitSpline, removeSplinePoint, splineToControlPoints, splineToPolyline } from "@sketchor/core";
@@ -138,7 +139,7 @@ export function PropertiesPanel({ onClose }: { onClose: () => void }) {
   );
 }
 
-function stripKey(e: Entity, key: "layer" | "color" | "construction" | "linetype" | "lineweight"): Entity {
+function stripKey(e: Entity, key: "layer" | "color" | "construction" | "linetype" | "lineweight" | "style" | "halign" | "valign" | "widthFactor" | "oblique"): Entity {
   const copy = { ...e } as Record<string, unknown>;
   delete copy[key];
   return copy as unknown as Entity;
@@ -350,6 +351,44 @@ function Geometry({ entity, unit }: { entity: Entity; unit: DisplayUnit }) {
           <PointRow label="Position" p={entity.at} unit={unit} onCommit={(p) => update({ ...entity, at: p })} testId="prop-at" />
           <LengthRow label="Height" value={entity.height} unit={unit} testId="prop-height" onCommit={(v) => v > 0 && update({ ...entity, height: v })} />
           <NumberRow label="Rotation" value={deg(entity.rotation)} suffix="°" testId="prop-rotation" onCommit={(v) => update({ ...entity, rotation: rad(v) })} />
+          <Row label="Style">
+            <select
+              className="propspanel-input"
+              value={entity.style ?? "Standard"}
+              data-testid="prop-text-style"
+              onChange={(e) => {
+                const name = e.target.value;
+                const preset = TEXT_STYLE_PRESETS.find((s) => s.name === name);
+                const next = name === "Standard" ? stripKey(entity, "style") : { ...entity, style: name };
+                // Picking a built-in preset the drawing doesn't have yet adds it to the table in the same undo step.
+                if (preset && !doc.hasRecord("textStyles", name)) {
+                  bus.execute({ type: "batch", commands: [{ type: "put-table-record", table: "textStyles", record: preset }, { type: "update-entity", entity: next }] });
+                } else update(next);
+              }}
+            >
+              {[...new Set(["Standard", ...TEXT_STYLE_PRESETS.map((s) => s.name), ...doc.records("textStyles").map((r) => r.name)])].map((n) => (
+                <option key={n} value={n}>{n}</option>
+              ))}
+            </select>
+          </Row>
+          <Row label="Align">
+            <select
+              className="propspanel-input"
+              value={`${entity.halign ?? "left"}/${entity.valign ?? "baseline"}`}
+              data-testid="prop-text-align"
+              onChange={(e) => {
+                const [h, v] = e.target.value.split("/");
+                const base = stripKey(stripKey(entity, "halign"), "valign");
+                update({ ...base, ...(h !== "left" ? { halign: h as "center" | "right" } : {}), ...(v !== "baseline" ? { valign: v as "bottom" | "middle" | "top" } : {}) });
+              }}
+            >
+              {["left", "center", "right"].flatMap((h) => ["baseline", "bottom", "middle", "top"].map((v) => (
+                <option key={`${h}/${v}`} value={`${h}/${v}`}>{h} / {v}</option>
+              )))}
+            </select>
+          </Row>
+          <NumberRow label="Width factor" value={entity.widthFactor ?? 1} testId="prop-text-width" onCommit={(v) => update(v > 0 && v !== 1 ? { ...entity, widthFactor: v } : stripKey(entity, "widthFactor"))} />
+          <NumberRow label="Oblique" value={entity.oblique ?? 0} suffix="°" testId="prop-text-oblique" onCommit={(v) => update(v ? { ...entity, oblique: v } : stripKey(entity, "oblique"))} />
         </Section>
       );
     case "image":

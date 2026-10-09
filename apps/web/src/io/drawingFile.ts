@@ -1,4 +1,4 @@
-import { type BlockDefinition, decodeDxfBytes, entitiesToDxf, entitiesToDxf2018, entitiesToEps, entitiesToEpsFile, entitiesToSvgDocument, flattenInserts } from "@sketchor/core";
+import { type BlockDefinition, type TextStyle, decodeDxfBytes, entitiesToDxf, entitiesToDxf2018, entitiesToEps, entitiesToEpsFile, entitiesToSvgDocument, flattenInserts } from "@sketchor/core";
 import { DWG_UNREADABLE, dwgToDxfText } from "../browser/dwgImport";
 import { isModelFile, loadModel } from "../model3d/stepImport";
 import { acceptList, allExtensions, formatOf } from "./formats";
@@ -124,7 +124,7 @@ function serialize(format: SaveFormat): string | Uint8Array {
     // declared unit so the file's numbers represent real-world size.
     const insUnits = displayUnitToDxfCode(displayUnit);
     const scale = factorFromMm(displayUnit);
-    return r12 ? entitiesToDxf(entities, insUnits, scale, keepBlocks ? blocks : undefined) : entitiesToDxf2018(entities, { insUnits, scale, ...(keepBlocks ? { blocks } : {}) });
+    return r12 ? entitiesToDxf(entities, insUnits, scale, keepBlocks ? blocks : undefined) : entitiesToDxf2018(entities, { insUnits, scale, textStyles: doc.records("textStyles") as TextStyle[], ...(keepBlocks ? { blocks } : {}) });
   }
   // True physical size: inches only when the tab works in inches/feet.
   const displayUnit = useApp.getState().displayUnit;

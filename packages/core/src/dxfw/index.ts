@@ -1,3 +1,4 @@
+import { STANDARD_TEXT_STYLE, type TextStyle } from "../textStyle";
 import type { Entity } from "../entities";
 import { layerOf } from "../entities";
 import type { BlockDefinition } from "../blocks/types";
@@ -100,10 +101,12 @@ function ltypeEntry(h: string, owner: string, name: string): string {
   );
 }
 
-function styleEntry(h: string, owner: string): string {
+function styleEntry(h: string, owner: string, s: TextStyle = STANDARD_TEXT_STYLE): string {
+  const file = s.font.startsWith("shx:") ? `${s.font.slice(4)}.shx` : s.font.startsWith("ttf:") ? `${s.font.slice(4)}.ttf` : "txt";
+  const flags = (s.backwards ? 2 : 0) | (s.upsideDown ? 4 : 0);
   return (
     symbolRecordHead("STYLE", h, owner, "AcDbTextStyleTableRecord") +
-    `2\nStandard\n70\n0\n40\n0.0\n41\n1.0\n50\n0.0\n71\n0\n42\n2.5\n3\ntxt\n4\n\n`
+    `2\n${s.name}\n70\n0\n` + pair(40, s.height) + pair(41, s.widthFactor) + pair(50, s.oblique) + `71\n${flags}\n` + pair(42, 2.5) + `3\n${file}\n4\n\n`
   );
 }
 
@@ -148,7 +151,7 @@ function header(insUnits: number, bounds: { minX: number; minY: number; maxX: nu
   );
 }
 
-function tablesSection(plan: Plan, layers: string[], blockDefs: readonly BlockDefinition[]): string {
+function tablesSection(plan: Plan, layers: string[], blockDefs: readonly BlockDefinition[], textStyles: readonly TextStyle[] = []): string {
   const { h, layerHandles, linetypeHandles } = plan;
   const layerEntries = layers.map((name) => layerEntry(layerHandles.get(name)!, h.layerTable, name));
   const ltypeEntries = [...linetypeHandles].map(([name, handle]) => ltypeEntry(handle, h.ltypeTable, name));
@@ -157,7 +160,10 @@ function tablesSection(plan: Plan, layers: string[], blockDefs: readonly BlockDe
     table("VPORT", h.vportTable, []) +
     table("LTYPE", h.ltypeTable, ltypeEntries) +
     table("LAYER", h.layerTable, layerEntries) +
-    table("STYLE", h.styleTable, [styleEntry(h.standardStyle, h.styleTable)]) +
+    table("STYLE", h.styleTable, [
+      styleEntry(h.standardStyle, h.styleTable, textStyles.find((s) => s.name === "Standard")),
+      ...textStyles.filter((s) => s.name !== "Standard").map((s) => styleEntry(plan.alloc.alloc(), h.styleTable, s)),
+    ]) +
     table("VIEW", h.viewTable, []) +
     table("UCS", h.ucsTable, []) +
     table("APPID", h.appidTable, [
@@ -228,6 +234,8 @@ export interface DxfWriteOptions2018 {
   scale?: number;
   /** B-08: the drawing's block definitions (mm, like the entities). Inserts naming one are written as INSERTs; without them (or for an unknown name) inserts are the caller's to flatten. */
   blocks?: readonly BlockDefinition[];
+  /** D-01: the drawing's `textStyles` records, written as STYLE table entries (TEXT group 7 names them). */
+  textStyles?: readonly TextStyle[];
 }
 
 /**
@@ -267,7 +275,7 @@ export function entitiesToDxf2018(entities: Entity[], options: DxfWriteOptions20
   return (
     header(insUnits, bounds, plan.alloc.seed()) +
     `0\nSECTION\n2\nCLASSES\n0\nENDSEC\n` +
-    tablesSection(plan, layers, blockDefs) +
+    tablesSection(plan, layers, blockDefs, options.textStyles) +
     blocksSection(plan, userBlocks) +
     `0\nSECTION\n2\nENTITIES\n${entitiesText}0\nENDSEC\n` +
     objects +

@@ -307,6 +307,16 @@ export interface TextEntity {
   text: string;
   height: number;
   rotation: number;
+  /** D-01: name of a `textStyles` record (absent = Standard). */
+  style?: string;
+  /** D-01: horizontal alignment of `at` against the text (DXF 72). Absent = left. */
+  halign?: "left" | "center" | "right";
+  /** D-01: vertical alignment of `at` (DXF 73). Absent = baseline. */
+  valign?: "baseline" | "bottom" | "middle" | "top";
+  /** D-01: width factor override (style's when absent). */
+  widthFactor?: number;
+  /** D-01: oblique angle override in degrees (style's when absent). */
+  oblique?: number;
 }
 
 /**
@@ -496,13 +506,15 @@ export function textWidth(text: string, height: number): number {
 
 /** The four corners of a text entity's bounding box, in world space (rotated about `at`). */
 export function textCorners(entity: TextEntity): Point[] {
-  const w = textWidth(entity.text, entity.height);
+  const w = textWidth(entity.text, entity.height) * (entity.widthFactor && entity.widthFactor > 0 ? entity.widthFactor : 1);
   const h = entity.height;
+  const ox = entity.at.x + (entity.halign === "center" ? -w / 2 : entity.halign === "right" ? -w : 0);
+  const oy = entity.at.y + (entity.valign === "middle" ? -h / 2 : entity.valign === "top" ? -h : 0);
   return [
-    { x: entity.at.x, y: entity.at.y },
-    { x: entity.at.x + w, y: entity.at.y },
-    { x: entity.at.x + w, y: entity.at.y + h },
-    { x: entity.at.x, y: entity.at.y + h },
+    { x: ox, y: oy },
+    { x: ox + w, y: oy },
+    { x: ox + w, y: oy + h },
+    { x: ox, y: oy + h },
   ].map((p) => rotatePoint(p, entity.at, entity.rotation));
 }
 

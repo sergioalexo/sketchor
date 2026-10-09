@@ -718,6 +718,12 @@ export function diffToCommands(doc: SketchDocument, parsed: ParsedEntity[]): Com
         if (existing.lineweight !== undefined) updated.lineweight = existing.lineweight;
         if (existing.construction !== undefined) updated.construction = existing.construction;
         if (existing.type === "line" && existing.infinite && updated.type === "line") updated.infinite = true;
+        if (existing.type === "text" && updated.type === "text") {
+          // D-01: style, alignment, width factor and oblique have no sketch-code word either.
+          for (const k of ["style", "halign", "valign", "widthFactor", "oblique"] as const) {
+            if (existing[k] !== undefined) (updated as unknown as Record<string, unknown>)[k] = existing[k];
+          }
+        }
         commands.push({ type: "update-entity", entity: updated });
       }
     } else if (p.type === "hatch" && !p.boundary) {

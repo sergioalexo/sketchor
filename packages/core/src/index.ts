@@ -19,6 +19,7 @@ export * from "./solver";
 export * from "./connectivity";
 export * from "./document";
 export * from "./tables";
+export * from "./textStyle";
 export * from "./layerTable";
 export * from "./commands";
 export * from "./sketchtext";

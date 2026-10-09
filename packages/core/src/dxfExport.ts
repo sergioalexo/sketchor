@@ -1,3 +1,4 @@
+import { H_ALIGN_CODE, V_ALIGN_CODE } from "./textStyle";
 import { explodeHatchEntities } from "./hatch/ops";
 import type { ArcEntity, CircleEntity, Entity, ImageEntity, InsertEntity, LineEntity, PointEntity, PolylineEntity, TextEntity } from "./entities";
 import { imageCorners, layerOf } from "./entities";
@@ -165,7 +166,23 @@ function textEntity(e: TextEntity): string {
     pair(30, 0) +
     pair(40, e.height) +
     pair(1, e.text) +
-    (e.rotation ? pair(50, (e.rotation * 180) / Math.PI) : "")
+    (e.rotation ? pair(50, (e.rotation * 180) / Math.PI) : "") +
+    textStyleGroups(e)
+  );
+}
+
+/** D-01: width factor (41), oblique (51) and alignment (72/73 + the alignment point 11/21) of a TEXT; empty when all default. */
+export function textStyleGroups(e: TextEntity): string {
+  const h = H_ALIGN_CODE[e.halign ?? "left"];
+  const v = V_ALIGN_CODE[e.valign ?? "baseline"];
+  return (
+    (e.widthFactor && e.widthFactor !== 1 ? pair(41, e.widthFactor) : "") +
+    (e.oblique ? pair(51, e.oblique) : "") +
+    (h || v ? `72
+${h}
+` + pair(11, e.at.x) + pair(21, e.at.y) + pair(31, 0) + `73
+${v}
+` : "")
   );
 }
 
