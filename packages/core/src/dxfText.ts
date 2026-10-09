@@ -4,6 +4,8 @@
  * outside ASCII as `\U+XXXX`. Cyrillic labels must survive every direction.
  */
 
+import { binaryDxfToText, isBinaryDxf } from "./dxfBinary";
+
 /** `$DWGCODEPAGE` value → WHATWG `TextDecoder` label. */
 const CODEPAGE_LABELS: Record<string, string> = {
   ANSI_874: "windows-874",
@@ -47,6 +49,7 @@ function decodeWith(label: string, bytes: Uint8Array, fatal: boolean): string | 
 
 /** DXF file bytes → text, choosing UTF-8 or the declared codepage (never mojibake an AC1021+ file or a 1251 one). */
 export function decodeDxfBytes(bytes: Uint8Array): string {
+  if (isBinaryDxf(bytes)) return binaryDxfToText(bytes); // X-11
   if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) return new TextDecoder("utf-8").decode(bytes);
   const { version, codepage } = sniffDxfHeader(bytes);
   const modern = version !== undefined && version >= "AC1021";

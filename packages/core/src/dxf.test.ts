@@ -511,8 +511,9 @@ describe("$INSUNITS", () => {
     expect(parse(dxf(header(4), oneMetreLine), { assumeUnits: 1 }).insUnits).toBe(4);
   });
 
-  it("warns instead of silently failing on binary DXF", () => {
-    expect(parse("AutoCAD Binary DXF" + String.fromCharCode(13, 10, 26, 0)).warnings[0]).toMatch(/binary DXF/);
+  it("reads a (here empty) binary DXF instead of refusing it (X-11), and warns when the bytes were lost to text decoding", () => {
+    expect(parse("AutoCAD Binary DXF" + String.fromCharCode(13, 10, 26, 0)).entities).toEqual([]);
+    expect(parse("AutoCAD Binary DXFЖ").warnings[0]).toMatch(/binary DXF/);
   });
 
   it("scales radii and block-placed geometry too", () => {

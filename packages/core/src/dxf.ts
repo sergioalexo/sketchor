@@ -10,6 +10,7 @@ import { aciToHex } from "./aci";
 import { transformEllipse } from "./ellipse";
 import { clampedUniformKnots as clampedKnots, interpolateNurbs, isValidNurbs, type NurbsData } from "./nurbs";
 import { unescapeDxfText } from "./dxfText";
+import { binaryDxfToText } from "./dxfBinary";
 import { STANDARD_TEXT_STYLE, hAlignFromCode, vAlignFromCode, type TextStyle } from "./textStyle";
 import { SKETCHOR_DICT_KEY, decodeDocData, parseEntityXdata, type SketchorDocData } from "./sketchorData";
 import { newGroupId, type Group } from "./groups";
@@ -1089,7 +1090,16 @@ function convertRecords(raws: RawEntity[], ctx: ConvertContext): Entity[] {
 export function parseDxf(text: string, options: DxfParseOptions = {}): DxfParseResult {
   const warnings: string[] = [];
   if (text.startsWith("AutoCAD Binary DXF")) {
-    warnings.push("binary DXF isn't supported — re-save the file as ASCII DXF");
+    // X-11: a caller that decoded the bytes as text (one char per byte) can still be read; otherwise the bytes are gone.
+    const bytes = new Uint8Array(text.length);
+    let ok = true;
+    for (let i = 0; i < text.length && ok; i++) {
+      const c = text.charCodeAt(i);
+      if (c > 255) ok = false;
+      else bytes[i] = c;
+    }
+    if (ok) text = binaryDxfToText(bytes);
+    else warnings.push("binary DXF arrived as text and could not be recovered — open it from its file bytes or re-save as ASCII DXF");
   }
   const allPairs = tokenize(text);
   const resolved = resolveUnits(allPairs);
