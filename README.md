@@ -468,6 +468,10 @@ never which one. Dev builds send nothing unless `VITE_METRICS_DEV=1`.
 4. **Rendering scale-up** — swap the Canvas2D renderer for WebGPU behind the
    same `render()` interface once drawings get large.
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, tests and how to contribute.
+
 ## License
 
 [GNU AGPL v3.0](LICENSE) or later.
