@@ -191,7 +191,7 @@ export function applySketchCode(text: string): ParseIssue[] {
 }
 
 /** Shared by every import path: replaces (or adds to) the drawing's entities as one undoable step. */
-function applyImportedEntities(entities: Entity[], replace: boolean, blocks: BlockDefinition[] = [], textStyles: TextStyle[] = [], extras: { groups?: Group[]; constraints?: Constraint[]; params?: TableRecord[] } = {}): void {
+function applyImportedEntities(entities: Entity[], replace: boolean, blocks: BlockDefinition[] = [], textStyles: TextStyle[] = [], extras: { groups?: Group[]; constraints?: Constraint[]; params?: TableRecord[]; foreign?: TableRecord[] } = {}): void {
   const commands: Command[] = [];
   if (!replace) {
     // Ids restored from SKETCHOR XDATA may already exist here: an add-import gets fresh ids, and the id-keyed extras are dropped.
@@ -206,6 +206,7 @@ function applyImportedEntities(entities: Entity[], replace: boolean, blocks: Blo
     for (const r of doc.records("blocks")) commands.push({ type: "delete-table-record", table: "blocks", name: r.name });
     for (const r of doc.records("textStyles")) commands.push({ type: "delete-table-record", table: "textStyles", name: r.name });
     for (const r of doc.records("params")) commands.push({ type: "delete-table-record", table: "params", name: r.name });
+    for (const r of doc.records("foreign")) commands.push({ type: "delete-table-record", table: "foreign", name: r.name });
   }
   // D-01: the file's text styles; an add-import never overwrites an existing style of the same name.
   for (const s of textStyles) if (replace || !doc.hasRecord("textStyles", s.name)) commands.push({ type: "put-table-record", table: "textStyles", record: s });
@@ -214,6 +215,7 @@ function applyImportedEntities(entities: Entity[], replace: boolean, blocks: Blo
   for (const entity of entities) commands.push({ type: "add-entity", entity });
   // X-05/X-08: groups (parents before children), the `params` table and constraints a Sketchor-written DXF carries.
   for (const record of extras.params ?? []) commands.push({ type: "put-table-record", table: "params", record });
+  for (const record of extras.foreign ?? []) commands.push({ type: "put-table-record", table: "foreign", record });
   for (const g of extras.groups ?? []) commands.push({ type: "group-entities", groupId: g.id, ids: g.members, name: g.name, ...(g.parent ? { parent: g.parent } : {}) });
   for (const constraint of extras.constraints ?? []) commands.push({ type: "add-constraint", constraint });
   if (commands.length === 1) bus.execute(commands[0]);
@@ -285,7 +287,7 @@ export function importDxfText(text: string, replace = true): { count: number; wa
 /** {@link importDxfText} for an already-parsed file. */
 function importParsedDxf(result: DxfParseResult, replace: boolean): { count: number; warnings: string[] } {
   const { entities, warnings, report, insUnits, unitSource } = result;
-  applyImportedEntities(entities, replace, result.blocks, result.textStyles, { groups: result.groups, constraints: result.constraints, params: result.params });
+  applyImportedEntities(entities, replace, result.blocks, result.textStyles, { groups: result.groups, constraints: result.constraints, params: result.params, foreign: result.foreign });
   useApp.getState().setImportReport(report);
   useApp.getState().setFileWarnings(warnings.filter((w) => !w.startsWith("unsupported entity")));
   useApp.getState().setImportUnits({ code: insUnits, source: unitSource });

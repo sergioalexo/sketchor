@@ -24,6 +24,8 @@ export * from "./layerTable";
 export * from "./commands";
 export * from "./sketchtext";
 export * from "./dxf";
+export * from "./foreign";
+export * from "./sketchorData";
 export * from "./dxfExport";
 export * from "./dxfText";
 export * from "./dxfw/index";

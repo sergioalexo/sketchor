@@ -15,6 +15,7 @@ import { SKETCHOR_DICT_KEY, decodeDocData, parseEntityXdata, type SketchorDocDat
 import { newGroupId, type Group } from "./groups";
 import type { Constraint } from "./constraints";
 import type { TableRecord } from "./tables";
+import type { ForeignRecord } from "./foreign";
 
 /** Minimal XML text-content escape for the thumbnail SVG. */
 function escapeXml(s: string): string {
@@ -613,6 +614,8 @@ export interface DxfParseResult {
   groups: Group[];
   constraints: Constraint[];
   params: TableRecord[];
+  /** X-09: unmodelled entities kept verbatim for re-save. */
+  foreign: ForeignRecord[];
 }
 
 /** Font file name (group 3) → a `TextStyle.font` value: `.shx` → `shx:<name>`, `.ttf`/`.otf` → `ttf:<family>`, anything else the stroke font. */
@@ -797,6 +800,8 @@ interface ConvertContext {
   handleToId?: Map<string, string>;
   /** X-08: ids already restored from SKETCHOR XDATA in this scope; absent = don't restore ids (inserts being expanded). */
   usedIds?: Set<string>;
+  /** X-09: top-level records no case modelled, collected to be kept verbatim. */
+  foreign?: RawEntity[];
 }
 
 /**
@@ -1046,6 +1051,7 @@ function convertRecords(raws: RawEntity[], ctx: ConvertContext): Entity[] {
       default:
         if (!KNOWN_IGNORED.has(raw.type)) {
           warnings.push(`unsupported entity: ${raw.type}`);
+          if (ctx.depth === 0) ctx.foreign?.push(raw);
         }
     }
     // Restore a Sketchor-written name, and the entity's own colour/linetype/
@@ -1095,7 +1101,8 @@ export function parseDxf(text: string, options: DxfParseOptions = {}): DxfParseR
   const hatchSources = new Map<string, string[]>();
   const handleToId = new Map<string, string>();
   const usedIds = new Set<string>();
-  const converted = convertRecords(raws, { blocks, warnings, depth: 0, stack: new Set(), keep, hatchSources, handleToId, usedIds });
+  const foreignRaws: RawEntity[] = [];
+  const converted = convertRecords(raws, { blocks, warnings, depth: 0, stack: new Set(), keep, hatchSources, handleToId, usedIds, foreign: foreignRaws });
   // H-09: an associative HATCH follows its boundary objects only when every one of them came through as an entity.
   for (const e of converted) {
     const handles = e.type === "hatch" ? hatchSources.get(e.id) : undefined;
@@ -1130,10 +1137,36 @@ export function parseDxf(text: string, options: DxfParseOptions = {}): DxfParseR
     insUnits,
     unitSource: resolved.source,
     textStyles: collectTextStyles(allPairs, MM_PER_INSUNIT[insUnits] || 1),
+    foreign: keepForeign(foreignRaws, allPairs, insUnits),
     groups: sketchor.groups,
     constraints: sketchor.data?.constraints ?? [],
     params: sketchor.data?.params ?? [],
   };
+}
+
+/** X-09: raw unsupported records (+ their CLASSES entries) as `foreign` table records. */
+function keepForeign(raws: RawEntity[], pairs: Pair[], insUnits: number): ForeignRecord[] {
+  if (raws.length === 0) return [];
+  const classes = new Map<string, [number, string][]>();
+  for (const c of collectSectionRecords(pairs, "CLASSES")) {
+    if (c.type === "CLASS") classes.set(str(c, 1, "").toUpperCase(), c.pairs.map((p) => [p.code, p.value] as [number, string]));
+  }
+  const withClass = new Set<string>();
+  return raws.slice(0, 50000).map((raw, i) => {
+    const rec: ForeignRecord = {
+      name: `foreign-${i + 1}`,
+      type: raw.type,
+      layer: str(raw, 8, "0") || "0",
+      pairs: raw.pairs.map((p) => [p.code, p.value] as [number, string]),
+      units: insUnits,
+    };
+    const cls = classes.get(raw.type.toUpperCase());
+    if (cls && !withClass.has(raw.type)) {
+      withClass.add(raw.type);
+      rec.cls = cls;
+    }
+    return rec;
+  });
 }
 
 /**

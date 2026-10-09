@@ -22,7 +22,8 @@ export type TableName =
   | "linetypes"
   | "hatchPatterns"
   | "layouts"
-  | "params";
+  | "params"
+  | "foreign";
 
 export const TABLE_NAMES: readonly TableName[] = [
   "layers",
@@ -33,6 +34,7 @@ export const TABLE_NAMES: readonly TableName[] = [
   "hatchPatterns",
   "layouts",
   "params",
+  "foreign",
 ];
 
 /** One row of a table. `name` is its key — unique within the table, case-sensitive. */

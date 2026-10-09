@@ -1,3 +1,4 @@
+import { foreignClassText, foreignEntityText, type ForeignRecord } from "../foreign";
 import { STANDARD_TEXT_STYLE, type TextStyle } from "../textStyle";
 import type { Entity } from "../entities";
 import { layerOf } from "../entities";
@@ -268,6 +269,8 @@ export interface DxfWriteOptions2018 {
   blocks?: readonly BlockDefinition[];
   /** D-01: the drawing's `textStyles` records, written as STYLE table entries (TEXT group 7 names them). */
   textStyles?: readonly TextStyle[];
+  /** X-09: unmodelled entities from an imported DXF, written back unchanged (new handles). Only those read in the output unit are written. */
+  foreign?: readonly ForeignRecord[];
   /** X-05/X-08: the drawing's groups (written as DXF GROUP objects and, exactly, in the SKETCHOR record), constraints and `params` table. Not scaled: constraint values stay in mm. */
   groups?: readonly Group[];
   constraints?: readonly Constraint[];
@@ -286,7 +289,8 @@ export function entitiesToDxf2018(entities: Entity[], options: DxfWriteOptions20
   const defByName = new Map(blockDefs.map((d) => [d.name, d]));
   const scaled = scale !== 1 ? entities.map((e) => scaleEntityKeepingInserts(e, scale)) : entities;
   const everyEntity = [...scaled, ...blockDefs.flatMap((d) => d.entities)];
-  const layers = [...new Set(everyEntity.map((e) => layerOf(e)))];
+  const foreign = (options.foreign ?? []).filter((f) => f.units === insUnits || f.units === 0 || insUnits === 0);
+  const layers = [...new Set([...everyEntity.map((e) => layerOf(e)), ...foreign.map((f) => f.layer)])];
   if (layers.length === 0) layers.push("0");
   const linetypes = [...new Set(everyEntity.map((e) => e.linetype).filter((l): l is string => !!l))];
   const bounds = boundsOf(scaled.filter((e) => !(e.type === "line" && e.infinite))) ?? { minX: 0, minY: 0, maxX: 0, maxY: 0 };
@@ -307,7 +311,7 @@ export function entitiesToDxf2018(entities: Entity[], options: DxfWriteOptions20
 
   // Infinite construction lines are drawing aids, not geometry: they stay out of the file (same rule as R12).
   const exported = scaled.filter((e) => !(e.type === "line" && e.infinite));
-  const entitiesText = exported.map((e) => write(e, plan.h.modelSpaceBlockRecord)).join("");
+  const entitiesText = exported.map((e) => write(e, plan.h.modelSpaceBlockRecord)).join("") + foreign.map((f) => foreignEntityText(f, next(), plan.h.modelSpaceBlockRecord)).join("");
 
   const groups = options.groups ?? [];
   const byId = new Map(groups.map((g) => [g.id, g]));
@@ -346,7 +350,7 @@ export function entitiesToDxf2018(entities: Entity[], options: DxfWriteOptions20
 
   return (
     header(insUnits, bounds, plan.alloc.seed()) +
-    `0\nSECTION\n2\nCLASSES\n0\nENDSEC\n` +
+    `0\nSECTION\n2\nCLASSES\n${foreign.map(foreignClassText).join("")}0\nENDSEC\n` +
     tablesSection(plan, layers, blockDefs, options.textStyles) +
     blocksSection(plan, userBlocks) +
     `0\nSECTION\n2\nENTITIES\n${entitiesText}0\nENDSEC\n` +
