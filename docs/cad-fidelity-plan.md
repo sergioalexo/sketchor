@@ -76,8 +76,9 @@ Written 2026-09-28 against `main` @ `8bafb82` (v0.28.0). Intended to be executed
 | 2026-10-09 | SV-04 | `<use>` of a `<symbol>` imports as an insert of a real block: `parseSvgText(text, {blocks: "keep"})` returns `blocks` (one definition per symbol + inherited style, named by the symbol id, base point = symbol origin, body at the document scale with layers stripped so it inherits the insert's) and an `insert` per use whose placement is decomposed from `use·vp⁻¹` into insert/scale (negative y = mirror)/rotation; a sheared or degenerate placement, an empty symbol, or the default `"explode"` mode (thumbnails) keeps expanding geometry. `importSvgText`/`overlaySvgText` pass the blocks to `applyImportedEntities`. 7 tests in `svgBlocks.test.ts` (evaluated extent equals the expanded import; export→import keeps one definition). |
 | 2026-10-09 | B-08 | `SaveFormat` `dxf-r12-blocks` (menu: Save As / Save a Copy as DXF R12 (keep blocks)): R12 BLOCKS + INSERT/ATTRIB instead of flat geometry. Print (`printDrawing`) hands the SVG exporter the block table, so the browser prints `<use>` instances (flattened only when a block body draws on a hidden layer). Laser SVG, EPS, plain R12 and the PDF writer stay flat by design (comments in `serialize()`). |
 | 2026-10-09 | B-09 | `blocks/manage.ts` (pure, 5 tests): `purgeCandidates`/`planPurge` (one batch = one undo; layer "0", built-in linetypes, current styles never listed; layers used only inside block bodies count as used), `planReplaceBlock` (instances keep placement/attributes, nested ones too, refuses cycles), `blockCountTable`/`blockCountCsv` (array cells and nested copies), `blockTree`, `instancesOf`. Block panel: Purge (confirm with counts), Count table + CSV, Rename, Select instances, Replace. |
+| 2026-10-09 | X-05, X-08 | `sketchorData.ts`: per-entity `1001 SKETCHOR` XDATA now carries name (untagged, older readers still work), `id=`, `fill=`, `construction=1`; one `SKETCHOR_DATA` XRECORD in the root dictionary holds a JSON blob (groups with ids/nesting, constraints, `params` table, per-block extras: explodable/scaleUniformly/description/units/dynamic/constraints) chunked over group 1, non-ASCII escaped. Entity ids are restored on import (duplicates keep a fresh id; an add-import/overlay re-ids collisions and drops id-keyed extras). Groups also written as real `GROUP` objects in `ACAD_GROUP` (nested groups flattened, unique names); a foreign file's named non-anonymous GROUPs (2+ importable members) import as groups when no exact SKETCHOR groups exist. Open: other tables (dimStyles etc.) join the record when their features write DXF natively; image pixels still not embedded |
 
-### Open items checklist (status 2026-10-07: SV-01, SV-02, Z-01, Z-02, X-01, X-02, Z-03, X-04 (partial), Z-04, X-06, X-07, F-09, TH-01, TH-02, TH-03, TH-06, C-01, C-02, C-03, C-04, C-05, C-06, C-07, C-08, C-09, SV-03, H-01, H-03, H-04, B-01, B-02, H-05, H-07, H-09, F-01, F-03, SV-08, F-02 done; B-03, B-04, B-05, B-06, B-07 (done), B-08 (done), H-06, H-08 partial; SV-04, H-02, SV-05, SV-09, SV-06, SV-10 partial, D-01 (partial) — the rest open)
+### Open items checklist (status 2026-10-07: SV-01, SV-02, Z-01, Z-02, X-01, X-02, Z-03, X-04 (partial), Z-04, X-06, X-07, F-09, TH-01, TH-02, TH-03, TH-06, C-01, C-02, C-03, C-04, C-05, C-06, C-07, C-08, C-09, SV-03, H-01, H-03, H-04, B-01, B-02, H-05, H-07, H-09, F-01, F-03, SV-08, F-02, X-05, X-08 done; B-03, B-04, B-05, B-06, B-07 (done), B-08 (done), H-06, H-08 partial; SV-04, H-02, SV-05, SV-09, SV-06, SV-10 partial, D-01 (partial) — the rest open)
 
 Tick `[x]` and add a progress-log row as items land. Order = recommended execution order.
 
@@ -201,8 +202,8 @@ Tick `[x]` and add a progress-log row as items land. Order = recommended executi
 
 **11 · DXF fidelity (continuous, after each phase)**
 - [ ] X-03 Import coverage sweep over `PROD_FILES` (see `docs/local-samples.md`)
-- [ ] X-05 DXF GROUP objects
-- [ ] X-08 Lossless SKETCHOR XDATA round-trip
+- [x] X-05 DXF GROUP objects
+- [x] X-08 Lossless SKETCHOR XDATA round-trip
 - [ ] X-09 Preserve unknown DXF data on re-save
 - [ ] X-10 DWG save via ODA converter (optional)
 - [ ] X-11 Binary DXF read

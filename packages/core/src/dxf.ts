@@ -11,6 +11,10 @@ import { transformEllipse } from "./ellipse";
 import { clampedUniformKnots as clampedKnots, interpolateNurbs, isValidNurbs, type NurbsData } from "./nurbs";
 import { unescapeDxfText } from "./dxfText";
 import { STANDARD_TEXT_STYLE, hAlignFromCode, vAlignFromCode, type TextStyle } from "./textStyle";
+import { SKETCHOR_DICT_KEY, decodeDocData, parseEntityXdata, type SketchorDocData } from "./sketchorData";
+import { newGroupId, type Group } from "./groups";
+import type { Constraint } from "./constraints";
+import type { TableRecord } from "./tables";
 
 /** Minimal XML text-content escape for the thumbnail SVG. */
 function escapeXml(s: string): string {
@@ -298,18 +302,6 @@ function str(raw: RawEntity, code: number, fallback = ""): string {
 /** Every numeric value for a repeated group code, in document order (e.g. SPLINE control points). */
 function allNums(raw: RawEntity, code: number): number[] {
   return raw.pairs.filter((p) => p.code === code).map((p) => parseFloat(p.value));
-}
-
-/**
- * The entity's sketch-code name, if this file is one the AC1032 writer
- * produced (dxfw/index.ts): a `1001 SKETCHOR` extended-data group followed
- * by `1000 <name>`. Any other application's XDATA (or none) is ignored.
- */
-function sketchorXdataName(raw: RawEntity): string | undefined {
-  const i = raw.pairs.findIndex((p) => p.code === 1001 && p.value.trim() === "SKETCHOR");
-  if (i === -1) return undefined;
-  const nameTag = raw.pairs.slice(i + 1).find((p) => p.code === 1000 || p.code === 1001);
-  return nameTag?.code === 1000 ? nameTag.value : undefined;
 }
 
 /**
@@ -617,6 +609,10 @@ export interface DxfParseResult {
   unitSource: DxfUnitSource;
   /** D-01: the file's STYLE table as text styles (heights in mm); empty when it only has Standard defaults. */
   textStyles: TextStyle[];
+  /** X-05/X-08: groups (from the SKETCHOR record, else DXF GROUP objects), and the constraints / `params` records a Sketchor-written file carries. Entity ids match `entities`. */
+  groups: Group[];
+  constraints: Constraint[];
+  params: TableRecord[];
 }
 
 /** Font file name (group 3) → a `TextStyle.font` value: `.shx` → `shx:<name>`, `.ttf`/`.otf` → `ttf:<family>`, anything else the stroke font. */
@@ -799,6 +795,8 @@ interface ConvertContext {
   hatchSources?: Map<string, string[]>;
   /** Top-level entity handle (group 5) -> entity id, for the hatch sources above. */
   handleToId?: Map<string, string>;
+  /** X-08: ids already restored from SKETCHOR XDATA in this scope; absent = don't restore ids (inserts being expanded). */
+  usedIds?: Set<string>;
 }
 
 /**
@@ -1024,6 +1022,7 @@ function convertRecords(raws: RawEntity[], ctx: ConvertContext): Entity[] {
           depth: ctx.depth + 1,
           stack: new Set([...ctx.stack, name]),
           insertLayer: layer,
+          usedIds: undefined,
         });
         const cos = Math.cos(rotation);
         const sin = Math.sin(rotation);
@@ -1056,8 +1055,16 @@ function convertRecords(raws: RawEntity[], ctx: ConvertContext): Entity[] {
     if (entities.length === beforeCount + 1) {
       const handle = str(raw, 5, "");
       if (handle && ctx.handleToId && ctx.depth === 0) ctx.handleToId.set(handle.toUpperCase(), entities[entities.length - 1].id);
-      const name = sketchorXdataName(raw);
-      if (name) entities[entities.length - 1].name = name;
+      const target = entities[entities.length - 1];
+      const x = parseEntityXdata(raw.pairs);
+      if (x.name) target.name = x.name;
+      if (x.fill) target.fill = x.fill;
+      if (x.construction) target.construction = true;
+      // X-08: the entity's own id comes back, so constraints/groups saved by id still resolve. A duplicate (an entity copied in another CAD app carries the same XDATA) keeps its fresh id.
+      if (x.id && ctx.usedIds && !ctx.usedIds.has(x.id)) {
+        ctx.usedIds.add(x.id);
+        target.id = x.id;
+      }
       const color = rawColor(raw);
       if (color) entities[entities.length - 1].color = color;
       const linetype = rawLinetype(raw);
@@ -1087,7 +1094,8 @@ export function parseDxf(text: string, options: DxfParseOptions = {}): DxfParseR
 
   const hatchSources = new Map<string, string[]>();
   const handleToId = new Map<string, string>();
-  const converted = convertRecords(raws, { blocks, warnings, depth: 0, stack: new Set(), keep, hatchSources, handleToId });
+  const usedIds = new Set<string>();
+  const converted = convertRecords(raws, { blocks, warnings, depth: 0, stack: new Set(), keep, hatchSources, handleToId, usedIds });
   // H-09: an associative HATCH follows its boundary objects only when every one of them came through as an entity.
   for (const e of converted) {
     const handles = e.type === "hatch" ? hatchSources.get(e.id) : undefined;
@@ -1100,6 +1108,19 @@ export function parseDxf(text: string, options: DxfParseOptions = {}): DxfParseR
   }
   const entities = scaleToMm(converted, insUnits);
   const blockDefs = keep ? buildBlockDefinitions(blocks, { blocks, warnings, depth: 0, stack: new Set(), keep }, insUnits) : [];
+  const sketchor = readObjects(allPairs, handleToId, warnings, new Set(entities.map((e) => e.id)));
+  if (sketchor.data?.blocks) {
+    for (const d of blockDefs) {
+      const x = sketchor.data.blocks[d.name];
+      if (!x) continue;
+      if (x.explodable !== undefined) d.explodable = x.explodable;
+      if (x.scaleUniformly !== undefined) d.scaleUniformly = x.scaleUniformly;
+      if (x.description) d.description = x.description;
+      if (x.units !== undefined) d.units = x.units;
+      if (x.dynamic !== undefined) d.dynamic = x.dynamic;
+      if (x.constraints) d.constraints = x.constraints;
+    }
+  }
 
   return {
     entities,
@@ -1109,7 +1130,53 @@ export function parseDxf(text: string, options: DxfParseOptions = {}): DxfParseR
     insUnits,
     unitSource: resolved.source,
     textStyles: collectTextStyles(allPairs, MM_PER_INSUNIT[insUnits] || 1),
+    groups: sketchor.groups,
+    constraints: sketchor.data?.constraints ?? [],
+    params: sketchor.data?.params ?? [],
   };
+}
+
+/**
+ * OBJECTS section: the SKETCHOR_DATA XRECORD (X-08) and GROUP objects (X-05).
+ * Exact groups from the XRECORD win (they keep ids and nesting); otherwise
+ * each non-anonymous DXF GROUP with 2+ importable members becomes a group.
+ * Members are checked against `entityIds`, so a group never names a ghost.
+ */
+function readObjects(
+  pairs: Pair[],
+  handleToId: Map<string, string>,
+  warnings: string[],
+  entityIds: Set<string>,
+): { data: SketchorDocData | null; groups: Group[] } {
+  const objs = collectSectionRecords(pairs, "OBJECTS");
+  const nameOf = new Map<string, string>(); // object handle -> dictionary key
+  for (const r of objs) {
+    if (r.type !== "DICTIONARY") continue;
+    for (let i = 0; i < r.pairs.length - 1; i++) {
+      if (r.pairs[i].code === 3 && r.pairs[i + 1].code === 350) nameOf.set(r.pairs[i + 1].value.trim().toUpperCase(), r.pairs[i].value);
+    }
+  }
+  let data: SketchorDocData | null = null;
+  for (const r of objs) {
+    if (r.type !== "XRECORD" || nameOf.get(str(r, 5, "").toUpperCase()) !== SKETCHOR_DICT_KEY) continue;
+    data = decodeDocData(r.pairs.filter((p) => p.code === 1).map((p) => p.value));
+    if (!data) warnings.push("the SKETCHOR data record is unreadable — groups and constraints were not restored");
+  }
+  if (data?.groups) {
+    const groups = data.groups
+      .map((g) => ({ ...g, members: g.members.filter((m) => entityIds.has(m) || data!.groups!.some((o) => o.id === m)) }))
+      .filter((g) => g.members.length > 0);
+    return { data, groups };
+  }
+  const groups: Group[] = [];
+  for (const r of objs) {
+    if (r.type !== "GROUP" || (num(r, 70, 0) & 1) === 1) continue;
+    const ids = r.pairs.filter((p) => p.code === 340).map((p) => handleToId.get(p.value.trim().toUpperCase())).filter((x): x is string => !!x);
+    const unique = [...new Set(ids)];
+    if (unique.length < 2) continue;
+    groups.push({ id: newGroupId(), name: nameOf.get(str(r, 5, "").toUpperCase()) || str(r, 300, "") || "Group", members: unique });
+  }
+  return { data, groups };
 }
 
 /** Named (non-`*`) BLOCKs → definitions in mm: ATTDEFs become attribute defs, nested INSERTs stay inserts, self-nesting is cut with a warning. */

@@ -4,6 +4,7 @@ import type { Entity, InsertEntity } from "../entities";
 import { layerOf } from "../entities";
 import { entityHead } from "./entities";
 import { pair } from "./write";
+import { entityXdataText } from "../sketchorData";
 
 /**
  * B-08: real blocks in the AC1032 writer. An INSERT names its BLOCK_RECORD;
@@ -38,7 +39,8 @@ export function insertEntity2018(e: InsertEntity, def: BlockDefinition, handle: 
     pair(10, e.insert.x) + pair(20, e.insert.y) + pair(30, 0) +
     pair(41, e.scale.x) + pair(42, e.scale.y) + pair(43, 1) +
     pair(50, e.rotation * RAD_TO_DEG) +
-    (arr ? `70\n${Math.round(arr.cols)}\n71\n${Math.round(arr.rows)}\n` + pair(44, arr.colSpacing) + pair(45, arr.rowSpacing) : "");
+    (arr ? `70\n${Math.round(arr.cols)}\n71\n${Math.round(arr.rows)}\n` + pair(44, arr.colSpacing) + pair(45, arr.rowSpacing) : "") +
+    entityXdataText(e);
   if (attribs.length > 0) {
     for (const a of attribs) {
       out +=

@@ -9,6 +9,10 @@ import { CONTINUOUS, builtinLinetype } from "../linetypes";
 import { HandleAllocator } from "./handles";
 import { entityDxf2018 } from "./entities";
 import { n, pair, unitsAndExtentsHeader } from "./write";
+import type { Group } from "../groups";
+import type { Constraint } from "../constraints";
+import type { TableRecord } from "../tables";
+import { SKETCHOR_DICT_KEY, encodeDocData, type BlockExtras, type SketchorDocData } from "../sketchorData";
 
 /**
  * X-01: a modern DXF writer (AC1032 — "DXF 2018"), alongside the R12 writer
@@ -56,6 +60,7 @@ const STANDARD_HANDLES = [
   "layoutDict",
   "modelLayout",
   "layout1Layout",
+  "sketchorXrecord",
 ] as const;
 type HandleKey = (typeof STANDARD_HANDLES)[number];
 
@@ -207,12 +212,37 @@ function layoutObject(h: string, ownerDict: string, name: string, blockRecord: s
   );
 }
 
-function objectsSection(plan: Plan): string {
+/** X-05: one DXF GROUP object per Sketchor group (nested groups list their flattened entities, since DXF groups cannot nest). Names are made unique, as the ACAD_GROUP dictionary requires. */
+function groupObjects(plan: Plan, groups: readonly Group[], flat: (g: Group) => string[], handleOf: Map<string, string>): { dict: string; objects: string } {
+  const used = new Set<string>();
+  let dict = "";
+  let objects = "";
+  for (const g of groups) {
+    const members = flat(g).map((id) => handleOf.get(id)).filter((x): x is string => !!x);
+    if (members.length === 0) continue;
+    const base = (g.name || "Group").replace(/[<>/\\":;?*|,=`\r\n]/g, "_");
+    let name = base;
+    for (let i = 2; used.has(name.toUpperCase()); i++) name = `${base} (${i})`;
+    used.add(name.toUpperCase());
+    const h = plan.alloc.alloc();
+    dict += `3\n${name}\n350\n${h}\n`;
+    objects +=
+      `0\nGROUP\n5\n${h}\n330\n${plan.h.groupDict}\n100\nAcDbGroup\n300\n\n70\n0\n71\n1\n` +
+      members.map((m) => `340\n${m}\n`).join("");
+  }
+  return { dict, objects };
+}
+
+function objectsSection(plan: Plan, groupsPart: { dict: string; objects: string }, data: SketchorDocData | null): string {
   const { h } = plan;
   const root =
     `0\nDICTIONARY\n5\n${h.rootDict}\n330\n0\n100\nAcDbDictionary\n281\n1\n` +
-    `3\nACAD_GROUP\n350\n${h.groupDict}\n3\nACAD_LAYOUT\n350\n${h.layoutDict}\n`;
-  const groupDict = `0\nDICTIONARY\n5\n${h.groupDict}\n330\n${h.rootDict}\n100\nAcDbDictionary\n281\n1\n`;
+    `3\nACAD_GROUP\n350\n${h.groupDict}\n3\nACAD_LAYOUT\n350\n${h.layoutDict}\n` +
+    (data ? `3\n${SKETCHOR_DICT_KEY}\n350\n${h.sketchorXrecord}\n` : "");
+  const xrecord = data
+    ? `0\nXRECORD\n5\n${h.sketchorXrecord}\n330\n${h.rootDict}\n100\nAcDbXrecord\n280\n1\n` + encodeDocData(data).map((c) => `1\n${c}\n`).join("")
+    : "";
+  const groupDict = `0\nDICTIONARY\n5\n${h.groupDict}\n330\n${h.rootDict}\n100\nAcDbDictionary\n281\n1\n` + groupsPart.dict;
   const layoutDict =
     `0\nDICTIONARY\n5\n${h.layoutDict}\n330\n${h.rootDict}\n100\nAcDbDictionary\n281\n1\n` +
     `3\nModel\n350\n${h.modelLayout}\n3\nLayout1\n350\n${h.layout1Layout}\n`;
@@ -223,6 +253,8 @@ function objectsSection(plan: Plan): string {
     layoutDict +
     layoutObject(h.modelLayout, h.layoutDict, "Model", h.modelSpaceBlockRecord, 0) +
     layoutObject(h.layout1Layout, h.layoutDict, "Layout1", h.paperSpaceBlockRecord, 1) +
+    groupsPart.objects +
+    xrecord +
     `0\nENDSEC\n`
   );
 }
@@ -236,6 +268,10 @@ export interface DxfWriteOptions2018 {
   blocks?: readonly BlockDefinition[];
   /** D-01: the drawing's `textStyles` records, written as STYLE table entries (TEXT group 7 names them). */
   textStyles?: readonly TextStyle[];
+  /** X-05/X-08: the drawing's groups (written as DXF GROUP objects and, exactly, in the SKETCHOR record), constraints and `params` table. Not scaled: constraint values stay in mm. */
+  groups?: readonly Group[];
+  constraints?: readonly Constraint[];
+  params?: readonly TableRecord[];
 }
 
 /**
@@ -257,12 +293,15 @@ export function entitiesToDxf2018(entities: Entity[], options: DxfWriteOptions20
 
   const plan = buildPlan(layers, linetypes, blockDefs);
   const next = () => plan.alloc.alloc();
+  const handleOf = new Map<string, string>();
   const write = (e: Entity, owner: string): string => {
+    const h = next();
+    handleOf.set(e.id, h);
     if (e.type === "insert") {
       const def = defByName.get(e.block);
-      return def ? insertEntity2018(e, def, next(), owner, next) : ""; // an insert of an unknown block draws nothing
+      return def ? insertEntity2018(e, def, h, owner, next) : ""; // an insert of an unknown block draws nothing
     }
-    return entityDxf2018(e, next(), owner, next);
+    return entityDxf2018(e, h, owner, next);
   };
   const userBlocks = blockDefinitions2018(blockDefs, plan.blocks, next, write);
 
@@ -270,7 +309,40 @@ export function entitiesToDxf2018(entities: Entity[], options: DxfWriteOptions20
   const exported = scaled.filter((e) => !(e.type === "line" && e.infinite));
   const entitiesText = exported.map((e) => write(e, plan.h.modelSpaceBlockRecord)).join("");
 
-  const objects = objectsSection(plan);
+  const groups = options.groups ?? [];
+  const byId = new Map(groups.map((g) => [g.id, g]));
+  const flat = (id: string): string[] => {
+    const out: string[] = [];
+    const seen = new Set<string>();
+    const walk = (gid: string) => {
+      if (seen.has(gid)) return;
+      seen.add(gid);
+      for (const m of byId.get(gid)?.members ?? []) {
+        if (byId.has(m)) walk(m);
+        else out.push(m);
+      }
+    };
+    walk(id);
+    return out;
+  };
+  const groupsPart = groupObjects(plan, groups, (g) => flat(g.id), handleOf);
+  const blockExtras: Record<string, BlockExtras> = {};
+  for (const d of options.blocks ?? []) {
+    const x: BlockExtras = {};
+    if (d.explodable === false) x.explodable = false;
+    if (d.scaleUniformly) x.scaleUniformly = true;
+    if (d.description) x.description = d.description;
+    if (d.units !== undefined) x.units = d.units;
+    if (d.dynamic !== undefined) x.dynamic = d.dynamic;
+    if (d.constraints?.length) x.constraints = [...d.constraints];
+    if (Object.keys(x).length) blockExtras[d.name] = x;
+  }
+  const docData: SketchorDocData = { v: 1 };
+  if (groups.length) docData.groups = [...groups];
+  if (options.constraints?.length) docData.constraints = [...options.constraints];
+  if (options.params?.length) docData.params = [...options.params];
+  if (Object.keys(blockExtras).length) docData.blocks = blockExtras;
+  const objects = objectsSection(plan, groupsPart, Object.keys(docData).length > 1 ? docData : null);
 
   return (
     header(insUnits, bounds, plan.alloc.seed()) +

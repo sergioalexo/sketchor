@@ -6,6 +6,7 @@ import { kindTessellate } from "../kinds/registry";
 import { aciToHex, hexToRgb, nearestAci } from "../aci";
 import { H_ALIGN_CODE, V_ALIGN_CODE } from "../textStyle";
 import { n, pair } from "./write";
+import { entityXdataText } from "../sketchorData";
 import { hatchDxfPairs, type OutPair } from "../hatch/hatchDxf";
 
 const RAD_TO_DEG = 180 / Math.PI;
@@ -45,17 +46,6 @@ export function entityHead(handle: string, owner: string, e: Entity): string {
   return `5\n${handle}\n330\n${owner}\n100\nAcDbEntity\n8\n${layerOf(e)}\n${colorGroups(e)}${linetypeGroups(e)}`;
 }
 
-/**
- * `1001 SKETCHOR` extended data carrying the entity's stable sketch-code
- * name (see sketchtext.ts), so a file Sketchor wrote and reopens keeps the
- * same L1/C1/... names instead of renumbering — the thing R12 export always
- * lost. Only written when the entity has a name.
- */
-function nameXdata(name: string | undefined): string {
-  if (!name) return "";
-  return `1001\nSKETCHOR\n1000\n${name}\n`;
-}
-
 export function lineEntity2018(e: LineEntity, handle: string, owner: string): string {
   return (
     `0\nLINE\n` +
@@ -63,7 +53,7 @@ export function lineEntity2018(e: LineEntity, handle: string, owner: string): st
     `100\nAcDbLine\n` +
     pair(10, e.a.x) + pair(20, e.a.y) + pair(30, 0) +
     pair(11, e.b.x) + pair(21, e.b.y) + pair(31, 0) +
-    nameXdata(e.name)
+    entityXdataText(e)
   );
 }
 
@@ -74,7 +64,7 @@ export function circleEntity2018(e: CircleEntity, handle: string, owner: string)
     `100\nAcDbCircle\n` +
     pair(10, e.center.x) + pair(20, e.center.y) + pair(30, 0) +
     pair(40, e.radius) +
-    nameXdata(e.name)
+    entityXdataText(e)
   );
 }
 
@@ -91,7 +81,7 @@ export function arcEntity2018(e: ArcEntity, handle: string, owner: string): stri
     pair(40, e.radius) +
     `100\nAcDbArc\n` +
     pair(50, startDeg) + pair(51, endDeg) +
-    nameXdata(e.name)
+    entityXdataText(e)
   );
 }
 
@@ -115,7 +105,7 @@ AcDbEllipse
     pair(210, 0) + pair(220, 0) + pair(230, 1) +
     hi(40, e.ratio) +
     hi(41, full ? 0 : e.start) + hi(42, full ? Math.PI * 2 : e.start + ellipseSweep(e)) +
-    nameXdata(e.name)
+    entityXdataText(e)
   );
 }
 
@@ -136,7 +126,7 @@ export function splineEntity2018(e: SplineEntity, handle: string, owner: string)
     (rational ? e.weights!.map((x) => hi(41, x)).join("") : "") +
     e.controlPoints.map((c) => hi(10, c.x) + hi(20, c.y) + hi(30, 0)).join("") +
     fit.map((c) => hi(11, c.x) + hi(21, c.y) + hi(31, 0)).join("") +
-    nameXdata(e.name)
+    entityXdataText(e)
   );
 }
 
@@ -146,7 +136,7 @@ export function pointEntity2018(e: PointEntity, handle: string, owner: string): 
     entityHead(handle, owner, e) +
     `100\nAcDbPoint\n` +
     pair(10, e.p.x) + pair(20, e.p.y) + pair(30, 0) +
-    nameXdata(e.name)
+    entityXdataText(e)
   );
 }
 
@@ -162,7 +152,7 @@ export function polylineEntity2018(e: PolylineEntity, handle: string, owner: str
     `90\n${e.points.length}\n` +
     `70\n${e.closed ? 1 : 0}\n` +
     verts +
-    nameXdata(e.name)
+    entityXdataText(e)
   );
 }
 
@@ -187,7 +177,7 @@ export function textEntity2018(e: TextEntity, handle: string, owner: string): st
     pair(7, e.style || "Standard") +
     textAlignGroups(e) +
     `100\nAcDbText\n` +
-    nameXdata(e.name)
+    entityXdataText(e)
   );
 }
 
@@ -208,7 +198,8 @@ export function imageEntity2018(e: ImageEntity, handle: string, owner: string, n
     entityHead(handle, owner, e) +
     `100\nAcDbPolyline\n` +
     `90\n${corners.length}\n70\n1\n` +
-    verts;
+    verts +
+    entityXdataText(e);
   const labelHeight = Math.min(e.width, e.height) * 0.08 || 1;
   const label =
     `0\nTEXT\n` +
@@ -227,7 +218,7 @@ export function hatchEntity2018(e: HatchEntity, handle: string, owner: string): 
   const fmt = ([code, v, kind]: OutPair): string => `${code}\n${kind === "f" ? n(v as number) : kind === "i" ? String(Math.round(v as number)) : v}\n`;
   // A solid fill takes the entity colour in DXF, so the paint colour travels there.
   const headOwner: HatchEntity = e.paint.kind === "solid" ? { ...e, color: e.paint.color } : e;
-  return `0\nHATCH\n` + entityHead(handle, owner, headOwner) + head.map(fmt).join("") + `100\nAcDbHatch\n` + body.map(fmt).join("") + nameXdata(e.name);
+  return `0\nHATCH\n` + entityHead(handle, owner, headOwner) + head.map(fmt).join("") + `100\nAcDbHatch\n` + body.map(fmt).join("") + entityXdataText(e);
 }
 
 /**
