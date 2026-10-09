@@ -19,6 +19,24 @@ const SOURCE =
   pairs("0", "3DSOLID", "5", "1C", "8", "Solids", "100", "AcDb3dSolid", "1", "ACIS DATA 12 34") +
   pairs("0", "ENDSEC", "0", "EOF");
 
+describe("X-03 sweep findings", () => {
+  const wrap = (body: string) => pairs("0", "SECTION", "2", "ENTITIES") + body + pairs("0", "ENDSEC", "0", "EOF");
+
+  it("SOLID imports as a closed outline in DXF corner order (1,2,4,3)", () => {
+    const r = parseDxf(wrap(pairs("0", "SOLID", "8", "0", "10", 0, "20", 0, "11", 10, "21", 0, "12", 0, "22", 5, "13", 10, "23", 5)));
+    const e = r.entities[0];
+    expect(e.type === "polyline" && e.closed && e.points).toEqual([
+      { x: 0, y: 0 }, { x: 10, y: 0 }, { x: 10, y: 5 }, { x: 0, y: 5 },
+    ]);
+    expect(r.report.skipped).toEqual([]);
+  });
+
+  it("a misaligned (corrupt) file's garbage record names are not preserved as foreign data", () => {
+    const r = parseDxf(wrap(pairs("0", "`10", "8", "0") + pairs("0", "OLE2FRAME", "8", "0", "90", 1)));
+    expect(r.foreign.map((f) => f.type)).toEqual(["OLE2FRAME"]);
+  });
+});
+
 describe("unknown DXF data survives a re-save", () => {
   const first = parseDxf(SOURCE);
 

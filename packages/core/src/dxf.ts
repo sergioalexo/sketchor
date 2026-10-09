@@ -873,6 +873,17 @@ function convertRecords(raws: RawEntity[], ctx: ConvertContext): Entity[] {
         entities.push({ id: newEntityId(), type: "point", layer, p: { x: num(raw, 10), y: num(raw, 20) } });
         break;
       }
+      case "SOLID":
+      case "TRACE":
+      case "3DFACE": {
+        // X-03: filled quad / triangle / 3D face, as its outline (DXF stores corners 1,2,4,3 for SOLID/TRACE, 1,2,3,4 for 3DFACE).
+        const c = (k: number): Point => ({ x: num(raw, 10 + k), y: num(raw, 20 + k) });
+        const corners = raw.type === "3DFACE" ? [c(0), c(1), c(2), c(3)] : [c(0), c(1), c(3), c(2)];
+        const pts = corners.filter((p, i) => i === 0 || Math.hypot(p.x - corners[i - 1].x, p.y - corners[i - 1].y) > 1e-9);
+        if (pts.length > 1 && Math.hypot(pts[0].x - pts[pts.length - 1].x, pts[0].y - pts[pts.length - 1].y) < 1e-9) pts.pop();
+        if (pts.length >= 3) entities.push({ id: newEntityId(), type: "polyline", layer, points: pts, closed: true });
+        break;
+      }
       case "ELLIPSE": {
         // A real ellipse entity (C-03). DXF stores the major-axis endpoint relative to the centre, the
         // minor/major ratio, and parametric start/end (counterclockwise, 0..2π for a full one).
@@ -1162,7 +1173,9 @@ function keepForeign(raws: RawEntity[], pairs: Pair[], insUnits: number): Foreig
     if (c.type === "CLASS") classes.set(str(c, 1, "").toUpperCase(), c.pairs.map((p) => [p.code, p.value] as [number, string]));
   }
   const withClass = new Set<string>();
-  return raws.slice(0, 50000).map((raw, i) => {
+  // Only well-formed record names: a corrupt file's misaligned groups must not be written back as "0 \`10".
+  const valid = raws.filter((r) => /^(?=.*[A-Za-z])[A-Za-z0-9][A-Za-z0-9_$]*$/.test(r.type));
+  return valid.slice(0, 50000).map((raw, i) => {
     const rec: ForeignRecord = {
       name: `foreign-${i + 1}`,
       type: raw.type,
@@ -1279,6 +1292,9 @@ const SUPPORTED_TYPES = new Set([
   "POLYLINE",
   "POINT",
   "INSERT",
+  "SOLID",
+  "TRACE",
+  "3DFACE",
   "HATCH",
 ]);
 

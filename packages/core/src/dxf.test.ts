@@ -543,13 +543,13 @@ describe("import report and warnings", () => {
     const text = entitiesOnly(
       rec("POINT", [[10, 0], [20, 0]]) +
         rec("CIRCLE", [[10, 0], [20, 0], [40, 1]]) +
-        rec("SOLID", []) +
+        rec("HELIX", []) +
         rec("LEADER", []) +
         rec("LEADER", []),
     );
     const { report } = parse(text);
     expect(report.parsed.map((p) => p.type)).toEqual(["CIRCLE", "POINT"]);
-    expect(report.skipped.map((p) => p.type)).toEqual(["LEADER", "SOLID"]);
+    expect(report.skipped.map((p) => p.type)).toEqual(["LEADER", "HELIX"]);
   });
 
   it("leaves records that carry no geometry out of both buckets", () => {

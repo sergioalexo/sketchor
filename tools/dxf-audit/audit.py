@@ -34,8 +34,8 @@ def audit_file(path: str) -> dict:
     return {
         "file": path,
         "dxfversion": doc.dxfversion,
-        "errors": [str(err) for err in auditor.errors],
-        "fixes": [str(fix) for fix in auditor.fixes],
+        "errors": [getattr(err, "message", str(err)) for err in auditor.errors],
+        "fixes": [getattr(fix, "message", str(fix)) for fix in auditor.fixes],
         "entityCounts": counts,
     }
 

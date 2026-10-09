@@ -13,6 +13,7 @@
     "desktop": "npm run tauri dev --workspace @sketchor/web",
     "test": "vitest run",
     "dxf:audit": "python tools/dxf-audit/audit.py",
+    "dxf:scorecard": "vite-node tools/dxf-audit/scorecard.ts",
     "theme:schema": "node tools/gen-theme-schema.mjs"
   },
   "devDependencies": {

@@ -120,7 +120,22 @@ never could. `apps/web/src/io/drawingFile.ts` picks AC1032 for a new save
 and R12 only for a tab that was *opened* from an R12/earlier file (or an
 explicit "Save As DXF R12"), tracked per-session in `dxfSourceVersions`.
 `tools/dxf-audit/` runs the AC1032 writer's output through ezdxf's auditor
-(`npm run dxf:audit`) — a local/manual check, not wired into CI.
+(`npm run dxf:audit`) — a local/manual check, not wired into CI;
+`npm run dxf:scorecard` writes a drawing corpus, audits it and re-imports it
+(`docs/dxf-fidelity-scorecard.md`).
+
+**Sketchor-only data (X-05/X-08/X-09, `sketchorData.ts`, `foreign.ts`).**
+Per entity, `1001 SKETCHOR` XDATA carries name (untagged first string),
+`id=`, `fill=`, `construction=1`; ids are restored on import (duplicates get
+fresh ids; add-imports re-id collisions and drop id-keyed extras). Per
+document, one `SKETCHOR_DATA` XRECORD in the root dictionary holds JSON
+(groups, constraints, `params`, per-block extras). Groups are also real DXF
+`GROUP` objects (members carry the `ACAD_REACTORS` back-reference). A new
+field that a DXF cannot express must join one of these carriers, with a
+round-trip test in `dxfw/sketchorRoundTrip.test.ts`. Unmodelled ENTITIES
+records land in the `foreign` table and are re-emitted by the AC1032 writer
+(only when the output unit equals the source's). Binary DXF is converted to
+ASCII text in `dxfBinary.ts` before parsing.
 
 ## Theming
 

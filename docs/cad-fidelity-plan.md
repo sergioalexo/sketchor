@@ -83,8 +83,9 @@ Written 2026-09-28 against `main` @ `8bafb82` (v0.28.0). Intended to be executed
 | 2026-10-09 | B-04 | In-place view: `blocks/refedit.ts` (`invertAffine`, `inPlaceBackdrop`: parent entities minus the edited instance, flattened with the parent's live definitions so the other instances show, pushed through the inverse placement; 3 tests incl. 90-degree rotation). Store: `BlockEditSession.contextInsert/showContext` (double-click passes the instance, the panel's Edit uses the first instance), `blockEditBackdrop()` cached per parent revision, renderer `RenderUiState.backdrop` at 25% alpha under everything, `BlockEditBar` Hide/Show context. (open) decision: recommended the fade-behind view as the default rather than a separate mode. Not driven in a live browser. |
 | 2026-10-09 | H-08 | Trim a hatch: `boundary.ts boundaryRegions` (every face of the planar graph with its islands) + `hatch/trim.ts trimHatch` (hatch boundary + all visible entities as cutters; faces whose scan-line interior points lie in the painted area are the pieces, the smallest holding the click is removed, the rest become hatches with the same paint/origin so the pattern phase is unchanged, associativity dropped; null when nothing cuts or the click is outside). `TrimTool` routes a hatch target there, one undo step. 5 tests (split, two cutters, island kept as a hole, null cases, concave scan line). |
 | 2026-10-09 | H-06 | `contributes.hatchPatterns: [{file, category?}]` in the manifest (`.pat` path check, no `..`/absolute/backslash), `isPatternOnly` (no main/ui/permissions → `main` no longer required, installs unsigned like a theme), `plugin/patternBundle.ts` (`loadPatternBundle`: size/count limits, per-file parse issues as warnings, duplicate names keep the first, category = contribution's else plugin name), `registerContributed` (never replaces a built-in; counts as custom so drawings carry it). Web: library panel "Install pack…" (JSON {manifest, patterns}), packs persisted in localStorage `sketchor.patternPacks.v1` and registered by `loadUserPatterns`. Documented in plugin-architecture.md. 5 tests. Recommendation taken: data-only, no code. |
+| 2026-10-09 | X-03, X-12 | Sweep over `PROD_FILES` (counts only): 11,653 DXFs, 0 parse errors, 745,876 entities, ~13 s; the only unsupported geometry was SOLID (1 file) so SOLID/TRACE/3DFACE now import as closed outlines; corrupt files with misaligned groups no longer leave garbage record names in `foreign`. Scorecard: `tools/dxf-audit/scorecard.ts` (`npm run dxf:scorecard`) writes 11 drawings, audits with ezdxf and re-imports; first run found ezdxf auto-fixing every grouped entity (missing `102 {ACAD_REACTORS` group back-reference) - the AC1032 writer now emits it. LibreCAD/ODA columns stay manual (no scriptable path); results in `docs/dxf-fidelity-scorecard.md` |
 
-### Open items checklist (status 2026-10-07: SV-01, SV-02, Z-01, Z-02, X-01, X-02, Z-03, X-04 (partial), Z-04, X-06, X-07, F-09, TH-01, TH-02, TH-03, TH-06, C-01, C-02, C-03, C-04, C-05, C-06, C-07, C-08, C-09, SV-03, H-01, H-03, H-04, B-01, B-02, H-05, H-07, H-09, F-01, F-03, SV-08, F-02, X-05, X-08 done; X-09 partial, X-11 done; B-03, B-04, B-05, B-06, B-07 (done), B-08 (done), H-06, H-08 partial; SV-04, H-02, SV-05, SV-09, SV-06, SV-10 partial, D-01 (partial) — the rest open)
+### Open items checklist (status 2026-10-07: SV-01, SV-02, Z-01, Z-02, X-01, X-02, Z-03, X-04 (partial), Z-04, X-06, X-07, F-09, TH-01, TH-02, TH-03, TH-06, C-01, C-02, C-03, C-04, C-05, C-06, C-07, C-08, C-09, SV-03, H-01, H-03, H-04, B-01, B-02, H-05, H-07, H-09, F-01, F-03, SV-08, F-02, X-05, X-08 done; X-09 partial, X-11 done; X-03, X-12 partial; B-03, B-04, B-05, B-06, B-07 (done), B-08 (done), H-06, H-08 partial; SV-04, H-02, SV-05, SV-09, SV-06, SV-10 partial, D-01 (partial) — the rest open)
 
 Tick `[x]` and add a progress-log row as items land. Order = recommended execution order.
 
@@ -207,13 +208,13 @@ Tick `[x]` and add a progress-log row as items land. Order = recommended executi
 - [ ] L-09 `contributes.layoutTemplates`
 
 **11 · DXF fidelity (continuous, after each phase)**
-- [ ] X-03 Import coverage sweep over `PROD_FILES` (see `docs/local-samples.md`)
+- [~] X-03 Import coverage sweep over `PROD_FILES` (see `docs/local-samples.md`) — done 2026-10-09: 11,653 files, 0 errors, SOLID/TRACE/3DFACE added; open: DIMENSION (dimensions track), re-run after each phase
 - [x] X-05 DXF GROUP objects
 - [x] X-08 Lossless SKETCHOR XDATA round-trip
 - [~] X-09 Preserve unknown DXF data on re-save — done: unknown model-space ENTITIES records (+ CLASSES entry) kept in the `foreign` table and written back by the AC1032 writer; open: unknown OBJECTS/block-body records, R12 save-back, rescale on unit change (dropped instead)
 - [ ] X-10 DWG save via ODA converter (optional)
 - [x] X-11 Binary DXF read
-- [ ] X-12 Fidelity scorecard vs LibreCAD
+- [~] X-12 Fidelity scorecard vs LibreCAD — done: `npm run dxf:scorecard` (11 drawings, ezdxf audit + Sketchor re-import) and `docs/dxf-fidelity-scorecard.md`; open: LibreCAD/ODA columns (manual), corpus for dimensions/leaders/MTEXT/layouts/images
 
 **12 · Other formats**
 - [ ] F-04 DXF preview upgrades (blocks/hatch/dims in thumbnails, TS ↔ Rust parity)

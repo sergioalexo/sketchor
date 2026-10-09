@@ -214,7 +214,7 @@ function layoutObject(h: string, ownerDict: string, name: string, blockRecord: s
 }
 
 /** X-05: one DXF GROUP object per Sketchor group (nested groups list their flattened entities, since DXF groups cannot nest). Names are made unique, as the ACAD_GROUP dictionary requires. */
-function groupObjects(plan: Plan, groups: readonly Group[], flat: (g: Group) => string[], handleOf: Map<string, string>): { dict: string; objects: string } {
+function groupObjects(plan: Plan, groups: readonly Group[], flat: (g: Group) => string[], handleOf: Map<string, string>, groupHandles: Map<string, string>): { dict: string; objects: string } {
   const used = new Set<string>();
   let dict = "";
   let objects = "";
@@ -225,7 +225,7 @@ function groupObjects(plan: Plan, groups: readonly Group[], flat: (g: Group) => 
     let name = base;
     for (let i = 2; used.has(name.toUpperCase()); i++) name = `${base} (${i})`;
     used.add(name.toUpperCase());
-    const h = plan.alloc.alloc();
+    const h = groupHandles.get(g.id)!;
     dict += `3\n${name}\n350\n${h}\n`;
     objects +=
       `0\nGROUP\n5\n${h}\n330\n${plan.h.groupDict}\n100\nAcDbGroup\n300\n\n70\n0\n71\n1\n` +
@@ -298,21 +298,6 @@ export function entitiesToDxf2018(entities: Entity[], options: DxfWriteOptions20
   const plan = buildPlan(layers, linetypes, blockDefs);
   const next = () => plan.alloc.alloc();
   const handleOf = new Map<string, string>();
-  const write = (e: Entity, owner: string): string => {
-    const h = next();
-    handleOf.set(e.id, h);
-    if (e.type === "insert") {
-      const def = defByName.get(e.block);
-      return def ? insertEntity2018(e, def, h, owner, next) : ""; // an insert of an unknown block draws nothing
-    }
-    return entityDxf2018(e, h, owner, next);
-  };
-  const userBlocks = blockDefinitions2018(blockDefs, plan.blocks, next, write);
-
-  // Infinite construction lines are drawing aids, not geometry: they stay out of the file (same rule as R12).
-  const exported = scaled.filter((e) => !(e.type === "line" && e.infinite));
-  const entitiesText = exported.map((e) => write(e, plan.h.modelSpaceBlockRecord)).join("") + foreign.map((f) => foreignEntityText(f, next(), plan.h.modelSpaceBlockRecord)).join("");
-
   const groups = options.groups ?? [];
   const byId = new Map(groups.map((g) => [g.id, g]));
   const flat = (id: string): string[] => {
@@ -329,7 +314,30 @@ export function entitiesToDxf2018(entities: Entity[], options: DxfWriteOptions20
     walk(id);
     return out;
   };
-  const groupsPart = groupObjects(plan, groups, (g) => flat(g.id), handleOf);
+  // Group handles are fixed before the entities are written: AutoCAD wants every member to name its groups as persistent reactors.
+  const groupHandles = new Map(groups.map((g) => [g.id, next()] as const));
+  const reactorsOf = new Map<string, string[]>();
+  for (const g of groups) for (const m of new Set(flat(g.id))) reactorsOf.set(m, [...(reactorsOf.get(m) ?? []), groupHandles.get(g.id)!]);
+  const write = (e: Entity, owner: string): string => {
+    const h = next();
+    handleOf.set(e.id, h);
+    let text: string;
+    if (e.type === "insert") {
+      const def = defByName.get(e.block);
+      text = def ? insertEntity2018(e, def, h, owner, next) : ""; // an insert of an unknown block draws nothing
+    } else {
+      text = entityDxf2018(e, h, owner, next);
+    }
+    const reactors = reactorsOf.get(e.id);
+    return reactors && text ? text.replace(`5\n${h}\n`, `5\n${h}\n102\n{ACAD_REACTORS\n${reactors.map((r) => `330\n${r}\n`).join("")}102\n}\n`) : text;
+  };
+  const userBlocks = blockDefinitions2018(blockDefs, plan.blocks, next, write);
+
+  // Infinite construction lines are drawing aids, not geometry: they stay out of the file (same rule as R12).
+  const exported = scaled.filter((e) => !(e.type === "line" && e.infinite));
+  const entitiesText = exported.map((e) => write(e, plan.h.modelSpaceBlockRecord)).join("") + foreign.map((f) => foreignEntityText(f, next(), plan.h.modelSpaceBlockRecord)).join("");
+
+  const groupsPart = groupObjects(plan, groups, (g) => flat(g.id), handleOf, groupHandles);
   const blockExtras: Record<string, BlockExtras> = {};
   for (const d of options.blocks ?? []) {
     const x: BlockExtras = {};
