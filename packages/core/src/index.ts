@@ -83,6 +83,7 @@ export * from "./hatch/userPatterns";
 export * from "./hatch/tile";
 export * from "./hatch/gradient";
 export * from "./hatch/ops";
+export * from "./hatch/trim";
 export * from "./hatch/render";
 export * from "./hatch/hatchDxf";
 export * from "./eps";

@@ -383,6 +383,42 @@ export function detectBoundary(entities: readonly Entity[], p: Point, opts: Boun
   return toResult(ents, pl, picks);
 }
 
+export interface BoundaryRegion {
+  result: BoundaryResult;
+  /** The face outline (no islands), for point-in-region tests. */
+  polygon: Point[];
+  area: number;
+}
+
+/**
+ * Every closed region of the drawing (what `detectBoundary` would return for a click in each), each with
+ * the islands inside it. Used by trim-hatch to cut a hatch into the pieces its cutters leave. Null when
+ * the drawing is empty or too large.
+ */
+export function boundaryRegions(entities: readonly Entity[], opts: BoundaryOptions = {}): BoundaryRegion[] | null {
+  const ents = geometryEntities(entities);
+  const pl = build(ents, opts);
+  if (!pl) return null;
+  const out: BoundaryRegion[] = [];
+  for (const face of pl.faces) {
+    if (face.area <= 1e-12 || face.poly.length < 3) continue;
+    const picks: { hes: HE[] }[] = [face];
+    const seen = new Set<number>([face.comp]);
+    for (const f of pl.faces) {
+      if (f.area >= 0 || seen.has(f.comp)) continue;
+      if (pointInPolygon(pl.graph.pts[f.hes[0].from], face.poly)) {
+        const walk = outerWalk(pl, f.comp);
+        if (walk) {
+          picks.push(walk);
+          seen.add(f.comp);
+        }
+      }
+    }
+    out.push({ result: toResult(ents, pl, picks), polygon: face.poly, area: face.area });
+  }
+  return out;
+}
+
 /** The boundary made of the given entities themselves ("select objects"): the outer boundary of every closed group. */
 export function boundaryFromObjects(entities: readonly Entity[], opts: BoundaryOptions = {}): BoundaryResult | null {
   const ents = geometryEntities(entities);

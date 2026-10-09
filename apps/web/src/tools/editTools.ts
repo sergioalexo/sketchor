@@ -19,6 +19,7 @@ import {
   transformed,
   splitAt,
   trimAt,
+  trimHatch,
 } from "@sketchor/core";
 import { hiddenLayerSet } from "../state/store";
 import { parseLength } from "./typedInput";
@@ -124,6 +125,16 @@ export class TrimTool implements Tool {
         return;
       }
       ctx.execute({ type: "update-entity", entity: extended });
+      return;
+    }
+    if (target.type === "hatch") {
+      // H-08: the cutters divide the hatch; the piece under the click goes, the rest stay as hatches.
+      const pieces = trimHatch(target, others, p.world);
+      if (!pieces) {
+        this.message = "Nothing cuts this hatch here - it needs a boundary or line crossing it to be trimmed";
+        return;
+      }
+      ctx.commit([{ type: "delete-entities", ids: [target.id] }, ...pieces.map((entity): Command => ({ type: "add-entity", entity }))]);
       return;
     }
     const result = trimAt(target, others, p.world);
