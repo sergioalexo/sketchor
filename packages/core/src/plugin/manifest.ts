@@ -43,6 +43,15 @@ export interface PluginContributions {
   tools?: ToolContribution[];
   /** Colour themes (TH-02): data-only JSON files in the bundle, validated by `validateTheme`. */
   themes?: ThemeContribution[];
+  /** Hatch patterns (H-06): data-only `.pat` files in the bundle, parsed by `parsePat`. */
+  hatchPatterns?: HatchPatternContribution[];
+}
+
+export interface HatchPatternContribution {
+  /** Bundle-relative path of the `.pat` file, e.g. "patterns/materials.pat". May hold several patterns. */
+  file: string;
+  /** Library category the patterns are listed under (default: the plugin's name). */
+  category?: string;
 }
 
 export interface ThemeContribution {
@@ -109,7 +118,7 @@ export function validateManifest(value: unknown): ManifestValidation {
   const themeOnly = isThemeOnly(obj as unknown as PluginManifest);
   if (themeOnly) {
     if (obj.main !== undefined) errors.push('a theme-only plugin must not declare "main"');
-  } else {
+  } else if (!isPatternOnly(obj as unknown as PluginManifest)) {
     requireString(obj, "main", errors);
   }
   optionalString(obj, "description", errors);
@@ -139,6 +148,7 @@ export function validateManifest(value: unknown): ManifestValidation {
       errors.push('"contributes.tools" is reserved for a future version and cannot be used yet');
     }
     if (isRecord(contributes) && contributes.themes !== undefined) validateThemeContributions(contributes.themes, errors);
+    if (isRecord(contributes) && contributes.hatchPatterns !== undefined) validateHatchPatternContributions(contributes.hatchPatterns, errors);
   }
 
   if (errors.length > 0) return { ok: false, errors };
@@ -189,11 +199,28 @@ function validateThemeContributions(v: unknown, errors: string[]): void {
   });
 }
 
-/** A bundle-relative `.json` path that cannot climb out of the bundle. */
-export function isSafeBundlePath(p: string): boolean {
+function validateHatchPatternContributions(v: unknown, errors: string[]): void {
+  if (!Array.isArray(v)) {
+    errors.push('"contributes.hatchPatterns" must be an array');
+    return;
+  }
+  v.forEach((t, i) => {
+    const at = `contributes.hatchPatterns[${i}]`;
+    if (!isRecord(t)) return void errors.push(`"${at}" must be an object`);
+    if (typeof t.file !== "string" || !isSafeBundlePath(t.file, "pat")) {
+      errors.push(`"${at}.file" must be a relative .pat path inside the bundle (no "..", no leading "/")`);
+    }
+    if (t.category !== undefined && (typeof t.category !== "string" || !t.category.trim() || t.category.length > 40)) {
+      errors.push(`"${at}.category" must be a short non-empty string when present`);
+    }
+  });
+}
+
+/** A bundle-relative `.json` (or `.pat`) path that cannot climb out of the bundle. */
+export function isSafeBundlePath(p: string, ext: "json" | "pat" = "json"): boolean {
   return (
     p.length <= 200 &&
-    /\.json$/i.test(p) &&
+    (ext === "pat" ? /\.pat$/i : /\.json$/i).test(p) &&
     !p.startsWith("/") &&
     !p.includes("\\") &&
     !/^[a-z]:/i.test(p) &&
@@ -211,4 +238,12 @@ export function isThemeOnly(m: Pick<PluginManifest, "contributes" | "main" | "ui
   if (!c || !Array.isArray(c.themes) || c.themes.length === 0) return false;
   if (m.ui !== undefined || (m.permissions?.length ?? 0) > 0) return false;
   return Object.entries(c).every(([k, v]) => k === "themes" || (Array.isArray(v) && v.length === 0));
+}
+
+/** H-06: a plugin that contributes hatch patterns and nothing that runs. Data, so it installs unsigned like a theme. */
+export function isPatternOnly(m: Pick<PluginManifest, "contributes" | "main" | "ui" | "permissions">): boolean {
+  const c = m.contributes;
+  if (!c || !Array.isArray(c.hatchPatterns) || c.hatchPatterns.length === 0) return false;
+  if (m.main !== undefined || m.ui !== undefined || (m.permissions?.length ?? 0) > 0) return false;
+  return Object.entries(c).every(([k, v]) => k === "hatchPatterns" || (Array.isArray(v) && v.length === 0));
 }

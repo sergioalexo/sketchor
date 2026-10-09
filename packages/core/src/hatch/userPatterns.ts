@@ -38,6 +38,8 @@ registerEntityRefRewriter("hatchPatterns", (entity, from, to) =>
 
 const docNames = new Set<string>();
 const importedNames = new Set<string>();
+/** Patterns a pattern-only plugin contributed (H-06), by upper-case name. */
+const contributedNames = new Set<string>();
 
 /** Mirrors the document's custom patterns into the registry (replacing the previous document's). Never overrides a library or imported pattern. */
 export function syncDocPatterns(doc: SketchDocument): void {
@@ -65,6 +67,28 @@ export function registerImported(defs: readonly PatternDef[]): string[] {
   return out;
 }
 
+/**
+ * Registers the patterns of a pattern plugin under their own category. Never replaces a built-in (or another
+ * kind of user pattern); a pattern from an earlier install of a plugin is replaced. Returns the names registered.
+ */
+export function registerContributed(defs: readonly PatternDef[]): string[] {
+  const out: string[] = [];
+  for (const d of defs) {
+    const key = d.name.toUpperCase();
+    const existing = lookupPattern(d.name);
+    if (existing && !contributedNames.has(key)) continue;
+    registerPattern(d);
+    contributedNames.add(key);
+    docNames.delete(key);
+    out.push(d.name);
+  }
+  return out;
+}
+
+export function removeContributed(names: readonly string[]): void {
+  for (const n of names) if (contributedNames.delete(n.toUpperCase())) unregisterPattern(n);
+}
+
 export function removeImported(name: string): void {
   if (importedNames.delete(name.toUpperCase())) unregisterPattern(name);
 }
@@ -77,7 +101,7 @@ export function importPatText(text: string): { names: string[]; issues: { line: 
 /** True when a pattern name needs a `hatchPatterns` record to survive outside this app (not in the built-in library). */
 export function isCustomPattern(name: string): boolean {
   const p = lookupPattern(name);
-  return !!p && (p.category === IMPORTED_CATEGORY || p.category === DOCUMENT_CATEGORY || p.category === undefined);
+  return !!p && (p.category === IMPORTED_CATEGORY || p.category === DOCUMENT_CATEGORY || p.category === undefined || contributedNames.has(name.toUpperCase()));
 }
 
 /** Command that stores a used custom pattern in the document table, or null when it is built-in, unknown or already stored. */

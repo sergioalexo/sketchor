@@ -275,3 +275,7 @@ Use them with a fallback, which keeps the panel readable in a host that
 predates them: `background: var(--sk-bg, #1e1f22); color: var(--sk-text, #dfe1e5);`.
 Panels that ignore them keep their own colours. Print/report HTML passed to
 `ui.print` is a sheet of paper and should stay fixed black-on-white.
+
+## Hatch pattern packs (H-06)
+
+A plugin may be data only: `contributes.hatchPatterns: [{ "file": "patterns/materials.pat", "category": "Shop" }]`, no `main`, no `ui`, no permissions. The `.pat` files (several patterns each) ship in the bundle; `loadPatternBundle` (`packages/core/src/plugin/patternBundle.ts`) validates the manifest, rejects unsafe paths and parses them with `parsePat`. Like a theme-only plugin it needs no signature. The Hatch panel's pattern library installs a pack from a JSON file `{ "manifest": "<manifest.json text>", "patterns": { "<path>": "<.pat text>" } }` ("Install pack..."), keeps it in localStorage and registers it at startup under the contribution's category (default: the plugin name). A contributed pattern never replaces a built-in, and a drawing that uses one stores it in its `hatchPatterns` table like an imported one.

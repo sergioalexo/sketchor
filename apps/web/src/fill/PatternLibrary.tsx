@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { IMPORTED_CATEGORY, PATTERN_CATEGORIES, parsePat, registeredPatterns, tileToFamilies, writePat, type PatternDef } from "@sketchor/core";
 import { PatternSwatch } from "./PatternSwatch";
-import { deleteUserPattern, saveUserPatterns } from "./userLibrary";
+import { deleteUserPattern, installPatternPack, saveUserPatterns } from "./userLibrary";
 
 /**
  * Pattern library browser (H-06): every registered pattern by category with
@@ -32,6 +32,7 @@ export function PatternLibrary({ current, onPick }: { current: string; onPick: (
   const [editor, setEditor] = useState<string | null>(null);
   const [tile, setTile] = useState({ w: 10, h: 10, lines: "0,0, 6,0\n0,0, 0,10" });
   const file = useRef<HTMLInputElement>(null);
+  const packFile = useRef<HTMLInputElement>(null);
   const all = useMemo(() => registeredPatterns(), [version]);
   const cats = useMemo(() => ["All", ...[...new Set(all.map((p) => p.category ?? "Other"))].sort((a, b) => order(a) - order(b) || a.localeCompare(b))], [all]);
   const q = query.trim().toLowerCase();
@@ -53,6 +54,19 @@ export function PatternLibrary({ current, onPick }: { current: string; onPick: (
     setCat(names.length ? IMPORTED_CATEGORY : "All");
     setMsg(`Imported ${names.length} pattern${names.length === 1 ? "" : "s"}${issues.length ? `, ${issues.length} problem line(s): ${issues[0]}` : ""}`);
     if (file.current) file.current.value = "";
+  };
+
+  const installPack = async (files: FileList | null) => {
+    const f = files?.[0];
+    if (!f) return;
+    const r = installPatternPack(await f.text());
+    if (r.ok) {
+      setVersion((v) => v + 1);
+      setMsg(`Installed ${r.names.length} pattern${r.names.length === 1 ? "" : "s"} from ${r.id}${r.warnings.length ? `, ${r.warnings.length} warning(s): ${r.warnings[0]}` : ""}`);
+    } else {
+      setMsg(r.reason);
+    }
+    if (packFile.current) packFile.current.value = "";
   };
 
   const applyTile = () => {
@@ -86,6 +100,8 @@ export function PatternLibrary({ current, onPick }: { current: string; onPick: (
       <div className="fill-row">
         <button className="btn ghost" data-testid="lib-import" onClick={() => file.current?.click()}>Import .pat…</button>
         <input ref={file} type="file" accept=".pat,text/plain" multiple hidden data-testid="lib-file" onChange={(e) => void importFiles(e.target.files)} />
+        <button className="btn ghost" data-testid="lib-pack" title="Install a pattern-only plugin bundle (.json with manifest + .pat files)" onClick={() => packFile.current?.click()}>Install pack…</button>
+        <input ref={packFile} type="file" accept=".json,application/json" hidden data-testid="lib-pack-file" onChange={(e) => void installPack(e.target.files)} />
         <button className="btn ghost" data-testid="lib-export" disabled={!all.some((p) => p.category === IMPORTED_CATEGORY || p.category === "Document")} onClick={() => download("patterns.pat", writePat(all.filter((p) => p.category === IMPORTED_CATEGORY || p.category === "Document")))} title="Export imported and drawing patterns">Export .pat</button>
         <button className="btn ghost" data-testid="lib-edit" onClick={() => setEditor(writePat([all.find((p) => p.name.toUpperCase() === current.toUpperCase()) ?? { name: "NEW1", description: "my pattern", families: [{ angle: 45, origin: { x: 0, y: 0 }, offset: { x: 0, y: 3 }, dashes: [] }] }]))} title="Duplicate and edit the selected pattern">Edit copy…</button>
         <button className="btn ghost" data-testid="lib-delete" disabled={all.find((p) => p.name.toUpperCase() === current.toUpperCase())?.category !== IMPORTED_CATEGORY} onClick={() => { deleteUserPattern(current); setVersion((v) => v + 1); }}>Delete</button>

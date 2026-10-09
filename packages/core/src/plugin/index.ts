@@ -9,3 +9,4 @@ export * from "./manifest";
 export * from "./hostApi";
 export * from "./signing";
 export * from "./themeBundle";
+export * from "./patternBundle";
