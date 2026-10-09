@@ -79,9 +79,7 @@ instances update live. The block commands (`define-block`, `update-block`,
 `rename-block`, `delete-block`, `explode-insert`) are macros in `ops.ts` that
 expand into table/entity commands. Writers take the definitions as an option
 (`entitiesToDxf2018({blocks})`, `entitiesToDxf(..., blocks)`, SVG
-`{blocks}` → `<symbol>`/`<use>`); `io/drawingFile.ts serialize()` keeps blocks for
-DXF 2018 and plain SVG, while R12, laser SVG and print still pass entities
-through `flattenInserts`. `parseDxf` keeps BLOCKS/INSERT by default
+`{blocks}` → `<symbol>`/`<use>`); `io/drawingFile.ts serialize()` keeps blocks for DXF 2018, plain SVG and "DXF R12 (keep blocks)" (`dxf-r12-blocks`); print renders them as SVG `<use>`; plain R12, laser SVG and EPS pass entities through `flattenInserts` on purpose. `parseDxf` keeps BLOCKS/INSERT by default
 (`{blocks:"explode"}` for callers with no block host: thumbnails, overlays);
 a unit rescale must use `scaleEntityKeepingInserts` + `scaleBlockDefinition`,
 never `transformed` on an insert (its scale is a ratio). Any new field that names a

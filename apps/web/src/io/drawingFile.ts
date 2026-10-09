@@ -37,11 +37,12 @@ import { reportError, track } from "../metrics/metrics";
  * download / hidden `<input type=file>` where the API is missing.
  */
 
-export type SaveFormat = "dxf" | "dxf-r12" | "svg" | "svg-laser" | "eps" | "eps-preview";
+export type SaveFormat = "dxf" | "dxf-r12" | "dxf-r12-blocks" | "svg" | "svg-laser" | "eps" | "eps-preview";
 
 const SAVE_FORMAT: Record<SaveFormat, { mime: string; description: string }> = {
   dxf: { mime: "application/dxf", description: "DXF Drawing" },
   "dxf-r12": { mime: "application/dxf", description: "DXF R12 Drawing (CAM)" },
+  "dxf-r12-blocks": { mime: "application/dxf", description: "DXF R12 Drawing (keeps blocks)" },
   svg: { mime: "image/svg+xml", description: "SVG Drawing" },
   "svg-laser": { mime: "image/svg+xml", description: "SVG for laser / CAM (hairlines, one colour per layer)" },
   eps: { mime: "application/postscript", description: "Encapsulated PostScript" },
@@ -105,24 +106,25 @@ const OPEN_TYPES: PickerType[] = [
 const OPEN_ACCEPT = acceptList();
 
 function serialize(format: SaveFormat): string | Uint8Array {
-  // B-08: real blocks go to AC1032 DXF and plain SVG. R12 is what CAM/laser shops read, and laser SVG is read by software that
-  // does not follow <use>, so those two stay flat (a "keep blocks" switch for R12 is still to come).
+  // B-08: real blocks go to AC1032 DXF, plain SVG and "DXF R12 (keeps blocks)". Plain R12 is what CAM/laser shops read flat
+  // (and a tab opened from an R12 file saves back flat), laser SVG goes to software that does not follow <use>, and EPS has no
+  // block concept, so those stay flattened on purpose.
   const blocks = doc.records("blocks") as BlockDefinition[];
-  const r12 = format === "dxf-r12" || (format === "dxf" && dxfSourceVersions.get(activeSessionId()) === "r12");
-  const keepBlocks = blocks.length > 0 && !r12 && format !== "svg-laser";
+  const r12 = format === "dxf-r12" || format === "dxf-r12-blocks" || (format === "dxf" && dxfSourceVersions.get(activeSessionId()) === "r12");
+  const keepBlocks = blocks.length > 0 && (!r12 || format === "dxf-r12-blocks") && format !== "svg-laser" && format !== "eps" && format !== "eps-preview";
   const entities = keepBlocks ? doc.all() : flattenInserts(doc, doc.all());
   if (format === "eps" || format === "eps-preview") {
     // EPS has no blocks (flattened above). Text-only for plain EPS; the preview variant is a binary DOS-EPS file.
     const title = defaultSaveName(format).replace(/\.eps$/i, "");
     return format === "eps" ? entitiesToEps(entities, { title }) : entitiesToEpsFile(entities, { title, tiffPreview: true });
   }
-  if (format === "dxf" || format === "dxf-r12") {
+  if (format === "dxf" || format === "dxf-r12" || format === "dxf-r12-blocks") {
     const displayUnit = useApp.getState().displayUnit;
     // Stored coordinates are always millimeters — rescale to match the
     // declared unit so the file's numbers represent real-world size.
     const insUnits = displayUnitToDxfCode(displayUnit);
     const scale = factorFromMm(displayUnit);
-    return r12 ? entitiesToDxf(entities, insUnits, scale) : entitiesToDxf2018(entities, { insUnits, scale, ...(keepBlocks ? { blocks } : {}) });
+    return r12 ? entitiesToDxf(entities, insUnits, scale, keepBlocks ? blocks : undefined) : entitiesToDxf2018(entities, { insUnits, scale, ...(keepBlocks ? { blocks } : {}) });
   }
   // True physical size: inches only when the tab works in inches/feet.
   const displayUnit = useApp.getState().displayUnit;
@@ -226,7 +228,7 @@ export type SaveMode = "save" | "save-as" | "save-copy";
  */
 /** The real file extension for a {@link SaveFormat} — "dxf" and "dxf-r12" are both plain `.dxf` files, "svg" and "svg-laser" both `.svg`. */
 function fileExtension(format: SaveFormat): string {
-  return format === "dxf-r12" ? "dxf" : format === "svg-laser" ? "svg" : format === "eps-preview" ? "eps" : format;
+  return format === "dxf-r12" || format === "dxf-r12-blocks" ? "dxf" : format === "svg-laser" ? "svg" : format === "eps-preview" ? "eps" : format;
 }
 
 function defaultSaveName(format: SaveFormat): string {

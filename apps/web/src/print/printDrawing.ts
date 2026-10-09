@@ -1,4 +1,4 @@
-import { entitiesToSvgDocument, flattenInserts } from "@sketchor/core";
+import { type BlockDefinition, entitiesToSvgDocument, flattenInserts } from "@sketchor/core";
 import { doc, hiddenLayerSet, useApp } from "../state/store";
 import { activeSaveTarget } from "../io/drawingFile";
 import { escapeHtml, printHtml } from "./printHtml";
@@ -10,10 +10,16 @@ import { escapeHtml, printHtml } from "./printHtml";
  */
 export function printDrawing(): void {
   const hidden = hiddenLayerSet();
-  const entities = flattenInserts(doc, doc.all()).filter((e) => !hidden.has(e.layer ?? "0"));
+  // B-08: the browser renders the SVG, and it follows <use>, so blocks print as symbol instances (smaller sheet, same ink).
+  // A hidden layer that a block body draws on can't be filtered per instance, so that case is flattened first.
+  const blocks = doc.records("blocks") as BlockDefinition[];
+  const bodyHidden = blocks.some((b) => b.entities.some((e) => e.layer !== undefined && e.layer !== "0" && hidden.has(e.layer)));
+  const keep = blocks.length > 0 && !bodyHidden;
+  const all = keep ? doc.all() : flattenInserts(doc, doc.all());
+  const entities = all.filter((e) => !hidden.has(e.layer ?? "0"));
   if (entities.length === 0) return;
 
-  const svg = entitiesToSvgDocument(entities, { strokeColor: "#000000", padding: 8, unit: "none" });
+  const svg = entitiesToSvgDocument(entities, { strokeColor: "#000000", padding: 8, unit: "none", ...(keep ? { blocks } : {}) });
   const title = activeSaveTarget()?.name ?? "Sketchor drawing";
   const unit = useApp.getState().displayUnit;
 
