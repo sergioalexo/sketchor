@@ -48,6 +48,7 @@ import {
 import {
   applyStraighten,
   beginBlockEdit,
+  blockEditBackdrop,
   activeBlockEdit,
   saveBlockEdit,
   discardBlockEdit,
@@ -413,6 +414,7 @@ export function Viewport() {
 
     render(ctx, w, h, viewRef.current, doc, {
       selection: new Set(state.selection),
+      backdrop: blockEditBackdrop(),
       preview,
       snap: state.tool === "select" ? null : snap,
       trackingRay: activeTool ? trackingRayRef.current : null,
@@ -1963,7 +1965,7 @@ export function Viewport() {
       if (editableAttributes(doc, dblInsert).length > 0 && insertContents(dblInsert).some((c) => c.type === "text" && c.id.includes(":attr:") && kindHitDistance(c, world) <= 8 / viewRef.current.scale)) {
         app.setAttedit(dblInsert.id);
       } else {
-        beginBlockEdit(dblInsert.block);
+        beginBlockEdit(dblInsert.block, dblInsert.id);
       }
       return;
     }

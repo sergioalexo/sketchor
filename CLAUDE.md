@@ -91,7 +91,7 @@ local entities plus the drawing's other tables. Every change on its bus is
 mirrored straight into the parent's definition *without history*
 (`liveSyncBlock`, `CommandBus.notify()`), so instances are live; Save restores
 the old body then runs one `update-block`, Discard/closing restores it. Code that
-treats "a tab" as a file (save, `isSessionBlank`) must respect `session.blockEdit`.
+treats "a tab" as a file (save, `isSessionBlank`) must respect `session.blockEdit`. Opened from an instance (double-click), the session also carries `contextInsert`: `blockEditBackdrop()` (core `inPlaceBackdrop`) maps the rest of the drawing through the inverse placement and `render` draws it faded behind the definition (REFEDIT view; toggle in `BlockEditBar`).
 
 ## Document tables and settings (`packages/core/src/tables.ts`)
 

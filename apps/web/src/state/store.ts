@@ -1,6 +1,6 @@
 import type { TextStyle } from "@sketchor/core";
 import { create } from "zustand";
-import { newEntityId, type Group, type Constraint, type TableRecord, scaleBlockDefinition, scaleEntityKeepingInserts, setActiveBlocks, blockEditChanges, blockEditDocument, getBlock, type AttributeDef, type BlockDefinition } from "@sketchor/core";
+import { newEntityId, type Group, type Constraint, type TableRecord, scaleBlockDefinition, scaleEntityKeepingInserts, setActiveBlocks, blockEditChanges, blockEditDocument, getBlock, inPlaceBackdrop, instancesOf, type AttributeDef, type BlockDefinition } from "@sketchor/core";
 import type { Model3D } from "../model3d/types";
 import {
   displayUnitToDxfCode,
@@ -116,6 +116,10 @@ export interface BlockEditSession {
   basePoint: { x: number; y: number };
   attributeDefs: AttributeDef[];
   unbind: () => void;
+  /** Edit in place (REFEDIT): the instance the editor was opened from; the rest of the drawing is drawn faded behind the definition. */
+  contextInsert?: string;
+  /** Whether that faded context is shown (default on when there is a context instance). */
+  showContext?: boolean;
 }
 
 /** True for a tab that shows (or is loading) a 3D model rather than a drawing. */
@@ -1560,10 +1564,14 @@ export function activeBlockEdit(): BlockEditSession | null {
  * instances re-render live; Save collapses the session into one undoable
  * `update-block`, Discard puts the old body back.
  */
-export function beginBlockEdit(name: string): string | null {
+export function beginBlockEdit(name: string, contextInsert?: string): string | null {
   const parent = activeSession();
   const existing = sessions.find((x) => x.blockEdit?.parentId === parent.id && x.blockEdit.name === name);
   if (existing) {
+    if (contextInsert && !existing.blockEdit!.contextInsert) {
+      existing.blockEdit!.contextInsert = contextInsert;
+      existing.blockEdit!.showContext = true;
+    }
     switchToSession(existing.id);
     return null;
   }
@@ -1583,13 +1591,39 @@ export function beginBlockEdit(name: string): string | null {
     activeLayer: parent.activeLayer,
     view: null,
     displayUnit: parent.displayUnit,
-    blockEdit: { parentId: parent.id, name, original: def, basePoint: { ...def.basePoint }, attributeDefs: def.attributeDefs.map((a) => ({ ...a })), unbind: () => {} },
+    blockEdit: { parentId: parent.id, name, original: def, basePoint: { ...def.basePoint }, attributeDefs: def.attributeDefs.map((a) => ({ ...a })), unbind: () => {}, ...(contextInsert ?? instancesOf(parent.doc, name)[0] ? { contextInsert: contextInsert ?? instancesOf(parent.doc, name)[0], showContext: true } : {}) },
   };
   s.blockEdit!.unbind = s.bus.onChange(() => liveSyncBlock(s));
   sessions.push(s);
   switchToSession(s.id);
   useApp.getState().requestFit();
   return null;
+}
+
+let backdropCache: { key: string; parentDoc: unknown; rev: number; count: number; entities: Entity[] | null } | null = null;
+
+/** Edit in place: the parent drawing in the edited block's local coordinates (faded context), or null when there is none / it is switched off. Cached per parent revision. */
+export function blockEditBackdrop(): Entity[] | null {
+  const be = activeSession().blockEdit;
+  if (!be || !be.contextInsert || be.showContext === false) return null;
+  const parent = sessions.find((x) => x.id === be.parentId);
+  if (!parent) return null;
+  const key = `${be.parentId}|${be.name}|${be.contextInsert}`;
+  const rev = parent.doc.tablesRevision;
+  const count = parent.doc.all().length;
+  if (backdropCache && backdropCache.key === key && backdropCache.parentDoc === parent.doc && backdropCache.rev === rev && backdropCache.count === count) return backdropCache.entities;
+  const entities = inPlaceBackdrop(parent.doc, be.contextInsert, be.name);
+  backdropCache = { key, parentDoc: parent.doc, rev, count, entities };
+  return entities;
+}
+
+/** Shows/hides the faded context of the active in-place block edit; returns the new state. */
+export function toggleBlockEditContext(): boolean {
+  const be = activeSession().blockEdit;
+  if (!be) return false;
+  be.showContext = be.showContext === false;
+  useApp.setState((s) => ({ revision: s.revision + 1 }));
+  return be.showContext;
 }
 
 /** Saves the active block edit as one `update-block` on the drawing it came from and closes the tab. Returns an error text when refused. */

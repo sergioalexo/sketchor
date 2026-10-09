@@ -34,6 +34,8 @@ export interface TransformPreview {
 
 export interface RenderUiState {
   selection: ReadonlySet<EntityId>;
+  /** B-04 edit in place: the surrounding drawing in the edited block's local coordinates, drawn faded behind everything. */
+  backdrop?: readonly Entity[] | null;
   /** Entities being drawn right now (not yet in the document) — the active tool's live preview, dashed. */
   preview: readonly Entity[];
   snap: Snap | null;
@@ -129,6 +131,15 @@ export function render(
   drawGrid(ctx, width, height, view);
 
   if (ui.closedRegions.length > 0) drawClosedRegions(ctx, view, ui.closedRegions);
+
+  if (ui.backdrop && ui.backdrop.length > 0) {
+    ctx.globalAlpha = 0.25;
+    for (const e of ui.backdrop) {
+      if (ui.hiddenLayers.has(layerOf(e))) continue;
+      drawEntity(ctx, view, e, e.color ?? COLORS.entity, 1);
+    }
+    ctx.globalAlpha = 1;
+  }
 
   beginHatchFrame();
   textStyleLookup = (name) => doc.getRecord("textStyles", name);
