@@ -1,4 +1,4 @@
-import { type BlockDefinition, decodeDxfBytes, entitiesToDxf, entitiesToDxf2018, entitiesToSvgDocument, flattenInserts } from "@sketchor/core";
+import { type BlockDefinition, decodeDxfBytes, entitiesToDxf, entitiesToDxf2018, entitiesToEps, entitiesToEpsFile, entitiesToSvgDocument, flattenInserts } from "@sketchor/core";
 import { DWG_UNREADABLE, dwgToDxfText } from "../browser/dwgImport";
 import { isModelFile, loadModel } from "../model3d/stepImport";
 import { acceptList, allExtensions, formatOf } from "./formats";
@@ -37,13 +37,15 @@ import { reportError, track } from "../metrics/metrics";
  * download / hidden `<input type=file>` where the API is missing.
  */
 
-export type SaveFormat = "dxf" | "dxf-r12" | "svg" | "svg-laser";
+export type SaveFormat = "dxf" | "dxf-r12" | "svg" | "svg-laser" | "eps" | "eps-preview";
 
 const SAVE_FORMAT: Record<SaveFormat, { mime: string; description: string }> = {
   dxf: { mime: "application/dxf", description: "DXF Drawing" },
   "dxf-r12": { mime: "application/dxf", description: "DXF R12 Drawing (CAM)" },
   svg: { mime: "image/svg+xml", description: "SVG Drawing" },
   "svg-laser": { mime: "image/svg+xml", description: "SVG for laser / CAM (hairlines, one colour per layer)" },
+  eps: { mime: "application/postscript", description: "Encapsulated PostScript" },
+  "eps-preview": { mime: "application/postscript", description: "Encapsulated PostScript with TIFF preview" },
 };
 
 /**
@@ -78,7 +80,7 @@ interface PickerType {
   accept: Record<string, string[]>;
 }
 interface FsWritable {
-  write(data: string): Promise<void>;
+  write(data: string | Uint8Array): Promise<void>;
   close(): Promise<void>;
 }
 interface FsFileHandle {
@@ -102,13 +104,18 @@ const OPEN_TYPES: PickerType[] = [
 ];
 const OPEN_ACCEPT = acceptList();
 
-function serialize(format: SaveFormat): string {
+function serialize(format: SaveFormat): string | Uint8Array {
   // B-08: real blocks go to AC1032 DXF and plain SVG. R12 is what CAM/laser shops read, and laser SVG is read by software that
   // does not follow <use>, so those two stay flat (a "keep blocks" switch for R12 is still to come).
   const blocks = doc.records("blocks") as BlockDefinition[];
   const r12 = format === "dxf-r12" || (format === "dxf" && dxfSourceVersions.get(activeSessionId()) === "r12");
   const keepBlocks = blocks.length > 0 && !r12 && format !== "svg-laser";
   const entities = keepBlocks ? doc.all() : flattenInserts(doc, doc.all());
+  if (format === "eps" || format === "eps-preview") {
+    // EPS has no blocks (flattened above). Text-only for plain EPS; the preview variant is a binary DOS-EPS file.
+    const title = defaultSaveName(format).replace(/\.eps$/i, "");
+    return format === "eps" ? entitiesToEps(entities, { title }) : entitiesToEpsFile(entities, { title, tiffPreview: true });
+  }
   if (format === "dxf" || format === "dxf-r12") {
     const displayUnit = useApp.getState().displayUnit;
     // Stored coordinates are always millimeters — rescale to match the
@@ -148,7 +155,7 @@ const saveTargets = new Map<string, SaveTarget>();
 function writableFormat(name: string): SaveFormat | null {
   const f = formatOf(name);
   if (f && !f.writable) return null; // DWG is import-only, 3D models are view-only
-  return f?.ext[0] === "svg" ? "svg" : "dxf";
+  return f?.ext[0] === "svg" ? "svg" : f?.ext[0] === "eps" ? "eps" : "dxf";
 }
 
 function activeSessionId(): string {
@@ -178,7 +185,13 @@ export function bindSaveHandle(handle: FsFileHandle): void {
   saveTargets.set(activeSessionId(), { kind: "handle", handle, format, name: handle.name });
 }
 
-async function writeTarget(target: SaveTarget, text: string): Promise<void> {
+function toBase64(bytes: Uint8Array): string {
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
+async function writeTarget(target: SaveTarget, text: string | Uint8Array): Promise<void> {
   if (target.kind === "handle") {
     const writable = await target.handle.createWritable();
     await writable.write(text);
@@ -186,7 +199,8 @@ async function writeTarget(target: SaveTarget, text: string): Promise<void> {
     return;
   }
   const { invoke } = await import("@tauri-apps/api/core");
-  await invoke("write_drawing_file", { path: target.path, contents: text });
+  if (typeof text === "string") await invoke("write_drawing_file", { path: target.path, contents: text });
+  else await invoke("write_drawing_bytes", { path: target.path, base64: toBase64(text) });
 }
 
 function noticeSaved(name: string): void {
@@ -212,7 +226,7 @@ export type SaveMode = "save" | "save-as" | "save-copy";
  */
 /** The real file extension for a {@link SaveFormat} — "dxf" and "dxf-r12" are both plain `.dxf` files, "svg" and "svg-laser" both `.svg`. */
 function fileExtension(format: SaveFormat): string {
-  return format === "dxf-r12" ? "dxf" : format === "svg-laser" ? "svg" : format;
+  return format === "dxf-r12" ? "dxf" : format === "svg-laser" ? "svg" : format === "eps-preview" ? "eps" : format;
 }
 
 function defaultSaveName(format: SaveFormat): string {
@@ -287,7 +301,7 @@ export async function saveDrawing(format: SaveFormat, suggestedName?: string, mo
 
   // Fallback (no File System Access API): trigger a browser download — there's
   // no real file handle to keep, so every save here prompts a download regardless of mode.
-  const blob = new Blob([text], { type: mime });
+  const blob = new Blob([text as BlobPart], { type: mime });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;

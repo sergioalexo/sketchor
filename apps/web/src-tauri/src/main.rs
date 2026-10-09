@@ -218,6 +218,16 @@ fn write_drawing_file(path: String, contents: String) -> Result<(), String> {
     std::fs::write(&path, contents).map_err(|e| e.to_string())
 }
 
+/// Binary twin of `write_drawing_file` (EPS with a TIFF preview): the bytes
+/// arrive base64-encoded so they survive the JSON IPC unchanged.
+#[tauri::command]
+fn write_drawing_bytes(path: String, base64: String) -> Result<(), String> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(base64.as_bytes())
+        .map_err(|e| e.to_string())?;
+    std::fs::write(&path, bytes).map_err(|e| e.to_string())
+}
+
 /// Where model previews are mirrored for the Explorer thumbnail handler.
 /// Must agree with `cache_dir` in native/dxf-thumbnailer/src/model.rs:
 /// `%LOCALAPPDATA%/Sketchor/thumbs`. None off Windows (no handler there).
@@ -401,6 +411,7 @@ fn main() {
             read_file_bytes,
             read_file_range,
             write_drawing_file,
+            write_drawing_bytes,
             write_thumbnail_cache,
             explorer_previews_status,
             enable_explorer_previews

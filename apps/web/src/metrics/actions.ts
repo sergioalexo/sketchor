@@ -44,6 +44,8 @@ export const TRACKED_BUTTONS: Record<string, string> = {
   "save-now": "file.save",
   "save-as-dxf": "file.saveAs.dxf",
   "save-as-svg": "file.saveAs.svg",
+  "save-as-eps": "file.saveAs.eps",
+  "save-copy-eps": "file.saveCopy.eps",
   "save-copy-dxf": "file.saveCopy.dxf",
   "save-copy-svg": "file.saveCopy.svg",
   print: "file.print",

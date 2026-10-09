@@ -16,7 +16,7 @@ describe("format registry", () => {
     expect(formatOf("noext")).toBeNull();
     expect(mimeOf("x.svg")).toBe("image/svg+xml");
     expect(formatOf("Art.AI")?.kind).toBe("2d");
-    expect(formatOf("Art.eps")?.writable).toBe(false);
+    expect(formatOf("Art.eps")?.writable).toBe(true);
     expect(mimeOf("x.unknown")).toBe("application/dxf");
   });
   it("builds accept lists", () => {

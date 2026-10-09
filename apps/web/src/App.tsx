@@ -910,6 +910,24 @@ export function App() {
                   Save As SVG for laser / CAM...
                 </button>
                 <button
+                  data-testid="save-as-eps"
+                  onClick={() => {
+                    setShowSaveMenu(false);
+                    void saveDrawing("eps", undefined, "save-as");
+                  }}
+                >
+                  Save As EPS...
+                </button>
+                <button
+                  data-testid="save-as-eps-preview"
+                  onClick={() => {
+                    setShowSaveMenu(false);
+                    void saveDrawing("eps-preview", undefined, "save-as");
+                  }}
+                >
+                  Save As EPS with TIFF preview...
+                </button>
+                <button
                   data-testid="save-copy-dxf"
                   onClick={() => {
                     setShowSaveMenu(false);
@@ -944,6 +962,24 @@ export function App() {
                   }}
                 >
                   Save a Copy as SVG for laser / CAM...
+                </button>
+                <button
+                  data-testid="save-copy-eps"
+                  onClick={() => {
+                    setShowSaveMenu(false);
+                    void saveDrawing("eps", undefined, "save-copy");
+                  }}
+                >
+                  Save a Copy as EPS...
+                </button>
+                <button
+                  data-testid="save-copy-eps-preview"
+                  onClick={() => {
+                    setShowSaveMenu(false);
+                    void saveDrawing("eps-preview", undefined, "save-copy");
+                  }}
+                >
+                  Save a Copy as EPS with TIFF preview...
                 </button>
                 {listExporters().length > 0 && <div className="action-menu-sep" data-plugin-rev={pluginVersion} />}
                 {listExporters().map((exp) => (

@@ -27,7 +27,7 @@ export const FORMATS: readonly FormatInfo[] = [
   { ext: ["svg"], kind: "2d", label: "SVG drawing", mime: "image/svg+xml", writable: true, association: true, nativeThumbnail: false },
   { ext: ["dwg"], kind: "2d", label: "DWG drawing", mime: "application/acad", writable: false, association: true, nativeThumbnail: false },
   // EPS/AI: own PostScript-subset importer (core/eps, F-01); import-only (export is F-02).
-  { ext: ["eps"], kind: "2d", label: "EPS drawing", mime: "application/postscript", writable: false, association: true, nativeThumbnail: true },
+  { ext: ["eps"], kind: "2d", label: "EPS drawing", mime: "application/postscript", writable: true, association: true, nativeThumbnail: true },
   { ext: ["ai"], kind: "2d", label: "Illustrator drawing", mime: "application/illustrator", writable: false, association: true, nativeThumbnail: true },
   { ext: ["step", "stp"], kind: "3d", label: "STEP model", mime: "model/step", writable: false, association: true, nativeThumbnail: true },
   { ext: ["iges", "igs"], kind: "3d", label: "IGES model", mime: "model/iges", writable: false, association: true, nativeThumbnail: true },
