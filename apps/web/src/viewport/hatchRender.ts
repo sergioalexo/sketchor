@@ -24,6 +24,22 @@ function regionPath(ctx: CanvasRenderingContext2D, view: View, h: HatchEntity): 
   }
 }
 
+const strokePaths = new WeakMap<object, Path2D>();
+/** The fill's strokes as one world-space Path2D (cached on the fill object, which is replaced whenever the hatch changes). */
+function strokePath(fill: { segments: Float32Array }): Path2D {
+  let path = strokePaths.get(fill);
+  if (!path) {
+    path = new Path2D();
+    const s = fill.segments;
+    for (let i = 0; i < s.length; i += 4) {
+      path.moveTo(s[i], s[i + 1]);
+      path.lineTo(s[i + 2], s[i + 3]);
+    }
+    strokePaths.set(fill, path);
+  }
+  return path;
+}
+
 let tintedThisFrame = 0;
 /** Call at the start of a frame; `hatchesTinted()` then says whether any hatch drawn since was summarised as a tint (H-02 status-bar notice). */
 export function beginHatchFrame(): void {
@@ -95,16 +111,15 @@ export function drawHatchEntity(ctx: CanvasRenderingContext2D, view: View, h: Ha
       regionPath(ctx, view, h);
       ctx.fill("evenodd");
     } else {
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      const s = fill.segments;
-      for (let i = 0; i < s.length; i += 4) {
-        const a = worldToScreen(view, { x: s[i], y: s[i + 1] });
-        const b = worldToScreen(view, { x: s[i + 2], y: s[i + 3] });
-        ctx.moveTo(a.x, a.y);
-        ctx.lineTo(b.x, b.y);
+      // H-10: one Path2D per hatch in world units, built once per fill; pan/zoom only changes the transform.
+      if (fill.segments.length > 0) {
+        ctx.save();
+        ctx.translate(view.ox, view.oy);
+        ctx.scale(view.scale, -view.scale);
+        ctx.lineWidth = 1 / view.scale;
+        ctx.stroke(strokePath(fill));
+        ctx.restore();
       }
-      ctx.stroke();
       const d = fill.dots;
       if (d.length > 0) {
         ctx.fillStyle = color;
