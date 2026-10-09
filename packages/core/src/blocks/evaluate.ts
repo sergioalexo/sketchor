@@ -33,7 +33,14 @@ export const mapPoint = (m: Affine, p: Point): Point => ({ x: m[0] * p.x + m[2] 
 /** The entity under `m`, whatever that takes: a circle/arc under uneven scale becomes an ellipse, anything else unrepresentable falls back to its outline. */
 export function applyAffine(e: Entity, m: Affine): Entity {
   const t = kindTransform(e, m);
-  if (t) return t;
+  if (t) {
+    // A placed copy's dimension keeps its def points: ids it referenced inside the definition mean nothing out here.
+    if (t.type === "dimension") {
+      const { refs: _r, target: _t, targets: _ts, ...rest } = t;
+      return rest;
+    }
+    return t;
+  }
   if (e.type === "circle" || e.type === "arc") {
     const full = e.type === "circle";
     const ccw = full ? true : e.ccw;

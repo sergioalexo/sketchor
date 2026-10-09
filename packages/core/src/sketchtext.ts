@@ -1,4 +1,4 @@
-import type { Entity, EntityId, HatchLoop, SplineEntity } from "./entities";
+import type { DimKind, DimensionEntity, Entity, EntityId, HatchLoop, SplineEntity } from "./entities";
 import { insertLine, insertSameGeometry, parseInsertLine, type ParsedInsert } from "./blocks/insertCode";
 import { hatchLine, hatchSameGeometry, parseHatchLine, type ParsedHatch } from "./hatch/hatchCode";
 import { loopFromPoints } from "./hatch/loops";
@@ -86,7 +86,7 @@ export function assignNames(doc: SketchDocument): Map<EntityId, string> {
       used.add(e.name);
     }
   }
-  const counters: Record<Entity["type"], number> = { line: 1, circle: 1, arc: 1, point: 1, ellipse: 1, spline: 1, hatch: 1, insert: 1, polyline: 1, text: 1, image: 1 };
+  const counters: Record<Entity["type"], number> = { line: 1, circle: 1, arc: 1, point: 1, ellipse: 1, spline: 1, hatch: 1, insert: 1, polyline: 1, text: 1, image: 1, dimension: 1 };
   for (const e of doc.all()) {
     if (names.has(e.id)) continue;
     const prefix = NAME_PREFIX[e.type];
@@ -99,7 +99,7 @@ export function assignNames(doc: SketchDocument): Map<EntityId, string> {
   return names;
 }
 
-const NAME_PREFIX: Record<Entity["type"], string> = { line: "L", circle: "C", arc: "A", point: "P", ellipse: "E", spline: "S", hatch: "H", insert: "I", polyline: "PL", text: "T", image: "IMG" };
+const NAME_PREFIX: Record<Entity["type"], string> = { line: "L", circle: "C", arc: "A", point: "P", ellipse: "E", spline: "S", hatch: "H", insert: "I", polyline: "PL", text: "T", image: "IMG", dimension: "D" };
 
 /** Next free name for a newly drawn entity (used by the tools). */
 export function nextEntityName(doc: SketchDocument, type: Entity["type"]): string {
@@ -222,6 +222,8 @@ export function toCode(doc: SketchDocument): string {
         `text ${name} at (${fmt(e.at.x)}, ${fmt(e.at.y)}) ${JSON.stringify(e.text)} h ${fmt(e.height)}` +
           (e.rotation ? ` rot ${fmt(toDeg(e.rotation))}` : ""),
       );
+    } else if (e.type === "dimension") {
+      out.push(dimensionLine(name, e));
     } else if (e.type === "image") {
       out.push(
         `image ${name} at (${fmt(e.insert.x)}, ${fmt(e.insert.y)}) ${fmt(e.width)}x${fmt(e.height)}` +
@@ -263,7 +265,96 @@ export type ParsedEntity =
   | ParsedInsert
   | { type: "polyline"; name: string; points: { x: number; y: number }[]; closed: boolean }
   | { type: "text"; name: string; at: { x: number; y: number }; text: string; height: number; rotation: number }
-  | { type: "image"; name: string; insert: { x: number; y: number }; width: number; height: number; rotation: number };
+  | { type: "image"; name: string; insert: { x: number; y: number }; width: number; height: number; rotation: number }
+  | ParsedDimension;
+
+/** D-02a: a dimension as written in code (angles in degrees there, radians here). Associations (`refs`, `target`) are not expressible and are carried over on edit. */
+export interface ParsedDimension {
+  type: "dimension";
+  name: string;
+  kind: DimKind;
+  pts: { x: number; y: number }[];
+  angle?: number;
+  axis?: "x" | "y";
+  textPos?: { x: number; y: number };
+  textOverride?: string;
+  style?: string;
+  scale?: number;
+  driving: boolean;
+  value?: number;
+}
+
+const DIM_KINDS: readonly DimKind[] = ["linear", "aligned", "angular2l", "angular3p", "radial", "diametric", "arclength", "ordinate", "jogged"];
+const DIM_HEAD_RE = /^dimension\s+([A-Za-z_]\w*)\s+([a-z0-9]+)\s*(.*)$/;
+const ANGULAR_KINDS = new Set<DimKind>(["angular2l", "angular3p"]);
+
+/** Points each dimension kind needs. */
+const DIM_POINTS: Record<DimKind, number> = { linear: 3, aligned: 3, angular2l: 5, angular3p: 4, radial: 2, diametric: 2, arclength: 4, ordinate: 3, jogged: 3 };
+
+function parseDimension(row: string): ParsedDimension | string {
+  const head = DIM_HEAD_RE.exec(row);
+  if (!head) return "dimension NAME KIND (x, y) ... [angle DEG] [axis x|y] [textat (x, y)] [text \"...\"] [style NAME] [scale K] [driving VALUE]";
+  const kind = head[2] as DimKind;
+  if (!DIM_KINDS.includes(kind)) return `unknown dimension kind '${head[2]}' (${DIM_KINDS.join(", ")})`;
+  let rest = head[3];
+  const take = (re: RegExp): RegExpExecArray | null => {
+    const m = re.exec(rest);
+    if (m) rest = (rest.slice(0, m.index) + " " + rest.slice(m.index + m[0].length)).trim();
+    return m;
+  };
+  const textM = take(/(?:^|\s)text\s+("(?:[^"\\]|\\.)*")/);
+  let textOverride: string | undefined;
+  if (textM) {
+    try {
+      textOverride = JSON.parse(textM[1]) as string;
+    } catch {
+      return "dimension text must be a quoted string";
+    }
+  }
+  const textAt = take(new RegExp(String.raw`(?:^|\s)textat\s*\(\s*(${NUM})\s*,\s*(${NUM})\s*\)`));
+  const angle = take(new RegExp(String.raw`(?:^|\s)angle\s+(${NUM})`));
+  const axis = take(/(?:^|\s)axis\s+(x|y)(?=\s|$)/);
+  const style = take(/(?:^|\s)style\s+(\S+)/);
+  const scale = take(new RegExp(String.raw`(?:^|\s)scale\s+(${NUM})`));
+  const driving = take(new RegExp(String.raw`(?:^|\s)driving\s+(${NUM})`));
+  const pts: { x: number; y: number }[] = [];
+  POINT_PAIR_CAPTURE.lastIndex = 0;
+  let pm: RegExpExecArray | null;
+  while ((pm = POINT_PAIR_CAPTURE.exec(rest))) pts.push({ x: Number(pm[1]), y: Number(pm[2]) });
+  const leftover = rest.replace(POINT_PAIR_CAPTURE, "").trim();
+  if (leftover !== "") return `unexpected '${leftover}' in the dimension`;
+  if (pts.length < DIM_POINTS[kind]) return `a ${kind} dimension needs ${DIM_POINTS[kind]} points`;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  return {
+    type: "dimension",
+    name: head[1],
+    kind,
+    pts: pts.slice(0, DIM_POINTS[kind]),
+    ...(angle ? { angle: toRad(Number(angle[1])) } : {}),
+    ...(axis ? { axis: axis[1] as "x" | "y" } : {}),
+    ...(textAt ? { textPos: { x: Number(textAt[1]), y: Number(textAt[2]) } } : {}),
+    ...(textOverride !== undefined ? { textOverride } : {}),
+    ...(style ? { style: style[1] } : {}),
+    ...(scale ? { scale: Number(scale[1]) } : {}),
+    driving: !!driving,
+    ...(driving ? { value: ANGULAR_KINDS.has(kind) ? toRad(Number(driving[1])) : Number(driving[1]) } : {}),
+  };
+}
+
+function dimensionLine(name: string, e: DimensionEntity): string {
+  const f = (p: { x: number; y: number }) => `(${fmt(p.x)}, ${fmt(p.y)})`;
+  const deg = (r: number) => fmt((r * 180) / Math.PI);
+  return (
+    `dimension ${name} ${e.kind} ${e.defPoints.map(f).join(" ")}` +
+    (e.angle ? ` angle ${deg(e.angle)}` : "") +
+    (e.axis ? ` axis ${e.axis}` : "") +
+    (e.textPos ? ` textat ${f(e.textPos)}` : "") +
+    (e.textOverride ? ` text ${JSON.stringify(e.textOverride)}` : "") +
+    (e.style ? ` style ${e.style}` : "") +
+    (e.scale && e.scale !== 1 ? ` scale ${fmt(e.scale)}` : "") +
+    (e.driving && e.value !== undefined ? ` driving ${ANGULAR_KINDS.has(e.kind) ? deg(e.value) : fmt(e.value)}` : "")
+  );
+}
 
 export interface ParseIssue {
   line: number;
@@ -417,10 +508,17 @@ export function parseCode(text: string): { entities: ParsedEntity[]; errors: Par
         continue;
       }
       parsed = { type: "polyline", name: match.groups!.name, points, closed: !!match.groups!.closed };
+    } else if (keyword === "dimension") {
+      const r = parseDimension(row);
+      if (typeof r === "string") {
+        errors.push({ line: lineNo, message: r });
+        continue;
+      }
+      parsed = r;
     }
 
     if (!parsed) {
-      const known = ["line", "circle", "arc", "point", "ellipse", "spline", "hatch", "insert", "polyline", "text", "image"];
+      const known = ["line", "circle", "arc", "point", "ellipse", "spline", "hatch", "insert", "polyline", "text", "image", "dimension"];
       errors.push({
         line: lineNo,
         message: known.includes(keyword)
@@ -529,6 +627,23 @@ function sameGeometry(existing: Entity, parsed: ParsedEntity): boolean {
       )
     );
   }
+  if (existing.type === "dimension" && parsed.type === "dimension") {
+    const near = (a: number | undefined, b: number | undefined) => (a === undefined || b === undefined ? a === b : Math.abs(a - b) < EPS);
+    return (
+      existing.kind === parsed.kind &&
+      existing.defPoints.length === parsed.pts.length &&
+      existing.defPoints.every((p, i) => Math.abs(p.x - parsed.pts[i].x) < EPS && Math.abs(p.y - parsed.pts[i].y) < EPS) &&
+      near(existing.angle ?? 0, parsed.angle ?? 0) &&
+      existing.axis === parsed.axis &&
+      (existing.textPos === undefined) === (parsed.textPos === undefined) &&
+      (!existing.textPos || !parsed.textPos || (Math.abs(existing.textPos.x - parsed.textPos.x) < EPS && Math.abs(existing.textPos.y - parsed.textPos.y) < EPS)) &&
+      (existing.textOverride ?? "") === (parsed.textOverride ?? "") &&
+      existing.style === parsed.style &&
+      near(existing.scale ?? 1, parsed.scale ?? 1) &&
+      existing.driving === parsed.driving &&
+      near(existing.driving ? existing.value : undefined, parsed.driving ? parsed.value : undefined)
+    );
+  }
   if (existing.type === "text" && parsed.type === "text") {
     return (
       existing.text === parsed.text &&
@@ -622,6 +737,23 @@ export function toEntity(parsed: ParsedEntity, id: EntityId, layer?: string, bul
         ratio: parsed.ratio,
         start: parsed.start,
         end: parsed.end,
+      };
+    case "dimension":
+      return {
+        id,
+        type: "dimension",
+        name: parsed.name,
+        ...layerProp,
+        kind: parsed.kind,
+        defPoints: parsed.pts,
+        ...(parsed.angle !== undefined ? { angle: parsed.angle } : {}),
+        ...(parsed.axis ? { axis: parsed.axis } : {}),
+        ...(parsed.textPos ? { textPos: parsed.textPos } : {}),
+        ...(parsed.textOverride !== undefined ? { textOverride: parsed.textOverride } : {}),
+        ...(parsed.style ? { style: parsed.style } : {}),
+        ...(parsed.scale !== undefined ? { scale: parsed.scale } : {}),
+        driving: parsed.driving,
+        ...(parsed.value !== undefined ? { value: parsed.value } : {}),
       };
     case "text":
       return {
@@ -718,6 +850,14 @@ export function diffToCommands(doc: SketchDocument, parsed: ParsedEntity[]): Com
         if (existing.lineweight !== undefined) updated.lineweight = existing.lineweight;
         if (existing.construction !== undefined) updated.construction = existing.construction;
         if (existing.type === "line" && existing.infinite && updated.type === "line") updated.infinite = true;
+        if (existing.type === "dimension" && updated.type === "dimension") {
+          // Code carries neither the associations to geometry nor style overrides / expressions: keep them.
+          if (existing.refs) updated.refs = existing.refs;
+          if (existing.target) updated.target = existing.target;
+          if (existing.targets) updated.targets = existing.targets;
+          if (existing.overrides) updated.overrides = existing.overrides;
+          if (existing.expression) updated.expression = existing.expression;
+        }
         if (existing.type === "text" && updated.type === "text") {
           // D-01: style, alignment, width factor and oblique have no sketch-code word either.
           for (const k of ["style", "halign", "valign", "widthFactor", "oblique"] as const) {

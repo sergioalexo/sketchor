@@ -1,3 +1,5 @@
+import { explodeDimensions } from "./dimensions/explode";
+import { activeDimHost, styleOnlyHost } from "./dimensions/context";
 import { hatchArt } from "./hatch/render";
 import type { HatchEntity, TextEntity, ArcEntity, CircleEntity, EllipseEntity, Entity, SplineEntity, ImageEntity, LineEntity, PolylineEntity } from "./entities";
 import { layerOf, newEntityId, polylineSegments, textWidth } from "./entities";
@@ -152,7 +154,13 @@ function polylinePathD(e: PolylineEntity, toSvg: (p: Point) => Point): string {
  * `<g>` per layer, world units mapped 1:1 to the viewBox (Y flipped, since
  * SVG Y grows down and world Y grows up).
  */
-export function entitiesToSvgDocument(entities: Entity[], opts: SvgExportOptions = {}): string {
+export function entitiesToSvgDocument(entitiesIn: Entity[], optsIn: SvgExportOptions = {}): string {
+  // D-02a: dimensions are drawn as their parts (lines, arrow fills, centred text) so SVG matches the canvas.
+  const entities = explodeDimensions(entitiesIn);
+  const blockHost = styleOnlyHost(activeDimHost());
+  const opts: SvgExportOptions = optsIn.blocks?.some((d) => d.entities.some((e) => e.type === "dimension"))
+    ? { ...optsIn, blocks: optsIn.blocks.map((d) => ({ ...d, entities: explodeDimensions(d.entities, blockHost) })) }
+    : optsIn;
   const padding = opts.padding ?? 5;
   const laser = opts.mode === "laser";
   const stroke = opts.strokeColor ?? "#000000";
@@ -290,8 +298,10 @@ export function entitiesToSvgDocument(entities: Entity[], opts: SvgExportOptions
         const p = toSvg(e.at);
         const rot = e.rotation ? ` transform="rotate(${fmt((-e.rotation * 180) / Math.PI)} ${fmt(p.x)} ${fmt(p.y)})"` : "";
         const col = e.color ? escapeXml(e.color) : stroke;
+        const anchor = e.halign === "center" ? ' text-anchor="middle"' : e.halign === "right" ? ' text-anchor="end"' : "";
+        const baseline = e.valign === "middle" ? ' dominant-baseline="central"' : e.valign === "top" ? ' dominant-baseline="hanging"' : "";
         body.push(
-          `<text x="${fmt(p.x)}" y="${fmt(p.y)}" font-size="${fmt(e.height)}" fill="${col}" stroke="none"${rot}>${escapeXml(e.text)}</text>`,
+          `<text x="${fmt(p.x)}" y="${fmt(p.y)}" font-size="${fmt(e.height)}" fill="${col}" stroke="none"${anchor}${baseline}${rot}>${escapeXml(e.text)}</text>`,
         );
       } else if (e.type === "image") {
         // The un-rotated top-left corner (insert + (0, height) in world,

@@ -1,6 +1,6 @@
 import type { TextStyle } from "@sketchor/core";
 import { create } from "zustand";
-import { newEntityId, type Group, type Constraint, type TableRecord, scaleBlockDefinition, scaleEntityKeepingInserts, setActiveBlocks, blockEditChanges, blockEditDocument, getBlock, inPlaceBackdrop, instancesOf, type AttributeDef, type BlockDefinition } from "@sketchor/core";
+import { newEntityId, type Group, type Constraint, type TableRecord, scaleBlockDefinition, scaleEntityKeepingInserts, setActiveBlocks, setActiveDimHost, blockEditChanges, blockEditDocument, getBlock, inPlaceBackdrop, instancesOf, type AttributeDef, type BlockDefinition } from "@sketchor/core";
 import type { Model3D } from "../model3d/types";
 import {
   displayUnitToDxfCode,
@@ -1342,6 +1342,7 @@ export function switchToSession(id: string): void {
   });
   rebindBus();
   setActiveBlocks(incoming.doc);
+  setActiveDimHost(incoming.doc);
   useApp.getState().syncLayersFromDoc(); // the layers are the incoming document's own
   bumpSessionsVersion();
 }

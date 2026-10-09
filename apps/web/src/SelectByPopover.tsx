@@ -26,6 +26,7 @@ const TYPE_LABELS: Record<Entity["type"], string> = {
   point: "Points",
   text: "Text",
   image: "Images",
+  dimension: "Dimensions",
 };
 
 type Tri = "any" | "yes" | "no";

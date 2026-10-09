@@ -7,6 +7,7 @@ import { solveSketch, type SolveOptions, type SolveResult } from "./solver/solve
 import type { Point } from "./geometry";
 import type { SketchDocument } from "./document";
 import { setActiveBlocks } from "./blocks/context";
+import { setActiveDimHost } from "./dimensions/context";
 import { planDefineBlock, planDeleteBlock, planExplode, planRenameBlock, planUpdateBlock } from "./blocks/ops";
 import type { AttributeDef, BlockDefinition } from "./blocks/types";
 import { entityRefRewritersFor, recordRefRewritersFor, type DocSettings, type TableRecord } from "./tables";
@@ -95,6 +96,7 @@ export class CommandBus {
 
   constructor(readonly doc: SketchDocument) {
     setActiveBlocks(doc);
+    setActiveDimHost(doc);
   }
 
   onChange(fn: () => void): () => void {
@@ -105,6 +107,7 @@ export class CommandBus {
   /** Tells listeners the document changed outside a command (the block editor's live preview writes the definition directly). */
   notify(): void {
     setActiveBlocks(this.doc);
+    setActiveDimHost(this.doc);
     this.emit();
   }
 
@@ -114,6 +117,7 @@ export class CommandBus {
 
   execute(command: Command): void {
     setActiveBlocks(this.doc);
+    setActiveDimHost(this.doc);
     const assoc = associationState(this.doc);
     const inverse = this.apply(command);
     // The solver runs as a middleware here (roadmap T-40): whatever the
@@ -139,7 +143,7 @@ export class CommandBus {
    * redoing, where the recorded geometry is already solved.
    */
   private solveAfterCommand(): Command[] {
-    const constraints = this.doc.constraints();
+    const constraints = this.doc.solverConstraints();
     if (this.solving || constraints.length === 0) {
       if (constraints.length === 0) this.lastSolve = null;
       return [];
@@ -163,7 +167,7 @@ export class CommandBus {
    * are previewed every frame and only the final position is committed.
    */
   solveSilently(options?: SolveOptions): SolveResult | null {
-    const constraints = this.doc.constraints();
+    const constraints = this.doc.solverConstraints();
     if (constraints.length === 0) return null;
     return solveSketch(this.doc.all(), constraints, options);
   }
@@ -178,6 +182,7 @@ export class CommandBus {
 
   undo(): void {
     setActiveBlocks(this.doc);
+    setActiveDimHost(this.doc);
     const entry = this.undoStack.pop();
     if (!entry) return;
     for (const inv of entry.inverse) this.apply(inv);
@@ -191,12 +196,13 @@ export class CommandBus {
 
   /** Re-reads the solver's verdict for the current document without moving anything. */
   private refreshDiagnosis(): void {
-    const constraints = this.doc.constraints();
+    const constraints = this.doc.solverConstraints();
     this.lastSolve = constraints.length === 0 ? null : solveSketch(this.doc.all(), constraints, { maxIterations: 0 });
   }
 
   redo(): void {
     setActiveBlocks(this.doc);
+    setActiveDimHost(this.doc);
     const entry = this.redoStack.pop();
     if (!entry) return;
     // Redo re-solves for the same reason execute does: the command alone

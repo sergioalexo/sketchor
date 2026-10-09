@@ -104,11 +104,11 @@ export function pasteCommands(payload: ClipboardPayload, offset: Point, into?: S
   // Blocks the destination lacks come along (same-name blocks already there win — pasting never redefines).
   for (const b of payload.blocks ?? []) if (!into?.hasRecord("blocks", b.name)) commands.push({ type: "put-table-record", table: "blocks", record: b });
   const ids: EntityId[] = [];
+  for (const e of payload.entities) idMap.set(e.id, newEntityId());
   for (const e of payload.entities) {
-    const id = newEntityId();
-    idMap.set(e.id, id);
+    const id = idMap.get(e.id)!;
     const { name: _dropped, ...rest } = e;
-    const moved = translated({ ...rest, id } as Entity, offset.x, offset.y);
+    const moved = translated(rewireDimension({ ...rest, id } as Entity, idMap), offset.x, offset.y);
     commands.push({ type: "add-entity", entity: moved });
     ids.push(id);
   }
@@ -122,6 +122,18 @@ export function pasteCommands(payload: ClipboardPayload, offset: Point, into?: S
     commands.push({ type: "group-entities", groupId: idMap.get(g.id)!, ids: members, name: g.name, ...(parent ? { parent } : {}) });
   }
   return { commands, ids };
+}
+
+/** A pasted dimension follows the copies of the geometry it was attached to, or — when that geometry was not copied — keeps its def points and detaches. */
+function rewireDimension(e: Entity, idMap: Map<string, string>): Entity {
+  if (e.type !== "dimension") return e;
+  const { refs, target, targets, ...rest } = e;
+  const out = { ...rest } as typeof e;
+  const mapped = (id: string) => idMap.get(id);
+  if (refs && refs.every((r) => !r || mapped(r.entityId))) out.refs = refs.map((r) => (r ? { ...r, entityId: mapped(r.entityId)! } : r));
+  if (target && mapped(target)) out.target = mapped(target)!;
+  if (targets && mapped(targets[0]) && mapped(targets[1])) out.targets = [mapped(targets[0])!, mapped(targets[1])!];
+  return out;
 }
 
 function depth(g: Group, all: Group[]): number {

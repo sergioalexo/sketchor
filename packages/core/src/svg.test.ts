@@ -37,7 +37,7 @@ const pointsOf = (e: Entity): Point[] => {
   if (e.type === "spline") return e.controlPoints;
   if (e.type === "insert") return [e.insert];
   if (e.type === "hatch") return e.loops.flatMap((l) => l.edges.flatMap((g) => (g.type === "line" ? [g.a] : [])));
-  return [e.center];
+  return [(e as { center: Point }).center];
 };
 
 const closeTo = (p: Point, x: number, y: number, digits = 6) => {

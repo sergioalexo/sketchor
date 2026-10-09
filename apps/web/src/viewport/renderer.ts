@@ -1,4 +1,4 @@
-import { canvasFontFamily, resolveTextLook, type TableRecord } from "@sketchor/core";
+import { canvasFontFamily, layoutOf, resolveTextLook, type TableRecord } from "@sketchor/core";
 import type { Bounds, BoxSelectMode, CanvasTokens, ClosedRegion, Entity, EntityId, Point, SketchDocument } from "@sketchor/core";
 import {
   arcPointAt,
@@ -755,6 +755,46 @@ function drawEntity(
     }
     ctx.fillText(entity.text, 0, 0);
     ctx.restore();
+    return;
+  }
+
+  if (entity.type === "dimension") {
+    // D-02a: the same layout the exporters use (core dimensions/layout.ts) — strokes, filled arrow heads, centred text.
+    const layout = layoutOf(entity);
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = lineWidth;
+    ctx.setLineDash([]);
+    for (const run of layout.lines) {
+      ctx.beginPath();
+      run.forEach((pt, i) => {
+        const s = worldToScreen(view, pt);
+        if (i === 0) ctx.moveTo(s.x, s.y);
+        else ctx.lineTo(s.x, s.y);
+      });
+      ctx.stroke();
+    }
+    for (const poly of layout.fills) {
+      ctx.beginPath();
+      poly.forEach((pt, i) => {
+        const s = worldToScreen(view, pt);
+        if (i === 0) ctx.moveTo(s.x, s.y);
+        else ctx.lineTo(s.x, s.y);
+      });
+      ctx.closePath();
+      ctx.fill();
+    }
+    if (layout.text && layout.text.text) {
+      const p = worldToScreen(view, layout.text.at);
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(-layout.text.rotation);
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.font = `${Math.max(1, layout.text.height * view.scale)}px ui-sans-serif, system-ui, sans-serif`;
+      ctx.fillText(layout.text.text, 0, 0);
+      ctx.restore();
+    }
     return;
   }
 

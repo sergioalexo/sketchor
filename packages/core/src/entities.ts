@@ -1,4 +1,5 @@
 import type { Point } from "./geometry";
+import type { PointRef } from "./constraints";
 import { arcPointAt, arcSweep, bulgeToArc, dist, rotatePoint } from "./geometry";
 import { kindPoints, kindTransform } from "./kinds/registry";
 
@@ -486,6 +487,68 @@ export interface InsertEntity {
   params?: Record<string, number | string>;
 }
 
+/** The dimension forms (D-02). */
+export type DimKind = "linear" | "aligned" | "angular2l" | "angular3p" | "radial" | "diametric" | "arclength" | "ordinate" | "jogged";
+
+/**
+ * A dimension (D-02a): measured value, extension lines, dimension line,
+ * arrows and text, all laid out from the data below by `dimensions/layout.ts`.
+ *
+ * `defPoints` is the always-valid fallback and the DXF/block-insert form; when
+ * `refs`/`target`/`targets` name geometry in the active document the layout
+ * reads the live positions instead, so the dimension follows its geometry
+ * (associative). Meaning of `defPoints` per kind —
+ * linear/aligned: [measured 1, measured 2, a point on the dimension line];
+ * angular3p: [vertex, end 1, end 2, a point on the dimension arc];
+ * angular2l: [line 1 a, line 1 b, line 2 a, line 2 b, a point on the arc];
+ * radial/diametric: [centre, a point on the circle]; jogged: [centre, point on
+ * the arc, substitute centre]; arclength: [centre, arc start, arc end, a point
+ * on the dimension arc]; ordinate: [datum origin, feature, leader end].
+ *
+ * A driving dimension IS the solver constraint (`dimensions/driving.ts`):
+ * `value` is its target (mm, or radians for angles) and the geometry follows.
+ */
+export interface DimensionEntity {
+  id: EntityId;
+  type: "dimension";
+  name?: string;
+  layer?: string;
+  color?: string;
+  /** Ignored for dimensions — present only so every entity shares one shape. */
+  fill?: string;
+  linetype?: string;
+  lineweight?: number;
+  construction?: boolean;
+  kind: DimKind;
+  defPoints: Point[];
+  /** Associative anchors, index-aligned with `defPoints` (null = free point). */
+  refs?: (PointRef | null)[];
+  /** The circle/arc a radial, diametric, jogged or arc-length dimension measures. */
+  target?: EntityId;
+  /** The two lines of an associative angular2l dimension. */
+  targets?: [EntityId, EntityId];
+  /** Linear: direction of the dimension line, radians (0 = horizontal, π/2 = vertical). */
+  angle?: number;
+  /** Ordinate: which coordinate it reads. */
+  axis?: "x" | "y";
+  /** Text centre when moved off its default place. */
+  textPos?: Point;
+  /** Replaces the measured text; `<>` stands for it. */
+  textOverride?: string;
+  /** `dimStyles` record name (absent = built-in default). */
+  style?: string;
+  /** Per-dimension overrides of the style. */
+  overrides?: Partial<import("./dimensions/style").DimStyle>;
+  /** Multiplies every style size (DIMSCALE); block inserts scale it with the block. */
+  scale?: number;
+  /** True = this dimension drives the geometry; false = reference (shown in parentheses). */
+  driving: boolean;
+  /** The driving target value (mm / radians). */
+  value?: number;
+  /** Formula for `value` once parameters exist (T-45). */
+  expression?: string;
+}
+
 export type Entity =
   | LineEntity
   | CircleEntity
@@ -497,7 +560,8 @@ export type Entity =
   | InsertEntity
   | PolylineEntity
   | TextEntity
-  | ImageEntity;
+  | ImageEntity
+  | DimensionEntity;
 
 /** Rough width of a {@link TextEntity} string in world units — one built-in font, ~0.55 em per glyph. */
 export function textWidth(text: string, height: number): number {

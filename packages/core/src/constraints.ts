@@ -31,7 +31,8 @@ export type Constraint =
   | { id: ConstraintId; type: "perpendicular"; a: EntityId; b: EntityId }
   | { id: ConstraintId; type: "tangent"; a: EntityId; b: EntityId }
   | { id: ConstraintId; type: "equal"; a: EntityId; b: EntityId }
-  | { id: ConstraintId; type: "distance"; a: PointRef; b: PointRef; value: number }
+  /** `axis` set = only the x (or y) component of b − a is held, by magnitude (a horizontal / vertical dimension). */
+  | { id: ConstraintId; type: "distance"; a: PointRef; b: PointRef; value: number; axis?: "x" | "y" }
   | { id: ConstraintId; type: "radius"; entityId: EntityId; value: number }
   | { id: ConstraintId; type: "angle"; a: EntityId; b: EntityId; value: number }
   | { id: ConstraintId; type: "fix"; entityId: EntityId }

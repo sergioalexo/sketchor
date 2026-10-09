@@ -153,6 +153,11 @@ export function rowsFor(model: SketchModel, c: Constraint): Row[] {
       const a = pointOf(model, c.a);
       const b = pointOf(model, c.b);
       if (!a || !b) return [];
+      if (c.axis) {
+        // |component| = value: the sign of today's offset is kept (a constant, so no derivative).
+        const d = c.axis === "x" ? sub(b.x, a.x) : sub(b.y, a.y);
+        return [row(sub(scale(d, d.v < 0 ? -1 : 1), konst(c.value)))];
+      }
       return [row(sub(distanceNum(a, b), konst(c.value)))];
     }
     case "radius": {

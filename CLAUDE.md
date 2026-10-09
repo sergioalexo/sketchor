@@ -42,6 +42,23 @@ approximately; `bounds`/`transform`/`path`/`snaps`/`hitDistance`/`grips` make it
 exact. The seven built-ins live in `kinds/builtin.ts`. **Adding a type: follow
 `docs/new-entity-checklist.md`.**
 
+## Dimensions and text styles (`packages/core/src/dimensions/`, plan §7)
+
+`DimensionEntity` (9 kinds) stores `defPoints` (always valid) plus optional
+associative `refs`/`target`/`targets`; `dimensions/layout.ts` is the one pure
+layout (strokes, filled arrow polygons, centred text) that the canvas draws and
+`explode.ts` turns into ordinary lines/polylines/TEXT for every writer without
+a DIMENSION record (R12/2018 DXF, SVG, PDF, EPS). Registry methods only see the
+entity, so references resolve against the *active document*
+(`dimensions/context.ts`, set by `CommandBus` next to `setActiveBlocks`; bare
+documents use `withDimHost`); placed block copies drop `refs` (ids are
+definition-local) and block-definition dimensions export through
+`styleOnlyHost`. Styles: `DimStyle` in the `dimStyles` table (ISO-25/ANSI/GOST
+presets in `style.ts`); text styles (`textStyle.ts`, `textStyles` table) give
+`TextEntity` `style/halign/valign/widthFactor/oblique`, and the DXF STYLE table
+round-trips. New entity fields that sketch code cannot express must be carried
+in `diffToCommands`.
+
 ## Hatching (`packages/core/src/hatch/`, plan §6)
 
 `HatchEntity {loops, paint, style}`: loops are chains of exact edges
@@ -491,9 +508,12 @@ hangs; `constraints/ConstraintPanel.tsx` is the panel (Ctrl+2) and owns
 the glyph characters. In the viewport a glyph click selects the geometry a
 constraint holds and a double-click removes it.
 
-Not yet built: driving dimensions (T-42 — `distance`/`radius`/`angle`
-today lock the *current* value rather than being editable), inference
-while drawing (T-43), DOF colouring (T-44).
+**Driving dimensions** (D-02b): a `DimensionEntity` with `driving: true` and a
+`value` *is* a constraint — `dimensions/driving.ts` derives it (`distance`
+with optional `axis`, `radius`, `angle`) and `SketchDocument.solverConstraints()`
+(explicit + derived) is what the bus gives the solver; there is no second
+record. Editing `value` moves the geometry in the same undo step. Not yet
+built: the value-edit UI, inference while drawing (T-43), DOF colouring (T-44).
 
 ## Typed input and the command line
 

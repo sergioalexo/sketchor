@@ -765,6 +765,16 @@ function placeEntity(
       };
     case "text":
       return { ...entity, id, at: map(entity.at), height: entity.height * radiusScale, rotation: entity.rotation + rotation };
+    case "dimension": {
+      // Same map as above as a matrix; a shearing insert leaves the dimension unmoved (its parts are not recomputed here).
+      const a = cos * sx;
+      const b = sin * sx;
+      const c = -sin * sy;
+      const d = cos * sy;
+      const placed = kindTransform(entity, [a, b, c, d, insertion.x - (a * base.x + c * base.y), insertion.y - (b * base.x + d * base.y)]) ?? entity;
+      const { refs: _r, target: _t, targets: _ts, ...rest } = placed as typeof entity;
+      return { ...rest, id } as Entity;
+    }
     case "image":
       return {
         ...entity,

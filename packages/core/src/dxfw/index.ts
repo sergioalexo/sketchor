@@ -1,4 +1,6 @@
 import { foreignClassText, foreignEntityText, type ForeignRecord } from "../foreign";
+import { explodeDimensions } from "../dimensions/explode";
+import { activeDimHost, styleOnlyHost } from "../dimensions/context";
 import { STANDARD_TEXT_STYLE, type TextStyle } from "../textStyle";
 import type { Entity } from "../entities";
 import { layerOf } from "../entities";
@@ -283,9 +285,14 @@ export interface DxfWriteOptions2018 {
  * export (`dxfExport.ts`) still drops them, since R12 predates XDATA's
  * modern use and CAM shops reading it don't want the extra data anyway.
  */
-export function entitiesToDxf2018(entities: Entity[], options: DxfWriteOptions2018 = {}): string {
+export function entitiesToDxf2018(entitiesIn: Entity[], options: DxfWriteOptions2018 = {}): string {
   const { insUnits = 0, scale = 1 } = options;
-  const blockDefs = (options.blocks ?? []).map((d) => (scale !== 1 ? scaleBlockDefinition(d, scale) : d));
+  // D-02a: dimensions are written as their parts until D-10 adds real DIMENSION records.
+  const entities = explodeDimensions(entitiesIn);
+  const blockHost = styleOnlyHost(activeDimHost());
+  const blockDefs = (options.blocks ?? [])
+    .map((d) => (d.entities.some((e) => e.type === "dimension") ? { ...d, entities: explodeDimensions(d.entities, blockHost) } : d))
+    .map((d) => (scale !== 1 ? scaleBlockDefinition(d, scale) : d));
   const defByName = new Map(blockDefs.map((d) => [d.name, d]));
   const scaled = scale !== 1 ? entities.map((e) => scaleEntityKeepingInserts(e, scale)) : entities;
   const everyEntity = [...scaled, ...blockDefs.flatMap((d) => d.entities)];

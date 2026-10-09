@@ -1,3 +1,4 @@
+import { explodeDimensions } from "../dimensions/explode";
 /**
  * F-02 / SV-08 — EPS writer. DSC-conformant (`%!PS-Adobe-3.0 EPSF-3.0`,
  * `%%BoundingBox`/`%%HiResBoundingBox`, LanguageLevel 2) plain PostScript that
@@ -173,7 +174,8 @@ function extent(entities: Entity[]): { minX: number; minY: number; maxX: number;
 }
 
 /** The EPS text for `entities` (inserts must already be flattened — see `flattenInserts`). */
-export function entitiesToEps(entities: Entity[], opts: EpsExportOptions = {}): string {
+export function entitiesToEps(entitiesIn: Entity[], opts: EpsExportOptions = {}): string {
+  const entities = explodeDimensions(entitiesIn);
   const ext = extent(entities) ?? { minX: 0, minY: 0, maxX: 10, maxY: 10 };
   const margin = opts.margin ?? 0;
   const ox = ext.minX - margin;
@@ -272,8 +274,9 @@ export function entitiesToEps(entities: Entity[], opts: EpsExportOptions = {}): 
         P("gsave");
         P(`${f6(c[0])} ${f6(c[1])} ${f6(c[2])} rg`);
         P(`/Helvetica findfont ${f6(e.height * PT_PER_MM)} scalefont setfont`);
-        P(`${X(e.at)} ${Y(e.at)} translate ${f6((e.rotation * 180) / Math.PI)} rotate 0 0 moveto`);
-        P(`${psString(e.text)} show`);
+        const lift = e.valign === "middle" ? -0.35 * e.height * PT_PER_MM : e.valign === "top" ? -0.7 * e.height * PT_PER_MM : 0;
+        P(`${X(e.at)} ${Y(e.at)} translate ${f6((e.rotation * 180) / Math.PI)} rotate 0 ${f6(lift)} moveto`);
+        P(e.halign === "center" ? `${psString(e.text)} dup stringwidth pop 2 div neg 0 rmoveto show` : e.halign === "right" ? `${psString(e.text)} dup stringwidth pop neg 0 rmoveto show` : `${psString(e.text)} show`);
         P("grestore");
         continue;
       }

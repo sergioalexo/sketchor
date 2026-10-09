@@ -1,3 +1,4 @@
+import { explodeDimensions } from "./dimensions/explode";
 import { blendWithWhite, hatchArt } from "./hatch/render";
 import { isFullEllipse } from "./ellipse";
 import type { ArcEntity, Entity, PolylineEntity } from "./entities";
@@ -48,10 +49,11 @@ export interface PdfDrawResult {
  */
 export function drawEntitiesToPdf(
   pdf: PdfBuilder,
-  entities: readonly Entity[],
+  entitiesIn: readonly Entity[],
   box: PdfDrawBox,
   opts: PdfDrawOptions = {},
 ): PdfDrawResult {
+  const entities = explodeDimensions(entitiesIn as Entity[]);
   const stroke = opts.strokeColor ?? "#111111";
   const drawable = entities.filter((e) => !(e.type === "line" && e.infinite) && e.type !== "image");
   const b = boundsOf(drawable as Entity[]);
@@ -118,10 +120,10 @@ export function drawEntitiesToPdf(
     } else if (e.type === "arc") {
       pdf.polyline(arcPoints(e.center, e.radius, (e as ArcEntity).startAngle, e.endAngle, e.ccw), paint);
     } else if (e.type === "text") {
-      const p = at(e.at);
-      // Entity text sits on its baseline at `at`, rotation-free on a plan
-      // sheet; the height is the font size, exactly as on the canvas.
-      pdf.text(p.x, p.y, e.text, { size: e.height * scale, color: e.color ?? stroke });
+      // The baseline start is `at` shifted by the vertical alignment (cap height ~0.7 em) along the text's own up axis.
+      const lift = e.valign === "middle" ? -0.35 * e.height : e.valign === "top" ? -0.7 * e.height : 0;
+      const p = at({ x: e.at.x - Math.sin(e.rotation) * lift, y: e.at.y + Math.cos(e.rotation) * lift });
+      pdf.text(p.x, p.y, e.text, { size: e.height * scale, color: e.color ?? stroke, align: e.halign ?? "left", ...(e.rotation ? { rotation: e.rotation } : {}) });
     } else if (e.type === "polyline") {
       pdf.polyline(polylinePoints(e), paint, e.closed);
     } else if (e.type === "hatch") {

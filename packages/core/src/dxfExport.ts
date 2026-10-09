@@ -1,3 +1,5 @@
+import { explodeDimensions } from "./dimensions/explode";
+import { activeDimHost, styleOnlyHost } from "./dimensions/context";
 import { H_ALIGN_CODE, V_ALIGN_CODE } from "./textStyle";
 import { explodeHatchEntities } from "./hatch/ops";
 import type { ArcEntity, CircleEntity, Entity, ImageEntity, InsertEntity, LineEntity, PointEntity, PolylineEntity, TextEntity } from "./entities";
@@ -317,7 +319,11 @@ function entityDxf(e: Entity): string {
  * under an inches tag would silently produce a file 25.4x the wrong size.
  * Defaults to 1 (no rescaling, i.e. the file's numbers stay millimeters).
  */
-export function entitiesToDxf(entities: Entity[], insUnits = 0, scale = 1, blocks: readonly BlockDefinition[] = []): string {
+export function entitiesToDxf(entitiesIn: Entity[], insUnits = 0, scale = 1, blocksIn: readonly BlockDefinition[] = []): string {
+  // D-02a: R12 has no DIMENSION worth writing; dimensions become their parts.
+  const entities = explodeDimensions(entitiesIn);
+  const blockHost = styleOnlyHost(activeDimHost());
+  const blocks = blocksIn.map((d) => (d.entities.some((e) => e.type === "dimension") ? { ...d, entities: explodeDimensions(d.entities, blockHost) } : d));
   const scaled = scale !== 1 ? entities.map((e) => scaleEntityKeepingInserts(e, scale)) : entities;
   const blockDefs = blocks.map((d) => (scale !== 1 ? scaleBlockDefinition(d, scale) : d));
   const defByName = new Map(blockDefs.map((d) => [d.name, d]));

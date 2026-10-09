@@ -37,6 +37,8 @@ export interface PdfTextStyle {
   color?: string;
   /** Where `x` sits relative to the string (default "left"). */
   align?: "left" | "center" | "right";
+  /** Radians counter-clockwise about the anchor (default 0). */
+  rotation?: number;
 }
 
 export interface PdfPaint {
@@ -269,10 +271,14 @@ export class PdfBuilder {
     const bold = style.bold === true;
     const [r, g, b] = rgb(style.color ?? "#000000");
     const w = pdfTextWidth(text, size, bold);
-    const left = style.align === "center" ? x - w / 2 : style.align === "right" ? x - w : x;
+    const shift = style.align === "center" ? w / 2 : style.align === "right" ? w : 0;
+    const rot = style.rotation ?? 0;
+    const place = rot
+      ? `${num(Math.cos(rot))} ${num(Math.sin(rot))} ${num(-Math.sin(rot))} ${num(Math.cos(rot))} ${num(x - shift * Math.cos(rot))} ${num(this.ty(y) - shift * Math.sin(rot))} Tm`
+      : `${num(x - shift)} ${num(this.ty(y))} Td`;
     this.current.push(
       `q\nBT\n${num(r)} ${num(g)} ${num(b)} rg\n/${bold ? "F2" : "F1"} ${num(size)} Tf\n` +
-        `${num(left)} ${num(this.ty(y))} Td\n${literal(text)} Tj\nET\nQ`,
+        `${place}\n${literal(text)} Tj\nET\nQ`,
     );
   }
 

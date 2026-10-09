@@ -1,5 +1,6 @@
 import type { Entity, EntityId } from "./entities";
 import { migrateDashedEntity } from "./entities";
+import { drivingConstraints } from "./dimensions/driving";
 import type { Group, GroupId } from "./groups";
 import type { Constraint, ConstraintId } from "./constraints";
 import { DOCUMENT_VERSION, sanitizeRecords, type DocSettings, type DocumentJson, type TableRecord } from "./tables";
@@ -121,6 +122,19 @@ export class SketchDocument {
 
   constraints(): Constraint[] {
     return [...this.constraintsMap.values()];
+  }
+
+  /** What the solver is given: the explicit constraints plus those standing for driving dimensions (D-02b). */
+  solverConstraints(): Constraint[] {
+    const explicit = this.constraints();
+    let hasDim = false;
+    for (const e of this.entities.values()) {
+      if (e.type === "dimension" && e.driving) {
+        hasDim = true;
+        break;
+      }
+    }
+    return hasDim ? [...explicit, ...drivingConstraints(this.entities.values(), (id) => this.entities.get(id))] : explicit;
   }
 
   /** Internal — used by the command bus only. */
