@@ -5,6 +5,7 @@ import { initDesktopFileOpen } from "./dxf/desktopBridge";
 import { initUpdateCheck } from "./update/updateService";
 import { initExplorerPreviews } from "./desktop/explorerPreviews";
 import { initMetrics } from "./metrics/metrics";
+import { initFirstOpenDemo } from "./demo/firstOpen";
 import { installPluginDevHandle, loadFirstPartyPlugins, loadInstalledPlugins } from "./plugins";
 import "./styles.css";
 
@@ -38,3 +39,6 @@ initMetrics();
 installPluginDevHandle();
 void loadFirstPartyPlugins();
 void loadInstalledPlugins();
+
+// Web build, first open: show the built-in showcase drawing (?demo forces, ?blank skips).
+initFirstOpenDemo();

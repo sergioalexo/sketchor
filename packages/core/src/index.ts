@@ -94,3 +94,4 @@ export * from "./hatch/trim";
 export * from "./hatch/render";
 export * from "./hatch/hatchDxf";
 export * from "./eps";
+export * from "./showcase";
